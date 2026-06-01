@@ -23,7 +23,17 @@ def clear_directory_contents(directory: Path) -> None:
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-MOJIBAKE_MARKERS = ("锛", "鍩", "璧", "涓", "绋", "棣", "欐", "", "�")
+MOJIBAKE_MARKERS = (
+    "\u951b",
+    "\u9369",
+    "\u74a7",
+    "\u6d93",
+    "\u7ecb",
+    "\u68e3",
+    "\u6b10",
+    "\ue11f",
+    "\ufffd",
+)
 
 
 def _mojibake_score(text: str) -> int:

@@ -3,6 +3,76 @@
   "description": "Public HKU official sources for the first RAG indexing pass. Start small, verify quality, then expand.",
   "sources": [
     {
+      "id": "hku_home",
+      "name": "HKU Homepage",
+      "url": "https://www.hku.hk/",
+      "category": "overview",
+      "audience": "all",
+      "degree_level": "all",
+      "source_type": "web",
+      "official": true
+    },
+    {
+      "id": "hku_contact",
+      "name": "HKU Contact Us",
+      "url": "https://www.hku.edu.hk/contact/",
+      "category": "contacts",
+      "audience": "all",
+      "degree_level": "all",
+      "source_type": "web",
+      "official": true
+    },
+    {
+      "id": "hku_faculties_departments",
+      "name": "HKU Faculties and Departments",
+      "url": "https://www.hku.hk/faculties/",
+      "category": "faculties_departments",
+      "audience": "all",
+      "degree_level": "all",
+      "source_type": "web",
+      "official": true
+    },
+    {
+      "id": "hku_calendar",
+      "name": "The University of Hong Kong Calendar",
+      "url": "https://calendar.hku.hk/",
+      "category": "academic_regulations",
+      "audience": "current_students",
+      "degree_level": "all",
+      "source_type": "web",
+      "official": true
+    },
+    {
+      "id": "hku_undergraduate_handbook",
+      "name": "HKU Undergraduate Handbook",
+      "url": "https://handbook.hku.hk/ug/",
+      "category": "academic_regulations",
+      "audience": "current_students",
+      "degree_level": "undergraduate",
+      "source_type": "web",
+      "official": true
+    },
+    {
+      "id": "hku_admissions_home",
+      "name": "HKU Admissions Home",
+      "url": "https://admissions.hku.hk/",
+      "category": "admissions",
+      "audience": "prospective_students",
+      "degree_level": "undergraduate",
+      "source_type": "web",
+      "official": true
+    },
+    {
+      "id": "hku_admissions_our_faculties",
+      "name": "HKU Admissions Our Faculties",
+      "url": "https://admissions.hku.hk/our-faculties",
+      "category": "faculties_departments",
+      "audience": "prospective_students",
+      "degree_level": "undergraduate",
+      "source_type": "web",
+      "official": true
+    },
+    {
       "id": "hku_admissions_programmes",
       "name": "HKU Undergraduate Programmes",
       "url": "https://admissions.hku.hk/programmes",
@@ -13,9 +83,69 @@
       "official": true
     },
     {
-      "id": "hku_admissions_fees_scholarships",
-      "name": "HKU Fees and Scholarships",
-      "url": "https://admissions.hku.hk/fees-and-scholarships",
+      "id": "hku_admissions_dual_degrees",
+      "name": "HKU Dual Degrees and Collaborative Programmes",
+      "url": "https://admissions.hku.hk/programmes/dual-degrees",
+      "category": "admissions",
+      "audience": "prospective_students",
+      "degree_level": "undergraduate",
+      "source_type": "web",
+      "official": true
+    },
+    {
+      "id": "hku_admissions_jupas",
+      "name": "HKU JUPAS Admissions",
+      "url": "https://admissions.hku.hk/apply/jupas",
+      "category": "admissions",
+      "audience": "prospective_students",
+      "degree_level": "undergraduate",
+      "source_type": "web",
+      "official": true
+    },
+    {
+      "id": "hku_admissions_jupas_eligibility",
+      "name": "HKU JUPAS Eligibility",
+      "url": "https://www.admissions.hku.hk/apply/jupas/eligibility",
+      "category": "admissions",
+      "audience": "prospective_students",
+      "degree_level": "undergraduate",
+      "source_type": "web",
+      "official": true
+    },
+    {
+      "id": "hku_admissions_international",
+      "name": "HKU International Qualifications Admissions",
+      "url": "https://www.admissions.hku.hk/apply/international-qualifications",
+      "category": "admissions",
+      "audience": "prospective_students",
+      "degree_level": "undergraduate",
+      "source_type": "web",
+      "official": true
+    },
+    {
+      "id": "hku_admissions_english_requirement",
+      "name": "HKU English Language Requirement",
+      "url": "https://admissions.hku.hk/apply/international-qualifications/english-language-requirement",
+      "category": "admissions",
+      "audience": "prospective_students",
+      "degree_level": "undergraduate",
+      "source_type": "web",
+      "official": true
+    },
+    {
+      "id": "hku_admissions_mainland",
+      "name": "HKU Mainland NJCEE Gao Kao Admissions",
+      "url": "https://admissions.hku.hk/zh-hans/apply/mainland",
+      "category": "admissions",
+      "audience": "prospective_students",
+      "degree_level": "undergraduate",
+      "source_type": "web",
+      "official": true
+    },
+    {
+      "id": "hku_admissions_fees",
+      "name": "HKU Tuition and Living Expenses",
+      "url": "https://admissions.hku.hk/fees-and-scholarships/fees",
       "category": "fees_scholarships",
       "audience": "prospective_students",
       "degree_level": "undergraduate",
@@ -23,11 +153,31 @@
       "official": true
     },
     {
-      "id": "hku_undergraduate_handbook",
-      "name": "HKU Undergraduate Handbook",
-      "url": "https://handbook.hku.hk/ug/",
-      "category": "academic_regulations",
-      "audience": "current_students",
+      "id": "hku_admissions_fees_zh_hans",
+      "name": "HKU Tuition and Living Expenses Simplified Chinese",
+      "url": "https://www.admissions.hku.hk/zh-hans/fees-and-scholarships/fees",
+      "category": "fees_scholarships",
+      "audience": "prospective_students",
+      "degree_level": "undergraduate",
+      "source_type": "web",
+      "official": true
+    },
+    {
+      "id": "hku_admissions_scholarships",
+      "name": "HKU Admissions Scholarships",
+      "url": "https://admissions.hku.hk/zh-hant/fees-and-scholarships/scholarships",
+      "category": "fees_scholarships",
+      "audience": "prospective_students",
+      "degree_level": "undergraduate",
+      "source_type": "web",
+      "official": true
+    },
+    {
+      "id": "hku_admissions_hkdse_scholarships",
+      "name": "HKU Entrance Scholarships for HKDSE Students",
+      "url": "https://admissions.hku.hk/fees-and-scholarships/scholarships/hku-entrance-scholarships-hkdse-students",
+      "category": "fees_scholarships",
+      "audience": "prospective_students",
       "degree_level": "undergraduate",
       "source_type": "web",
       "official": true
@@ -43,11 +193,211 @@
       "official": true
     },
     {
-      "id": "hku_student_affairs",
-      "name": "HKU Student Affairs Office",
-      "url": "https://www.studentaffairs.hku.hk/",
+      "id": "hku_taught_postgraduate_applying",
+      "name": "HKU Taught Postgraduate Applying",
+      "url": "https://portal.hku.hk/tpg-admissions/applying",
+      "category": "admissions",
+      "audience": "prospective_students",
+      "degree_level": "taught_postgraduate",
+      "source_type": "web",
+      "official": true
+    },
+    {
+      "id": "hku_taught_postgraduate_faq",
+      "name": "HKU Taught Postgraduate FAQ",
+      "url": "https://portal.hku.hk/tpg-admissions/applying/faq",
+      "category": "admissions",
+      "audience": "prospective_students",
+      "degree_level": "taught_postgraduate",
+      "source_type": "web",
+      "official": true
+    },
+    {
+      "id": "hku_graduate_school",
+      "name": "HKU Graduate School",
+      "url": "https://gradsch.hku.hk/",
+      "category": "admissions",
+      "audience": "prospective_students",
+      "degree_level": "research_postgraduate",
+      "source_type": "web",
+      "official": true
+    },
+    {
+      "id": "hku_graduate_school_how_to_apply",
+      "name": "HKU Graduate School How to Apply",
+      "url": "https://gradsch.hku.hk/prospective_students/application/how_to_apply",
+      "category": "admissions",
+      "audience": "prospective_students",
+      "degree_level": "research_postgraduate",
+      "source_type": "web",
+      "official": true
+    },
+    {
+      "id": "hku_graduate_school_research_areas",
+      "name": "HKU Graduate School Research Areas",
+      "url": "https://gradsch.hku.hk/prospective_students/research_areas",
+      "category": "admissions",
+      "audience": "prospective_students",
+      "degree_level": "research_postgraduate",
+      "source_type": "web",
+      "official": true
+    },
+    {
+      "id": "hku_student_life",
+      "name": "HKU Student Life and Resources",
+      "url": "https://www.studentlife.hku.hk/",
       "category": "student_life",
       "audience": "current_students",
+      "degree_level": "all",
+      "source_type": "web",
+      "official": true
+    },
+    {
+      "id": "hku_student_life_non_local",
+      "name": "HKU Information for Non-local Students",
+      "url": "https://studentlife.hku.hk/information-for-non-local-students",
+      "category": "visa_arrival",
+      "audience": "current_students",
+      "degree_level": "all",
+      "source_type": "web",
+      "official": true
+    },
+    {
+      "id": "hku_student_life_societies_support",
+      "name": "HKU Student Societies and Support",
+      "url": "https://studentlife.hku.hk/student-societies",
+      "category": "student_life",
+      "audience": "current_students",
+      "degree_level": "all",
+      "source_type": "web",
+      "official": true
+    },
+    {
+      "id": "hku_student_life_financial_resources",
+      "name": "HKU Financial Resources",
+      "url": "https://studentlife.hku.hk/financial-assistance",
+      "category": "fees_scholarships",
+      "audience": "current_students",
+      "degree_level": "all",
+      "source_type": "web",
+      "official": true
+    },
+    {
+      "id": "hku_student_life_fees_scholarships",
+      "name": "HKU Student Life Fees and Scholarships",
+      "url": "https://www.studentlife.hku.hk/fees-and-scholarships",
+      "category": "fees_scholarships",
+      "audience": "current_students",
+      "degree_level": "all",
+      "source_type": "web",
+      "official": true
+    },
+    {
+      "id": "hku_cedars_who_we_are",
+      "name": "HKU CEDARS Who We Are",
+      "url": "https://www.cedars.hku.hk/whoweare.php",
+      "category": "student_life",
+      "audience": "current_students",
+      "degree_level": "all",
+      "source_type": "web",
+      "official": true
+    },
+    {
+      "id": "hku_cedars_contact",
+      "name": "HKU CEDARS Contact Us",
+      "url": "https://www.cedars.hku.hk/contact-us",
+      "category": "contacts",
+      "audience": "current_students",
+      "degree_level": "all",
+      "source_type": "web",
+      "official": true
+    },
+    {
+      "id": "hku_cedars_housing",
+      "name": "HKU CEDARS Housing",
+      "url": "https://housing.cedars.hku.hk/",
+      "category": "housing",
+      "audience": "current_students",
+      "degree_level": "all",
+      "source_type": "web",
+      "official": true
+    },
+    {
+      "id": "hku_cedars_residence_application",
+      "name": "HKU Residence Application",
+      "url": "https://housing.cedars.hku.hk/university-accommodation/residence-application",
+      "category": "housing",
+      "audience": "current_students",
+      "degree_level": "all",
+      "source_type": "web",
+      "official": true
+    },
+    {
+      "id": "hku_cedars_sen_funding",
+      "name": "HKU SEN Funding",
+      "url": "https://www.cedars.hku.hk/cope/sen-support/sen-funding",
+      "category": "student_support",
+      "audience": "current_students",
+      "degree_level": "all",
+      "source_type": "web",
+      "official": true
+    },
+    {
+      "id": "hku_its_students",
+      "name": "HKU ITS Students",
+      "url": "https://its.hku.hk/students/",
+      "category": "it_services",
+      "audience": "current_students",
+      "degree_level": "all",
+      "source_type": "web",
+      "official": true
+    },
+    {
+      "id": "hku_its_guide",
+      "name": "HKU Information Technology Services Guide",
+      "url": "https://its.hku.hk/kb/information-technology-services-guide/",
+      "category": "it_services",
+      "audience": "current_students",
+      "degree_level": "all",
+      "source_type": "web",
+      "official": true
+    },
+    {
+      "id": "hku_its_wifi",
+      "name": "HKU WiFi Access",
+      "url": "https://its.hku.hk/kb/procedures-on-accessing-hku-wifi/",
+      "category": "it_services",
+      "audience": "current_students",
+      "degree_level": "all",
+      "source_type": "web",
+      "official": true
+    },
+    {
+      "id": "hku_its_email_calendar",
+      "name": "HKU Email and Calendar",
+      "url": "https://its.hku.hk/services/email-communications/email-and-calendar/",
+      "category": "it_services",
+      "audience": "current_students",
+      "degree_level": "all",
+      "source_type": "web",
+      "official": true
+    },
+    {
+      "id": "hku_libraries",
+      "name": "HKU Libraries",
+      "url": "https://www.lib.hku.hk/",
+      "category": "library",
+      "audience": "current_students",
+      "degree_level": "all",
+      "source_type": "web",
+      "official": true
+    },
+    {
+      "id": "hku_international_affairs_academic_information",
+      "name": "HKU International Affairs Academic Information",
+      "url": "https://intlaffairs.hku.hk/academic-information",
+      "category": "academic_dates",
+      "audience": "exchange_students",
       "degree_level": "all",
       "source_type": "web",
       "official": true

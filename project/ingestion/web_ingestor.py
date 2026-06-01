@@ -10,6 +10,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 import config
+from utils import pdf_to_markdown
 
 
 FRONT_MATTER_BOUNDARY = "---"
@@ -27,6 +28,20 @@ def front_matter(metadata: dict) -> str:
         f"{json.dumps(metadata, ensure_ascii=False, indent=2)}\n"
         f"{FRONT_MATTER_BOUNDARY}\n\n"
     )
+
+
+def source_metadata(source: dict, title: str | None = None) -> dict:
+    return {
+        "source_id": source["id"],
+        "source_url": source["url"],
+        "title": title or source.get("title") or source.get("name") or source["id"],
+        "category": source.get("category", ""),
+        "audience": source.get("audience", ""),
+        "degree_level": source.get("degree_level", ""),
+        "source_type": source.get("source_type", "web"),
+        "official": bool(source.get("official", False)),
+        "last_indexed_at": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 def split_front_matter(markdown: str) -> tuple[dict, str]:
@@ -129,29 +144,48 @@ def fetch_html(url: str, timeout: int = 30) -> str:
         return response.read().decode(charset, errors="replace")
 
 
+def download_binary(url: str, output_path: Path, timeout: int = 60) -> None:
+    request = Request(
+        url,
+        headers={
+            "User-Agent": "HKU-Agentic-Knowledge-Assistant/0.1 (+https://github.com/)",
+            "Accept": "application/pdf,*/*",
+        },
+    )
+    with urlopen(request, timeout=timeout) as response:
+        output_path.write_bytes(response.read())
+
+
 def source_to_markdown(source: dict, html_text: str) -> str:
     title = source.get("title") or source.get("name") or extract_title(html_text, source["id"])
     parser = HTMLToMarkdownParser()
     parser.feed(html_text)
     parser.close()
 
-    metadata = {
-        "source_id": source["id"],
-        "source_url": source["url"],
-        "title": title,
-        "category": source.get("category", ""),
-        "audience": source.get("audience", ""),
-        "degree_level": source.get("degree_level", ""),
-        "source_type": source.get("source_type", "web"),
-        "official": bool(source.get("official", False)),
-        "last_indexed_at": datetime.now(timezone.utc).isoformat(),
-    }
+    metadata = source_metadata(source, title)
 
     body = parser.markdown()
     if not body.startswith("#"):
         body = f"# {title}\n\n{body}"
 
     return front_matter(metadata) + body + "\n"
+
+
+def pdf_source_to_markdown(source: dict, temp_dir: Path) -> str:
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    source_id = slugify(source["id"])
+    pdf_path = temp_dir / f"{source_id}.pdf"
+    converted_dir = temp_dir / "converted"
+
+    download_binary(source["url"], pdf_path)
+    pdf_to_markdown(pdf_path, converted_dir)
+
+    converted_path = converted_dir / f"{pdf_path.stem}.md"
+    body = converted_path.read_text(encoding="utf-8")
+    title = source.get("title") or source.get("name") or pdf_path.stem
+    if not body.lstrip().startswith("#"):
+        body = f"# {title}\n\n{body}"
+    return front_matter(source_metadata(source, title)) + body.lstrip()
 
 
 def load_sources(path: str | Path = config.DATA_SOURCES_PATH) -> list[dict]:
@@ -181,8 +215,12 @@ def ingest_sources(
             continue
 
         try:
-            html_text = fetch_html(source["url"])
-            markdown = source_to_markdown(source, html_text)
+            source_type = source.get("source_type", "web").lower()
+            if source_type == "pdf" or source["url"].lower().split("?", 1)[0].endswith(".pdf"):
+                markdown = pdf_source_to_markdown(source, output / ".downloads")
+            else:
+                html_text = fetch_html(source["url"])
+                markdown = source_to_markdown(source, html_text)
             output_path.write_text(markdown, encoding="utf-8")
             print(f"Indexed source: {source['id']} -> {output_path.name}")
             added += 1

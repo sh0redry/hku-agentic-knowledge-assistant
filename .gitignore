@@ -1,12 +1,16 @@
 .DS_Store
 qdrant_db/
 markdown_docs/
+markdown_docs/.downloads/
 parent_store/
 docs/
 __pycache__/
+*.pyc
 .vscode/
 .env
 .venv/
 venv/
 
 *.docx
+evals/results*.jsonl
+evals/results*.json

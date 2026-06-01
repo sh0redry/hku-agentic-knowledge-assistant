@@ -86,6 +86,8 @@ def direct_answer(state: State, llm, collection):
         queries.append(original_query)
     if "简历" in question and "候选人姓名" in question:
         queries.append("姓名 候选人 简历 name candidate")
+    if any(term in question for term in ("学院", "院系", "学部")) or "facult" in question.lower():
+        queries.append("HKU faculties departments schools Faculty of Architecture Arts Business Dentistry Education Engineering Law Medicine Science Social Sciences")
 
     max_attempts = max(1, config.DIRECT_RETRIEVAL_RETRIES)
     docs = []

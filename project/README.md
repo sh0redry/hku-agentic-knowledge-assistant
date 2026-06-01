@@ -37,6 +37,76 @@ python project/app.py
 
 The application will be available at `http://localhost:7860` (default Gradio port).
 
+### Build the HKU Knowledge Base
+
+Fetched pages, parent chunks, and Qdrant indexes are local generated artifacts:
+
+| Directory | Contents | Commit to Git? |
+|-----------|----------|----------------|
+| `markdown_docs/` | Cleaned Markdown generated from HKU official sources and uploaded files | No |
+| `parent_store/` | Parent chunks used to provide full retrieval context | No |
+| `qdrant_db/` | Local Qdrant vector database | No |
+
+These directories are intentionally listed in `.gitignore`. Anyone who clones the
+repository can rebuild them from the source list in
+`project/data_sources/hku_sources.json`.
+
+Stop the Gradio app first, then run:
+
+```bash
+python project/bootstrap_hku_data.py
+```
+
+Or run the ingestion command directly:
+
+```bash
+python project/ingest_hku_sources.py --overwrite --reindex
+```
+
+The ingestor writes Markdown files with source metadata, then rebuilds the parent
+store and vector index. Some HKU pages may reject scripted requests or be
+temporarily unreachable; those failures are reported in the console and can be
+fixed by updating `project/data_sources/hku_sources.json`.
+
+`project/data_sources/hku_sources.json` supports both web pages and PDFs. For a
+PDF source, add an entry like:
+
+```json
+{
+  "id": "hku_example_pdf",
+  "name": "HKU Example PDF",
+  "url": "https://example.hku.hk/example.pdf",
+  "category": "academic_regulations",
+  "audience": "current_students",
+  "degree_level": "undergraduate",
+  "source_type": "pdf",
+  "official": true
+}
+```
+
+The ingestor downloads the PDF into `markdown_docs/.downloads/`, converts it to
+Markdown with the existing PDF pipeline, adds source metadata as front matter,
+and indexes it with the rest of the knowledge base.
+
+### Run Evals
+
+The repository includes a small HKU evaluation set in `evals/questions.jsonl`.
+By default, the eval runner checks retrieval coverage only and does not call the
+LLM:
+
+```bash
+python evals/run_evals.py
+```
+
+It writes detailed results to `evals/results.jsonl` and prints a hit-rate summary
+by category and language. To run full answer generation as well, use:
+
+```bash
+python evals/run_evals.py --answers
+```
+
+The `--answers` mode can consume Gemini or other LLM quota.
+
 ### Prerequisites
 
 - Python 3.11+
