@@ -1,0 +1,56 @@
+{
+  "project": "HKU Agentic Knowledge Assistant",
+  "description": "Public HKU official sources for the first RAG indexing pass. Start small, verify quality, then expand.",
+  "sources": [
+    {
+      "id": "hku_admissions_programmes",
+      "name": "HKU Undergraduate Programmes",
+      "url": "https://admissions.hku.hk/programmes",
+      "category": "admissions",
+      "audience": "prospective_students",
+      "degree_level": "undergraduate",
+      "source_type": "web",
+      "official": true
+    },
+    {
+      "id": "hku_admissions_fees_scholarships",
+      "name": "HKU Fees and Scholarships",
+      "url": "https://admissions.hku.hk/fees-and-scholarships",
+      "category": "fees_scholarships",
+      "audience": "prospective_students",
+      "degree_level": "undergraduate",
+      "source_type": "web",
+      "official": true
+    },
+    {
+      "id": "hku_undergraduate_handbook",
+      "name": "HKU Undergraduate Handbook",
+      "url": "https://handbook.hku.hk/ug/",
+      "category": "academic_regulations",
+      "audience": "current_students",
+      "degree_level": "undergraduate",
+      "source_type": "web",
+      "official": true
+    },
+    {
+      "id": "hku_taught_postgraduate_admissions",
+      "name": "HKU Taught Postgraduate Admissions",
+      "url": "https://admissions.hku.hk/tpg/",
+      "category": "admissions",
+      "audience": "prospective_students",
+      "degree_level": "taught_postgraduate",
+      "source_type": "web",
+      "official": true
+    },
+    {
+      "id": "hku_student_affairs",
+      "name": "HKU Student Affairs Office",
+      "url": "https://www.studentaffairs.hku.hk/",
+      "category": "student_life",
+      "audience": "current_students",
+      "degree_level": "all",
+      "source_type": "web",
+      "official": true
+    }
+  ]
+}
