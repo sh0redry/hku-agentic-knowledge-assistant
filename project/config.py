@@ -18,7 +18,7 @@ SPARSE_MODEL = os.environ.get("SPARSE_MODEL", "Qdrant/bm25")
 SEARCH_SCORE_THRESHOLD = float(os.environ.get("SEARCH_SCORE_THRESHOLD", "0.3"))
 DIRECT_SINGLE_QUESTION = os.environ.get("DIRECT_SINGLE_QUESTION", "true").lower() == "true"
 DIRECT_RETRIEVAL_LIMIT = int(os.environ.get("DIRECT_RETRIEVAL_LIMIT", "5"))
-DIRECT_RETRIEVAL_RETRIES = int(os.environ.get("DIRECT_RETRIEVAL_RETRIES", "2"))
+DIRECT_RETRIEVAL_RETRIES = int(os.environ.get("DIRECT_RETRIEVAL_RETRIES", "4"))
 LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "gemini").lower()
 LLM_MODEL = os.environ.get("LLM_MODEL", "gemini-2.5-flash")
 LLM_TEMPERATURE = 0

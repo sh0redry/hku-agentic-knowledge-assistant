@@ -10,6 +10,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 import config
+from retrieval.bilingual import aliases_for_source, aliases_markdown
 from utils import pdf_to_markdown
 
 
@@ -31,15 +32,18 @@ def front_matter(metadata: dict) -> str:
 
 
 def source_metadata(source: dict, title: str | None = None) -> dict:
+    resolved_title = title or source.get("title") or source.get("name") or source["id"]
+    aliases = aliases_for_source(source.get("id"), source.get("category"), resolved_title)
     return {
         "source_id": source["id"],
         "source_url": source["url"],
-        "title": title or source.get("title") or source.get("name") or source["id"],
+        "title": resolved_title,
         "category": source.get("category", ""),
         "audience": source.get("audience", ""),
         "degree_level": source.get("degree_level", ""),
         "source_type": source.get("source_type", "web"),
         "official": bool(source.get("official", False)),
+        "aliases": aliases,
         "last_indexed_at": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -167,6 +171,7 @@ def source_to_markdown(source: dict, html_text: str) -> str:
     body = parser.markdown()
     if not body.startswith("#"):
         body = f"# {title}\n\n{body}"
+    body = aliases_markdown(metadata.get("aliases", [])) + body
 
     return front_matter(metadata) + body + "\n"
 
@@ -183,9 +188,11 @@ def pdf_source_to_markdown(source: dict, temp_dir: Path) -> str:
     converted_path = converted_dir / f"{pdf_path.stem}.md"
     body = converted_path.read_text(encoding="utf-8")
     title = source.get("title") or source.get("name") or pdf_path.stem
+    metadata = source_metadata(source, title)
     if not body.lstrip().startswith("#"):
         body = f"# {title}\n\n{body}"
-    return front_matter(source_metadata(source, title)) + body.lstrip()
+    body = aliases_markdown(metadata.get("aliases", [])) + body.lstrip()
+    return front_matter(metadata) + body
 
 
 def load_sources(path: str | Path = config.DATA_SOURCES_PATH) -> list[dict]:

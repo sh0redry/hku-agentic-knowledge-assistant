@@ -38,6 +38,9 @@ class DocumentChuncker:
 
         for chunk in parent_chunks:
             chunk.metadata.update(document_metadata)
+            aliases = document_metadata.get("aliases", [])
+            if aliases:
+                chunk.metadata["aliases_text"] = " ".join(aliases)
         
         merged_parents = self.__merge_small_parents(parent_chunks)
         split_parents = self.__split_large_parents(merged_parents)

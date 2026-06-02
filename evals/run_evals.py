@@ -19,6 +19,8 @@ import config
 from db.vector_db_manager import VectorDbManager
 from core.chat_interface import ChatInterface
 from core.rag_system import RAGSystem
+from rag_agent.nodes import retrieve_expanded_documents
+from retrieval.bilingual import expand_query
 
 
 DEFAULT_QUESTIONS = ROOT / "evals" / "questions.jsonl"
@@ -65,7 +67,8 @@ def evaluate_retrieval(questions: list[dict], k: int, threshold: float) -> tuple
 
     results = []
     for item in questions:
-        docs = collection.similarity_search(item["question"], k=k, score_threshold=threshold)
+        queries = expand_query(item["question"], category=item.get("category"))
+        docs = retrieve_expanded_documents(collection, queries, limit=k, max_queries=config.DIRECT_RETRIEVAL_RETRIES)
         expected = item.get("expected_source_ids", [])
         hit = bool(docs) if not expected else any(
             source_hit(doc.metadata or {}, expected) for doc in docs

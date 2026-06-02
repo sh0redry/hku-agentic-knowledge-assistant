@@ -6,6 +6,7 @@ from .schemas import QueryAnalysis
 from .prompts import *
 from utils import estimate_context_tokens
 from core.cache import answer_cache, cache_key, rewrite_cache
+from retrieval.bilingual import expand_queries
 import config
 from config import BASE_TOKEN_THRESHOLD, TOKEN_GROWTH_FACTOR
 
@@ -78,27 +79,32 @@ def rewrite_query(state: State, llm, fallback_llm=None):
 def request_clarification(state: State):
     return {}
 
+def retrieve_expanded_documents(collection, queries, *, limit, max_queries):
+    docs_by_parent = {}
+    for query in queries[:max_queries]:
+        results = collection.similarity_search(
+            query,
+            k=limit,
+            score_threshold=config.SEARCH_SCORE_THRESHOLD,
+        )
+        for doc in results:
+            key = doc.metadata.get("parent_id") or doc.metadata.get("source_url") or doc.page_content[:80]
+            docs_by_parent.setdefault(key, doc)
+    return list(docs_by_parent.values())[:limit]
+
 def direct_answer(state: State, llm, collection):
     question = state["rewrittenQuestions"][0]
     original_query = state.get("originalQuery", question)
-    queries = [question]
-    if original_query and original_query not in queries:
-        queries.append(original_query)
+    queries = expand_queries([question], original_query)
     if "简历" in question and "候选人姓名" in question:
         queries.append("姓名 候选人 简历 name candidate")
-    if any(term in question for term in ("学院", "院系", "学部")) or "facult" in question.lower():
-        queries.append("HKU faculties departments schools Faculty of Architecture Arts Business Dentistry Education Engineering Law Medicine Science Social Sciences")
 
-    max_attempts = max(1, config.DIRECT_RETRIEVAL_RETRIES)
-    docs = []
-    for query in queries[:max_attempts]:
-        docs = collection.similarity_search(
-            query,
-            k=config.DIRECT_RETRIEVAL_LIMIT,
-            score_threshold=config.SEARCH_SCORE_THRESHOLD,
-        )
-        if docs:
-            break
+    docs = retrieve_expanded_documents(
+        collection,
+        queries,
+        limit=config.DIRECT_RETRIEVAL_LIMIT,
+        max_queries=max(1, config.DIRECT_RETRIEVAL_RETRIES),
+    )
 
     if not docs:
         msg = "I couldn't find any information to answer your question in the available sources."
