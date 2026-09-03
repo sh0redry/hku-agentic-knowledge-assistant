@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "HKU AGENTS SIS Bridge",
+  "version": "0.1.0",
+  "description": "Read-only local bridge between an open HKU SIS tab and HKU AGENTS.",
+  "minimum_chrome_version": "116",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://sis-main.hku.hk/*",
+    "http://127.0.0.1/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "HKU AGENTS SIS Bridge",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://sis-main.hku.hk/*"],
+      "js": ["sis_parser.js", "content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'"
+  }
+}

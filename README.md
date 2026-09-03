@@ -54,8 +54,9 @@
 This fork defaults to DeepSeek, with Gemini configured as the backup provider.
 It also includes a local-first HKU AGENTS platform skeleton: FastAPI, a capability
 registry, SQLite-backed tasks and audit events, confirmation gates, SSE task
-events, and a zero-network SIS preflight simulator. The browser connector and
-real SIS enrollment writes are not implemented.
+events, a zero-network SIS preflight simulator, and an authenticated read-only
+Chrome extension bridge for inspecting an already-open SIS tab. Real SIS
+enrollment writes are not implemented.
 
 ```bash
 cp project/.env.example project/.env
@@ -67,6 +68,10 @@ Then run:
 ```bash
 python project/app.py
 ```
+
+For the optional read-only SIS connection, load `browser_runtime/extension` as
+an unpacked extension and pair it from the GUI's **Connections** tab. The
+extension has no cookie or SIS write permissions.
 
 Ollama is still available as an optional local provider by setting `LLM_PROVIDER=ollama`.
 

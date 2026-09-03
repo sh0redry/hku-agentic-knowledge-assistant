@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>HKU AGENTS SIS Bridge</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main>
+      <h1>HKU AGENTS</h1>
+      <p class="muted">Read-only SIS bridge</p>
+      <label for="port">Local app port</label>
+      <input id="port" type="number" min="1024" max="65535" value="7860">
+      <label for="token">Pairing token</label>
+      <input id="token" type="password" autocomplete="off" spellcheck="false">
+      <button id="connect" type="button">Save and connect</button>
+      <button id="bind" class="secondary" type="button">Bind open SIS tab</button>
+      <div id="status" role="status">Checking status…</div>
+      <p class="notice">This extension cannot submit SIS forms and has no cookie permission.</p>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 import html
 import uuid
+from datetime import datetime, timezone
 
 import gradio as gr
 
+import config
 from agents.models import TaskStatus
 
 
@@ -34,6 +36,16 @@ def _course_rows(value: str) -> list[dict]:
 
 def create_gradio_ui(container):
     knowledge_capability = container.registry.get("knowledge.answer")
+    sis_browser = container.connectors["sis_browser"]
+
+    def bridge_websocket_url():
+        base = config.API_BASE_URL.rstrip("/")
+        scheme = "wss" if base.startswith("https://") else "ws"
+        address = base.split("://", 1)[-1]
+        return f"{scheme}://{address}/api/v1/browser/ws"
+
+    def pairing_info():
+        return container.browser_bridge.pairing_info(bridge_websocket_url())
 
     def safe_call(call):
         try:
@@ -125,6 +137,43 @@ def create_gradio_ui(container):
         except Exception as exc:
             return _pretty({"ok": False, "simulated": True, "error": str(exc)})
 
+    async def live_sis_call(action, operation):
+        completed_at = lambda: datetime.now(timezone.utc).isoformat(timespec="seconds")
+        try:
+            result = await operation()
+            response = {
+                "ok": True,
+                "read_only": True,
+                "action": action,
+                "completed_at": completed_at(),
+                "result": result,
+            }
+            if action == "inspect_cart":
+                response["cart_state"] = (
+                    "empty" if result.get("course_count", 0) == 0 else "courses_found"
+                )
+            return _pretty(response)
+        except Exception as exc:
+            return _pretty(
+                {
+                    "ok": False,
+                    "read_only": True,
+                    "action": action,
+                    "completed_at": completed_at(),
+                    "error": getattr(exc, "code", type(exc).__name__),
+                    "message": str(exc),
+                }
+            )
+
+    async def bind_sis_tab():
+        return await live_sis_call("bind_tab", sis_browser.bind_tab)
+
+    async def inspect_sis_page():
+        return await live_sis_call("inspect_page", sis_browser.inspect_page)
+
+    async def inspect_sis_cart():
+        return await live_sis_call("inspect_cart", sis_browser.inspect_cart)
+
     with gr.Blocks(title="HKU AGENTS") as demo:
         # A concrete value is deep-copied per browser session. Using a callable
         # creates a hidden queued load event that can stall the first UI action
@@ -134,13 +183,21 @@ def create_gradio_ui(container):
 
         with gr.Tab("Dashboard"):
             gr.Markdown(
-                "The platform API is the system boundary. SIS browser access is not implemented yet."
+                "The platform API is the system boundary. SIS browser access is read-only."
             )
             health_output = gr.Code(value="Press Refresh", language="json", label="Platform health")
+            browser_health_output = gr.Code(
+                value=_pretty(sis_browser.health()),
+                language="json",
+                label="SIS browser connection",
+            )
             health_button = gr.Button("Refresh health", variant="primary")
             health_button.click(
-                lambda: _pretty({"status": "ok", "service": "hku-agents", "mode": "local-first"}),
-                outputs=health_output,
+                lambda: (
+                    _pretty({"status": "ok", "service": "hku-agents", "mode": "local-first"}),
+                    _pretty(sis_browser.health()),
+                ),
+                outputs=[health_output, browser_health_output],
                 queue=False,
             )
 
@@ -211,7 +268,38 @@ def create_gradio_ui(container):
 
         with gr.Tab("SIS Preflight"):
             gr.Markdown(
-                "## Simulator only\n"
+                "## Live browser inspection (read-only)\n"
+                "Bind an already-open SIS tab or inspect its structured page state. "
+                "These commands cannot click controls or submit forms."
+            )
+            with gr.Row():
+                bind_sis_button = gr.Button("Bind open SIS tab", variant="primary")
+                inspect_sis_button = gr.Button("Inspect current SIS page")
+                inspect_cart_button = gr.Button("Inspect cart")
+            live_sis_output = gr.Code(
+                value="Pair the extension in Connections first.",
+                language="json",
+                label="Live read-only result",
+            )
+            bind_sis_button.click(
+                bind_sis_tab,
+                outputs=live_sis_output,
+                queue=False,
+            )
+            inspect_sis_button.click(
+                inspect_sis_page,
+                outputs=live_sis_output,
+                queue=False,
+            )
+            inspect_cart_button.click(
+                inspect_sis_cart,
+                outputs=live_sis_output,
+                show_progress="minimal",
+                queue=False,
+            )
+
+            gr.Markdown(
+                "## Offline simulator\n"
                 "This validates exact course, section, and class-number sets. "
                 "It does not connect to Chrome or HKU SIS and sends no requests."
             )
@@ -250,10 +338,34 @@ def create_gradio_ui(container):
             )
 
         with gr.Tab("Connections"):
+            gr.Markdown(
+                "## Pair the read-only extension\n"
+                "Load `browser_runtime/extension` as an unpacked Chrome extension, then copy "
+                "this process-local token into its popup. Do not share the token."
+            )
+            current_pairing = pairing_info()
+            pairing_token = gr.Textbox(
+                value=current_pairing["pairing_token"],
+                label="Pairing token",
+                interactive=False,
+            )
+            websocket_address = gr.Textbox(
+                value=current_pairing["websocket_url"],
+                label="Local bridge address",
+                interactive=False,
+            )
+            rotate_pairing_button = gr.Button("Rotate pairing token")
             connections_output = gr.Code(
-                value="Press Refresh", language="json", label="Connector status"
+                value=_pretty({"connections": container.connection_status()}),
+                language="json",
+                label="Connector status",
             )
             connections_button = gr.Button("Refresh connections")
+            rotate_pairing_button.click(
+                lambda: container.browser_bridge.rotate_pairing_token(),
+                outputs=pairing_token,
+                queue=False,
+            )
             connections_button.click(
                 lambda: safe_call(lambda: {"connections": container.connection_status()}),
                 outputs=connections_output,

@@ -4,17 +4,20 @@ import asyncio
 import json
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException, Query, Request, WebSocket
 from fastapi.exceptions import RequestValidationError
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import ValidationError
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from agents.errors import CapabilityError
 from agents.models import TERMINAL_TASK_STATUSES, TaskStatus
 from api.schemas import ActionConfirmRequest, ActionDraftRequest, ActionExecuteRequest, ChatRequest
 from application import ApplicationContainer
+from browser_bridge.service import BrowserBridgeError
 from connectors.sis.models import SISPreflightRequest
+import config
 
 
 def _dump(model):
@@ -30,6 +33,10 @@ def create_api_app(
         title="HKU AGENTS API",
         version="0.1.0",
         description="Local-first capability and task API for the HKU AGENTS assistant.",
+    )
+    app.add_middleware(
+        TrustedHostMiddleware,
+        allowed_hosts=["127.0.0.1", "localhost", "testserver"],
     )
     app.state.container = container or ApplicationContainer(db_path=db_path)
 
@@ -68,6 +75,61 @@ def create_api_app(
     @app.get("/api/v1/connections")
     async def connections():
         return {"connections": app.state.container.connection_status()}
+
+    def bridge_http_error(exc: BrowserBridgeError) -> HTTPException:
+        status = 504 if exc.code == "BROWSER_TIMEOUT" else 409
+        return HTTPException(status_code=status, detail={"code": exc.code, "message": str(exc)})
+
+    @app.get("/api/v1/browser/pairing")
+    async def browser_pairing(request: Request):
+        if not config.BROWSER_BRIDGE_ENABLED:
+            raise HTTPException(status_code=404, detail="Browser bridge is disabled.")
+        scheme = "wss" if request.url.scheme == "https" else "ws"
+        websocket_url = f"{scheme}://{request.url.netloc}/api/v1/browser/ws"
+        return app.state.container.browser_bridge.pairing_info(websocket_url)
+
+    @app.post("/api/v1/browser/pairing/rotate")
+    async def rotate_browser_pairing(request: Request):
+        if not config.BROWSER_BRIDGE_ENABLED:
+            raise HTTPException(status_code=404, detail="Browser bridge is disabled.")
+        token = app.state.container.browser_bridge.rotate_pairing_token()
+        scheme = "wss" if request.url.scheme == "https" else "ws"
+        return {
+            "pairing_token": token,
+            "websocket_url": f"{scheme}://{request.url.netloc}/api/v1/browser/ws",
+        }
+
+    @app.get("/api/v1/browser/status")
+    async def browser_status():
+        return app.state.container.connectors["sis_browser"].health()
+
+    @app.websocket("/api/v1/browser/ws")
+    async def browser_websocket(websocket: WebSocket):
+        if not config.BROWSER_BRIDGE_ENABLED:
+            await websocket.close(code=4404, reason="Browser bridge is disabled.")
+            return
+        await app.state.container.browser_bridge.handle_websocket(websocket)
+
+    @app.post("/api/v1/browser/sis/bind")
+    async def bind_sis_tab():
+        try:
+            return await app.state.container.connectors["sis_browser"].bind_tab()
+        except BrowserBridgeError as exc:
+            raise bridge_http_error(exc) from exc
+
+    @app.get("/api/v1/browser/sis/page")
+    async def inspect_sis_page():
+        try:
+            return await app.state.container.connectors["sis_browser"].inspect_page()
+        except BrowserBridgeError as exc:
+            raise bridge_http_error(exc) from exc
+
+    @app.get("/api/v1/browser/sis/cart")
+    async def inspect_sis_cart():
+        try:
+            return await app.state.container.connectors["sis_browser"].inspect_cart()
+        except BrowserBridgeError as exc:
+            raise bridge_http_error(exc) from exc
 
     @app.post("/api/v1/chat")
     async def chat(body: ChatRequest):

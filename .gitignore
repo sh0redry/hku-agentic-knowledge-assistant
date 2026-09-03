@@ -12,6 +12,8 @@ docs/
 __pycache__/
 *.pyc
 .vscode/
+browser_runtime/extension/dist/
+browser_runtime/extension/*.pem
 
 # Local secrets and API keys
 .env

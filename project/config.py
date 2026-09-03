@@ -25,6 +25,18 @@ APP_HOST = os.environ.get("APP_HOST", "127.0.0.1")
 APP_PORT = int(os.environ.get("APP_PORT", "7860"))
 API_BASE_URL = os.environ.get("API_BASE_URL", f"http://{APP_HOST}:{APP_PORT}")
 CONFIRMATION_TTL_SECONDS = int(os.environ.get("CONFIRMATION_TTL_SECONDS", "300"))
+BROWSER_BRIDGE_ENABLED = os.environ.get("BROWSER_BRIDGE_ENABLED", "true").lower() == "true"
+BROWSER_HEARTBEAT_TIMEOUT_SECONDS = float(
+    os.environ.get("BROWSER_HEARTBEAT_TIMEOUT_SECONDS", "45")
+)
+BROWSER_COMMAND_TIMEOUT_SECONDS = float(
+    os.environ.get("BROWSER_COMMAND_TIMEOUT_SECONDS", "10")
+)
+BROWSER_EXTENSION_IDS = {
+    item.strip()
+    for item in os.environ.get("BROWSER_EXTENSION_IDS", "").split(",")
+    if item.strip()
+}
 
 # --- Qdrant Configuration ---
 CHILD_COLLECTION = os.environ.get("CHILD_COLLECTION", "document_child_chunks_bge_m3")

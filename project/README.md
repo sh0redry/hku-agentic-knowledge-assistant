@@ -61,6 +61,10 @@ Core endpoints:
 | `GET /api/v1/health` | Local application health |
 | `GET /api/v1/capabilities` | Registered capability manifests |
 | `GET /api/v1/connections` | Connector and future browser-runtime status |
+| `GET /api/v1/browser/pairing` | Current local extension pairing information |
+| `POST /api/v1/browser/sis/bind` | Bind an open SIS tab through the read-only extension |
+| `GET /api/v1/browser/sis/page` | Read structured state from the bound SIS page |
+| `GET /api/v1/browser/sis/cart` | Read structured cart rows without submitting anything |
 | `POST /api/v1/chat` | Execute the existing Knowledge Agent through the platform boundary |
 | `POST /api/v1/sis/preflight` | Run the zero-network SIS simulator |
 | `GET /api/v1/tasks/{task_id}/events` | Stream task events over SSE |
@@ -71,6 +75,19 @@ Run the platform tests without contacting HKU SIS or an LLM:
 ```bash
 python -m unittest discover -s tests -v
 ```
+
+### Connect the read-only SIS extension
+
+The first browser integration is an unpacked Manifest V3 extension in
+`browser_runtime/extension`. Start HKU AGENTS, load that directory from
+`chrome://extensions` using **Developer mode → Load unpacked**, then open the
+GUI's **Connections** tab. Copy its process-local pairing token into the
+extension popup and bind an SIS tab that you logged into yourself.
+
+The extension has no cookie, debugger, download, clipboard, web-request, or
+form-execution permission. It accepts a fixed read-only command set and sends
+only validated page type, login state, term label, and exact course identifiers.
+See `browser_runtime/extension/README.md` for setup and security details.
 
 ### Build the HKU Knowledge Base
 

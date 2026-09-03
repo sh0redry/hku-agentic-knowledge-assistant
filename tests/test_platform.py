@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import queue
+import shutil
+import subprocess
 import sys
 import tempfile
 import threading
@@ -10,6 +14,7 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
+from starlette.websockets import WebSocketDisconnect
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,7 +35,13 @@ from agents.models import (
 from api.app import create_api_app
 from application import ApplicationContainer
 from agents.knowledge.agent import KnowledgeAnswerCapability
-from connectors.sis.protocol import BrowserCommand, BrowserCommandName, sanitize_for_log
+from browser_bridge.models import HeartbeatMessage
+from browser_bridge.service import BrowserBridgeService
+from connectors.sis.protocol import (
+    BrowserCommand,
+    BrowserCommandName,
+    sanitize_for_log,
+)
 from ui.gradio_app import create_gradio_ui
 
 
@@ -99,8 +110,77 @@ class PlatformAPITests(unittest.TestCase):
         )
         connections = self.client.get("/api/v1/connections").json()["connections"]
         browser = next(item for item in connections if item["id"] == "sis_browser")
-        self.assertEqual(browser["status"], "not_implemented")
+        self.assertEqual(browser["status"], "disconnected")
         self.assertFalse(browser["safe_for_writes"])
+
+    def test_browser_pairing_requires_extension_origin_and_current_token(self):
+        self.assertEqual(
+            self.client.get("/api/v1/browser/pairing", headers={"host": "evil.example"}).status_code,
+            400,
+        )
+        pairing = self.client.get("/api/v1/browser/pairing").json()
+        self.assertGreaterEqual(len(pairing["pairing_token"]), 20)
+        self.assertEqual(pairing["websocket_url"], "ws://testserver/api/v1/browser/ws")
+
+        with self.assertRaises(WebSocketDisconnect):
+            with self.client.websocket_connect(
+                "/api/v1/browser/ws", headers={"origin": "https://evil.example"}
+            ):
+                pass
+
+        with self.client.websocket_connect(
+            "/api/v1/browser/ws",
+            headers={"origin": f"chrome-extension://{'a' * 32}"},
+        ) as invalid_token_socket:
+            invalid_token_socket.send_json(
+                {"type": "pair", "token": "x" * 32, "extension_version": "0.1.0"}
+            )
+            with self.assertRaises(WebSocketDisconnect):
+                invalid_token_socket.receive_json()
+
+        extension_id = "a" * 32
+        with self.client.websocket_connect(
+            "/api/v1/browser/ws",
+            headers={"origin": f"chrome-extension://{extension_id}"},
+        ) as websocket:
+            websocket.send_json(
+                {
+                    "type": "pair",
+                    "token": pairing["pairing_token"],
+                    "extension_version": "0.1.0",
+                }
+            )
+            paired = websocket.receive_json()
+            self.assertTrue(paired["read_only"])
+            self.assertEqual(paired["extension_id"], extension_id)
+            websocket.send_json(
+                {
+                    "type": "heartbeat",
+                    "tab": {
+                        "bound": True,
+                        "origin": "https://sis-main.hku.hk",
+                        "logged_in": True,
+                        "page_kind": "cart",
+                        "term_label": "2026-27 Sem 1",
+                        "course_count": 1,
+                    },
+                }
+            )
+            status = self.client.get("/api/v1/browser/status").json()
+            self.assertEqual(status["status"], "connected")
+            self.assertEqual(status["tab"]["page_kind"], "cart")
+
+        self.assertEqual(self.client.get("/api/v1/browser/status").json()["status"], "disconnected")
+        with self.assertRaises(WebSocketDisconnect):
+            with self.client.websocket_connect(
+                "/api/v1/browser/ws",
+                headers={"origin": f"chrome-extension://{'b' * 32}"},
+            ):
+                pass
+
+        bind = self.client.post("/api/v1/browser/sis/bind")
+        self.assertEqual(bind.status_code, 409)
+        self.assertEqual(bind.json()["detail"]["code"], "BROWSER_NOT_CONNECTED")
 
     def test_simulated_sis_preflight_is_zero_request_and_exact(self):
         response = self.client.post("/api/v1/sis/preflight", json=preflight_payload())
@@ -152,6 +232,133 @@ class PlatformAPITests(unittest.TestCase):
 
 
 class SafetyFrameworkTests(unittest.TestCase):
+    def test_browser_bridge_named_command_round_trip(self):
+        class FakeWebSocket:
+            def __init__(self):
+                self.sent = asyncio.Queue()
+
+            async def send_json(self, payload):
+                await self.sent.put(payload)
+
+        async def scenario():
+            bridge = BrowserBridgeService(command_timeout=1)
+            websocket = FakeWebSocket()
+            await bridge._activate_connection(websocket, "b" * 32, "0.1.0")
+            request_task = asyncio.create_task(
+                bridge.request(BrowserCommand(command=BrowserCommandName.INSPECT_PAGE))
+            )
+            sent = await websocket.sent.get()
+            self.assertEqual(sent["command"], "sis.inspect_page")
+            await bridge._handle_message(
+                {
+                    "protocol_version": 1,
+                    "request_id": sent["request_id"],
+                    "ok": True,
+                    "data": {"page_kind": "unknown"},
+                    "error": None,
+                }
+            )
+            result = await request_task
+            self.assertTrue(result.ok)
+            self.assertEqual(result.data["page_kind"], "unknown")
+
+        asyncio.run(scenario())
+
+    def test_browser_bridge_routes_gui_requests_to_the_websocket_event_loop(self):
+        class ThreadSafeWebSocket:
+            def __init__(self):
+                self.sent = queue.Queue()
+
+            async def send_json(self, payload):
+                self.sent.put(payload)
+
+        bridge = BrowserBridgeService(command_timeout=1)
+        websocket = ThreadSafeWebSocket()
+        owner_loop = asyncio.new_event_loop()
+        owner_ready = threading.Event()
+
+        def run_owner_loop():
+            asyncio.set_event_loop(owner_loop)
+            owner_ready.set()
+            owner_loop.run_forever()
+            owner_loop.close()
+
+        owner_thread = threading.Thread(target=run_owner_loop)
+        owner_thread.start()
+        self.assertTrue(owner_ready.wait(timeout=1))
+        asyncio.run_coroutine_threadsafe(
+            bridge._activate_connection(websocket, "c" * 32, "0.1.0"), owner_loop
+        ).result(timeout=1)
+
+        async def gui_loop_scenario():
+            request_task = asyncio.create_task(
+                bridge.request(BrowserCommand(command=BrowserCommandName.INSPECT_PAGE))
+            )
+            sent = await asyncio.to_thread(websocket.sent.get, True, 1)
+            response = {
+                "protocol_version": 1,
+                "request_id": sent["request_id"],
+                "ok": True,
+                "data": {"page_kind": "unknown"},
+                "error": None,
+            }
+            owner_result = asyncio.run_coroutine_threadsafe(
+                bridge._handle_message(response), owner_loop
+            )
+            await asyncio.wrap_future(owner_result)
+            return await request_task
+
+        try:
+            result = asyncio.run(gui_loop_scenario())
+            self.assertTrue(result.ok)
+            self.assertEqual(bridge.status()["last_command"]["stage"], "completed")
+        finally:
+            owner_loop.call_soon_threadsafe(owner_loop.stop)
+            owner_thread.join(timeout=2)
+
+    def test_bridge_messages_reject_unexpected_sensitive_fields(self):
+        with self.assertRaises(Exception):
+            HeartbeatMessage.model_validate(
+                {"type": "heartbeat", "tab": None, "cookie": "must-not-enter-bridge"}
+            )
+
+    def test_extension_manifest_is_read_only_and_parser_handles_synthetic_row(self):
+        extension_root = ROOT / "browser_runtime" / "extension"
+        manifest = json.loads((extension_root / "manifest.json").read_text(encoding="utf-8"))
+        permissions = set(manifest["permissions"])
+        self.assertTrue(
+            permissions.isdisjoint(
+                {
+                    "cookies",
+                    "debugger",
+                    "downloads",
+                    "webRequest",
+                    "clipboardRead",
+                    "scripting",
+                    "tabs",
+                }
+            )
+        )
+        self.assertEqual(
+            manifest["content_scripts"][0]["matches"], ["https://sis-main.hku.hk/*"]
+        )
+        self.assertEqual(
+            manifest["host_permissions"],
+            ["https://sis-main.hku.hk/*", "http://127.0.0.1/*"],
+        )
+
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("Node.js is not installed; skipped pure parser test.")
+        result = subprocess.run(
+            [node, str(ROOT / "tests" / "sis_parser.test.js")],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+
     def test_knowledge_initialization_starts_once_in_the_background(self):
         capability = KnowledgeAnswerCapability()
         started = threading.Event()
