@@ -15,7 +15,6 @@ custom_css = """
     --shadow: 0 14px 38px rgba(17, 24, 39, 0.08);
 }
 
-.progress-text,
 footer {
     display: none !important;
 }
@@ -96,6 +95,39 @@ button.stop,
 button.stop:hover,
 .stop:hover {
     background: #ffe4e6 !important;
+}
+
+#chat-initialization {
+    min-height: 420px !important;
+    padding: 56px 28px !important;
+    align-items: center !important;
+    justify-content: center !important;
+    text-align: center !important;
+    background: #fbfcff !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 14px !important;
+}
+
+.agent-progress {
+    width: min(560px, 86vw) !important;
+    height: 14px !important;
+    margin: 18px auto 8px !important;
+    overflow: hidden !important;
+    background: #e5e7eb !important;
+    border-radius: 999px !important;
+}
+
+.agent-progress-fill {
+    height: 100% !important;
+    background: linear-gradient(90deg, #2563eb, #60a5fa) !important;
+    border-radius: inherit !important;
+    transition: width 0.35s ease !important;
+}
+
+.agent-progress-label {
+    color: var(--text-main) !important;
+    font-variant-numeric: tabular-nums !important;
+    font-weight: 700 !important;
 }
 
 #doc-management-tab {

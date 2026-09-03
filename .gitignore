@@ -3,6 +3,11 @@ qdrant_db/
 markdown_docs/
 markdown_docs/.downloads/
 parent_store/
+hku_agents.db
+hku_agents.db-shm
+hku_agents.db-wal
+tests/.tmp/
+.cache/
 docs/
 __pycache__/
 *.pyc

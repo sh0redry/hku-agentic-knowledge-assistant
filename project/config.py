@@ -6,7 +6,25 @@ _BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 MARKDOWN_DIR = os.path.join(_BASE_DIR, "markdown_docs")
 PARENT_STORE_PATH = os.path.join(_BASE_DIR, "parent_store")
 QDRANT_DB_PATH = os.path.join(_BASE_DIR, "qdrant_db")
+_FASTEMBED_CACHE_SETTING = os.environ.get(
+    "FASTEMBED_CACHE_PATH", os.path.join(".cache", "fastembed")
+)
+FASTEMBED_CACHE_PATH = (
+    _FASTEMBED_CACHE_SETTING
+    if os.path.isabs(_FASTEMBED_CACHE_SETTING)
+    else os.path.join(_BASE_DIR, _FASTEMBED_CACHE_SETTING)
+)
 DATA_SOURCES_PATH = os.path.join(_BASE_DIR, "project", "data_sources", "hku_sources.json")
+_APP_DB_SETTING = os.environ.get("APP_DB_PATH", os.path.join(_BASE_DIR, "hku_agents.db"))
+APP_DB_PATH = (
+    _APP_DB_SETTING
+    if os.path.isabs(_APP_DB_SETTING)
+    else os.path.join(_BASE_DIR, _APP_DB_SETTING)
+)
+APP_HOST = os.environ.get("APP_HOST", "127.0.0.1")
+APP_PORT = int(os.environ.get("APP_PORT", "7860"))
+API_BASE_URL = os.environ.get("API_BASE_URL", f"http://{APP_HOST}:{APP_PORT}")
+CONFIRMATION_TTL_SECONDS = int(os.environ.get("CONFIRMATION_TTL_SECONDS", "300"))
 
 # --- Qdrant Configuration ---
 CHILD_COLLECTION = os.environ.get("CHILD_COLLECTION", "document_child_chunks_bge_m3")

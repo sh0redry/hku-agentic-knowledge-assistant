@@ -1,6 +1,14 @@
-# Agentic RAG System Documentation
+# HKU AGENTS and Agentic RAG System Documentation
 
-An **Agentic Retrieval-Augmented Generation (RAG)** system built with **LangGraph**, featuring **parent–child chunking**, **hybrid dense + sparse retrieval**, and **multi-LLM provider support**.
+The project now uses a local-first HKU AGENTS application framework. FastAPI is
+the application boundary, Gradio is the first GUI client, capabilities are
+registered independently, and SQLite stores sanitized task and audit state. The
+existing **Agentic Retrieval-Augmented Generation (RAG)** system is retained as
+the lazily initialized `knowledge.answer` capability.
+
+The first SIS capability is a **simulator only**. It validates exact term,
+course, section, and class-number sets, sends no network requests, and does not
+connect to a browser or HKU SIS. Real enrollment writes are intentionally absent.
 
 
 ## Table of Contents
@@ -31,13 +39,38 @@ is present.
 
 ### Running the Application
 
-Start the Gradio interface locally:
+Start the combined FastAPI and Gradio application locally:
 
 ```bash
 python project/app.py
 ```
 
-The application will be available at `http://localhost:7860` (default Gradio port).
+The GUI will be available at `http://127.0.0.1:7860`. FastAPI documentation is
+available at `http://127.0.0.1:7860/docs`.
+
+The Knowledge Agent is initialized when the user first opens the **Chat** tab.
+The Chat panel remains hidden while the GUI reports model, index, and graph
+initialization progress. Initialization is process-wide and idempotent, so later
+Chat visits reuse the ready agent. If initialization fails, the GUI shows the
+error and offers an explicit retry.
+
+Core endpoints:
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/v1/health` | Local application health |
+| `GET /api/v1/capabilities` | Registered capability manifests |
+| `GET /api/v1/connections` | Connector and future browser-runtime status |
+| `POST /api/v1/chat` | Execute the existing Knowledge Agent through the platform boundary |
+| `POST /api/v1/sis/preflight` | Run the zero-network SIS simulator |
+| `GET /api/v1/tasks/{task_id}/events` | Stream task events over SSE |
+| `POST /api/v1/actions/*` | Draft, validate, confirm, and execute governed actions |
+
+Run the platform tests without contacting HKU SIS or an LLM:
+
+```bash
+python -m unittest discover -s tests -v
+```
 
 ### Build the HKU Knowledge Base
 
@@ -142,7 +175,12 @@ PDF → Markdown Conversion → Parent/Child Chunking → Vector Indexing → Ag
 
 | File | Purpose |
 |------|---------|
-| `project/app.py` | Application entry point, launches Gradio UI |
+| `project/app.py` | Application entry point, mounts Gradio on FastAPI |
+| `project/application.py` | Composition root for capabilities, connectors, tasks, policy, and storage |
+| `project/api/` | Versioned FastAPI routes and request schemas |
+| `project/agents/` | Capability contracts and domain agents |
+| `project/connectors/` | Deterministic external-system adapters and SIS simulator |
+| `project/services/` | SQLite store, task manager, policy, confirmation, and audit services |
 | `project/config.py` | **Central configuration hub** - edit this for provider/model/chunking changes |
 | `project/utils.py` | PDF to Markdown conversion and context token estimation |
 | `project/document_chunker.py` | Parent/child splitting logic with cleaning and merging rules |
@@ -195,7 +233,11 @@ All primary settings are in `project/config.py`. Key parameters:
 MARKDOWN_DIR = "markdown_docs"        # Storage for converted PDF → Markdown files
 PARENT_STORE_PATH = "parent_store"    # File-backed storage for parent chunks
 QDRANT_DB_PATH = "qdrant_db"          # Local Qdrant vector database path
+FASTEMBED_CACHE_PATH = ".cache/fastembed"  # Persistent sparse-model cache
 ```
+
+The FastEmbed cache is local and ignored by Git. The first Chat initialization
+may still download `Qdrant/bm25`; subsequent launches reuse the cached files.
 
 ### Qdrant Configuration
 

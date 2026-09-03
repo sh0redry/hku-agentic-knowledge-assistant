@@ -52,6 +52,10 @@
 ### HKU Project Default
 
 This fork defaults to DeepSeek, with Gemini configured as the backup provider.
+It also includes a local-first HKU AGENTS platform skeleton: FastAPI, a capability
+registry, SQLite-backed tasks and audit events, confirmation gates, SSE task
+events, and a zero-network SIS preflight simulator. The browser connector and
+real SIS enrollment writes are not implemented.
 
 ```bash
 cp project/.env.example project/.env

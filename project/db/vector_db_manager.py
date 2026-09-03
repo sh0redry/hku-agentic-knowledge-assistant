@@ -15,10 +15,18 @@ class VectorDbManager:
     __dense_embeddings: HuggingFaceEmbeddings
     __sparse_embeddings: FastEmbedSparse
 
-    def __init__(self):
+    def __init__(self, progress_callback=None):
+        report = progress_callback or (lambda _value, _description: None)
+        report(0.08, "Opening the local vector database")
         self.__client = QdrantClient(path=config.QDRANT_DB_PATH)
+        report(0.15, f"Loading dense retrieval model: {config.DENSE_MODEL}")
         self.__dense_embeddings = HuggingFaceEmbeddings(model_name=config.DENSE_MODEL)
-        self.__sparse_embeddings = FastEmbedSparse(model_name=config.SPARSE_MODEL)
+        report(0.48, f"Loading sparse retrieval model: {config.SPARSE_MODEL}")
+        self.__sparse_embeddings = FastEmbedSparse(
+            model_name=config.SPARSE_MODEL,
+            cache_dir=config.FASTEMBED_CACHE_PATH,
+        )
+        report(0.62, "Retrieval models are ready")
 
     def create_collection(self, collection_name):
         vector_size = len(self.__dense_embeddings.embed_query("test"))
@@ -154,3 +162,6 @@ class VectorDbManager:
             )
         except Exception as e:
             print(f"Unable to get collection {collection_name}: {e}")
+
+    def close(self):
+        self.__client.close()
