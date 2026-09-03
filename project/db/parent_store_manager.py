@@ -23,6 +23,12 @@ class ParentStoreManager:
         for parent_id, doc in parents:
             self.save(parent_id, doc.page_content, doc.metadata)
 
+    def exists(self, parent_id: str) -> bool:
+        file_path = self.__store_path / (
+            parent_id if parent_id.lower().endswith(".json") else f"{parent_id}.json"
+        )
+        return file_path.exists()
+
     def load(self, parent_id: str) -> Dict:
         file_path = self.__store_path / (
             parent_id if parent_id.lower().endswith(".json") else f"{parent_id}.json"

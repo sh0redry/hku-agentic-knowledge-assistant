@@ -30,7 +30,7 @@
   <img src="https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white" alt="Python"/>
   <img src="https://img.shields.io/badge/LangGraph-1.1%2B-orange?logo=langchain&logoColor=white" alt="LangGraph"/>
   <img src="https://img.shields.io/badge/Qdrant-vector%20db-DC244C" alt="Qdrant"/>
-  <img src="https://img.shields.io/badge/LLM%20Providers-Ollama%20%7C%20OpenAI%20%7C%20Anthropic%20%7C%20Google-purple" alt="LLM Providers"/>
+  <img src="https://img.shields.io/badge/LLM%20Providers-DeepSeek%20%7C%20Gemini%20%7C%20Ollama%20%7C%20OpenAI-purple" alt="LLM Providers"/>
 </p>
 
 <p align="center">
@@ -51,19 +51,20 @@
 
 ### HKU Project Default
 
-This fork defaults to Google Gemini instead of local Ollama.
+This fork defaults to DeepSeek, with Gemini configured as the backup provider.
 
 ```bash
 cp project/.env.example project/.env
 ```
 
-Set `GOOGLE_API_KEY` in `project/.env`, then run:
+Set `DEEPSEEK_API_KEY` in `project/.env`. To enable the Gemini backup, also set `GEMINI_API_KEY`.
+Then run:
 
 ```bash
 python project/app.py
 ```
 
-Ollama is still available as an optional local fallback by setting `LLM_PROVIDER=ollama`.
+Ollama is still available as an optional local provider by setting `LLM_PROVIDER=ollama`.
 
 This repository demonstrates how to build an **Agentic RAG (Retrieval-Augmented Generation)** system using LangGraph with minimal code. Most RAG tutorials show basic concepts but lack guidance on building modular, agent-driven systems — this project bridges that gap by providing **both learning materials and an extensible architecture**.
 

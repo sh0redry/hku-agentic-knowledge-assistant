@@ -25,7 +25,9 @@ Create a local environment file:
 cp project/.env.example project/.env
 ```
 
-Then set `GOOGLE_API_KEY` in `project/.env`. Gemini is the default LLM provider.
+Then set `DEEPSEEK_API_KEY` in `project/.env`. DeepSeek is the default LLM
+provider, and Gemini is configured as the backup provider when `GEMINI_API_KEY`
+is present.
 
 ### Running the Application
 
@@ -105,12 +107,13 @@ by category and language. To run full answer generation as well, use:
 python evals/run_evals.py --answers
 ```
 
-The `--answers` mode can consume Gemini or other LLM quota.
+The `--answers` mode can consume DeepSeek, Gemini, or other LLM quota.
 
 ### Prerequisites
 
 - Python 3.11+
-- Google AI Studio API key for the default Gemini provider
+- DeepSeek API key for the default provider
+- Google AI Studio API key if you want the Gemini backup provider enabled
 - Ollama is optional if you want to run a local model later
 
 ---
@@ -122,7 +125,7 @@ This system implements an advanced RAG pipeline with the following key features:
 - **Parent-Child Chunking**: Documents are split into small child chunks (for precise retrieval) linked to larger parent chunks (for rich context)
 - **Hybrid Search**: Combines dense embeddings and sparse (BM25) retrieval for optimal results
 - **LangGraph Agent**: Orchestrates query rewriting, retrieval, and response generation
-- **Multi-Provider Support**: Seamlessly switch between Ollama, OpenAI GPT, Google Gemini, and Anthropic Claude
+- **Multi-Provider Support**: Seamlessly switch between DeepSeek, Google Gemini, Ollama, OpenAI GPT, and Anthropic Claude
 - **Vector Storage**: Uses Qdrant for efficient similarity search
 
 ### Data Flow
@@ -206,12 +209,16 @@ SPARSE_VECTOR_NAME = "sparse"               # Named sparse vector field (BM25)
 ```python
 DENSE_MODEL = "sentence-transformers/all-mpnet-base-v2"
 SPARSE_MODEL = "Qdrant/bm25"
-LLM_PROVIDER = "gemini"
-LLM_MODEL = "gemini-2.5-flash"
+LLM_PROVIDER = "deepseek"
+LLM_MODEL = "deepseek-chat"
 LLM_TEMPERATURE = 0  # 0 = deterministic, 1 = creative
+LLM_FALLBACK_PROVIDER = "gemini"
+LLM_FALLBACK_MODEL = "gemini-2.5-flash"
 ```
 
-The default provider is created in `project/core/llm_factory.py`. To switch to Ollama later, set these values in `project/.env`:
+The default provider is created in `project/core/llm_factory.py`. API keys live
+only in `project/.env`, which is ignored by Git. To switch to Ollama later, set
+these values in `project/.env`:
 
 ```bash
 LLM_PROVIDER=ollama
@@ -264,7 +271,8 @@ LANGFUSE_BASE_URL = "http://localhost:3000"  # Langfuse Cloud or self-hosted URL
 
 > **Performance Note:** LLMs with 7B+ parameters typically offer superior reasoning, context comprehension, and response quality compared to smaller models. This applies to both proprietary and open-source models, as long as they **support native tool/function calling,** which is required for agentic RAG workflows.
 
-If you want to permanently switch from one provider to another (e.g., Ollama → Google Gemini), follow this steps:
+If you want to permanently switch from one provider to another (e.g., DeepSeek
+to Google Gemini), follow these steps:
 
 **Step 1:** Install the provider's SDK
 
@@ -399,6 +407,7 @@ ACTIVE_LLM_CONFIG = "google"  # Switch to Gemini Pro
 
 | Provider | Environment Variable | Import Statement | Example Models |
 |----------|---------------------|------------------|----------------|
+| DeepSeek | `DEEPSEEK_API_KEY` | `from langchain_openai import ChatOpenAI` | `deepseek-chat`, `deepseek-reasoner` |
 | OpenAI | `OPENAI_API_KEY` | `from langchain_openai import ChatOpenAI` | `gpt-5.2`, `ggpt-5-mini` |
 | Anthropic | `ANTHROPIC_API_KEY` | `from langchain_anthropic import ChatAnthropic` | `claude-opus-4-6`, `claude-sonnet-4-6` |
 | Google | `GOOGLE_API_KEY` | `from langchain_google_genai import ChatGoogleGenerativeAI` | `gemini-2.5-pro`, `gemini-2.5-flash` |

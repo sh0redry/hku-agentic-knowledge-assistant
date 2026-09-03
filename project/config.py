@@ -19,14 +19,22 @@ SEARCH_SCORE_THRESHOLD = float(os.environ.get("SEARCH_SCORE_THRESHOLD", "0.3"))
 DIRECT_SINGLE_QUESTION = os.environ.get("DIRECT_SINGLE_QUESTION", "true").lower() == "true"
 DIRECT_RETRIEVAL_LIMIT = int(os.environ.get("DIRECT_RETRIEVAL_LIMIT", "5"))
 DIRECT_RETRIEVAL_RETRIES = int(os.environ.get("DIRECT_RETRIEVAL_RETRIES", "4"))
-LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "gemini").lower()
-LLM_MODEL = os.environ.get("LLM_MODEL", "gemini-2.5-flash")
+LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "deepseek").lower()
+LLM_MODEL = os.environ.get("LLM_MODEL", "deepseek-chat")
 LLM_TEMPERATURE = 0
+LLM_FALLBACK_PROVIDER = os.environ.get("LLM_FALLBACK_PROVIDER", "gemini").lower()
+LLM_FALLBACK_MODEL = os.environ.get("LLM_FALLBACK_MODEL", "gemini-2.5-flash")
+LLM_FALLBACK_ENABLED = os.environ.get("LLM_FALLBACK_ENABLED", "true").lower() == "true"
 QUERY_REWRITE_PROVIDER = os.environ.get("QUERY_REWRITE_PROVIDER", LLM_PROVIDER).lower()
-QUERY_REWRITE_MODEL = os.environ.get("QUERY_REWRITE_MODEL", "qwen2.5:3b-instruct")
+_DEFAULT_QUERY_REWRITE_MODEL = (
+    "qwen2.5:3b-instruct" if QUERY_REWRITE_PROVIDER == "ollama" else LLM_MODEL
+)
+QUERY_REWRITE_MODEL = os.environ.get("QUERY_REWRITE_MODEL", _DEFAULT_QUERY_REWRITE_MODEL)
 
 # Provider-specific configuration
-GEMINI_API_KEY = os.environ.get("GOOGLE_API_KEY", "")
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
+DEEPSEEK_BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY", "")
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 
 # --- Agent Configuration ---

@@ -7,10 +7,20 @@ docs/
 __pycache__/
 *.pyc
 .vscode/
+
+# Local secrets and API keys
 .env
+*.env
+*.env.local
+project/.env
+project/.env.*
+!project/.env.example
 .venv/
 venv/
 
 *.docx
 evals/results*.jsonl
 evals/results*.json
+
+# Private local product and architecture plan
+HKU_AGENTS_INTEGRATION_PLAN.md

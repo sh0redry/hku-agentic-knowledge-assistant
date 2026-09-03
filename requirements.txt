@@ -3,6 +3,7 @@ gradio==6.14.0
 ipykernel==7.2.0
 langchain-huggingface==1.2.2
 langchain-google-genai
+langchain-openai
 langchain-ollama==1.1.0
 langchain-qdrant==1.1.0
 langchain-text-splitters==1.1.2

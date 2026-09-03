@@ -4,6 +4,7 @@ import config
 from pathlib import Path
 from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
 from ingestion.web_ingestor import split_front_matter
+from utils import _clean_pdf_markdown, _looks_mojibake
 
 class DocumentChuncker:
     def __init__(self):
@@ -34,6 +35,9 @@ class DocumentChuncker:
         
         with open(doc_path, "r", encoding="utf-8") as f:
             document_metadata, markdown = split_front_matter(f.read())
+            markdown = _clean_pdf_markdown(markdown)
+            if _looks_mojibake(markdown):
+                raise ValueError(f"Markdown content still looks garbled after cleanup: {doc_path}")
             parent_chunks = self.__parent_splitter.split_text(markdown)
 
         for chunk in parent_chunks:
