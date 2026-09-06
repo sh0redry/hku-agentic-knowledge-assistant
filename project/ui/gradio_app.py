@@ -34,6 +34,21 @@ def _course_rows(value: str) -> list[dict]:
     return rows
 
 
+def _expected_course_rows(value: str) -> list[dict]:
+    rows = []
+    for line_number, raw_line in enumerate(value.splitlines(), start=1):
+        line = raw_line.strip()
+        if not line:
+            continue
+        parts = [part.strip() for part in line.split("|")]
+        if len(parts) != 2 or not all(parts):
+            raise ValueError(f"Line {line_number} must use COURSE_CODE | SECTION.")
+        rows.append({"course_code": parts[0], "section": parts[1]})
+    if not rows:
+        raise ValueError("At least one expected course is required.")
+    return rows
+
+
 def create_gradio_ui(container):
     knowledge_capability = container.registry.get("knowledge.answer")
     sis_browser = container.connectors["sis_browser"]
@@ -136,6 +151,43 @@ def create_gradio_ui(container):
             return _pretty({"task": task.model_dump(mode="json"), "result": task.result})
         except Exception as exc:
             return _pretty({"ok": False, "simulated": True, "error": str(exc)})
+
+    async def live_preflight_handler(term_label, expected_text):
+        try:
+            task = await container.tasks.submit_and_wait(
+                "sis.enrollment.live_preflight",
+                {
+                    "term_label": term_label.strip(),
+                    "expected_courses": _expected_course_rows(expected_text),
+                },
+            )
+            operation_completed = task.status == TaskStatus.COMPLETED
+            result = task.result or {}
+            return _pretty(
+                {
+                    "ok": operation_completed and bool(result.get("ready")),
+                    "operation_completed": operation_completed,
+                    "ready": bool(result.get("ready")),
+                    "read_only": True,
+                    "task": {
+                        "id": task.id,
+                        "capability": task.capability,
+                        "status": task.status.value,
+                        "phase": task.phase,
+                        "error": task.error,
+                    },
+                    "result": task.result,
+                }
+            )
+        except Exception as exc:
+            return _pretty(
+                {
+                    "ok": False,
+                    "read_only": True,
+                    "error": getattr(exc, "code", type(exc).__name__),
+                    "message": str(exc),
+                }
+            )
 
     async def live_sis_call(action, operation):
         completed_at = lambda: datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -294,6 +346,36 @@ def create_gradio_ui(container):
             inspect_cart_button.click(
                 inspect_sis_cart,
                 outputs=live_sis_output,
+                show_progress="minimal",
+                queue=False,
+            )
+
+            gr.Markdown(
+                "## Live enrollment preflight (read-only)\n"
+                "Enter only the courses you expect. HKU AGENTS reads the current term and "
+                "Temporary Course List directly from the bound SIS tab."
+            )
+            with gr.Row():
+                live_term_label = gr.Textbox(
+                    value="2026-27 Sem 2", label="Expected SIS term"
+                )
+                live_expected = gr.Textbox(
+                    value="COMP2119 | 1A",
+                    lines=5,
+                    label="Expected: COURSE | SECTION",
+                )
+            live_preflight_button = gr.Button(
+                "Run live read-only preflight", variant="primary"
+            )
+            live_preflight_output = gr.Code(
+                value="Bind the SIS tab and open Enrollment Add Classes first.",
+                language="json",
+                label="Live preflight result",
+            )
+            live_preflight_button.click(
+                live_preflight_handler,
+                inputs=[live_term_label, live_expected],
+                outputs=live_preflight_output,
                 show_progress="minimal",
                 queue=False,
             )

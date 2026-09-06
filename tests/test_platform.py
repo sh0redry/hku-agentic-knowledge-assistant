@@ -10,7 +10,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
@@ -36,7 +36,7 @@ from api.app import create_api_app
 from application import ApplicationContainer
 from agents.knowledge.agent import KnowledgeAnswerCapability
 from browser_bridge.models import HeartbeatMessage
-from browser_bridge.service import BrowserBridgeService
+from browser_bridge.service import BrowserBridgeError, BrowserBridgeService
 from connectors.sis.protocol import (
     BrowserCommand,
     BrowserCommandName,
@@ -62,6 +62,27 @@ def preflight_payload(*, visible_class_number: str = "12345") -> dict:
                 "class_number": visible_class_number,
             }
         ],
+    }
+
+
+def live_preflight_payload(*, term_label: str = "2026-27 Sem 2") -> dict:
+    return {
+        "term_label": term_label,
+        "expected_courses": [
+            {"course_code": "COMP2119", "section": "1A"}
+        ],
+    }
+
+
+def live_cart_snapshot(*, term_label: str = "2026-27 Sem 2", courses=None) -> dict:
+    return {
+        "bound": True,
+        "origin": "https://sis-main.hku.hk",
+        "logged_in": True,
+        "page_kind": "cart",
+        "term_label": term_label,
+        "course_count": len(courses or []),
+        "visible_courses": courses or [],
     }
 
 
@@ -106,7 +127,11 @@ class PlatformAPITests(unittest.TestCase):
         capabilities = self.client.get("/api/v1/capabilities").json()["capabilities"]
         self.assertEqual(
             {item["id"] for item in capabilities},
-            {"knowledge.answer", "sis.enrollment.preflight"},
+            {
+                "knowledge.answer",
+                "sis.enrollment.preflight",
+                "sis.enrollment.live_preflight",
+            },
         )
         connections = self.client.get("/api/v1/connections").json()["connections"]
         browser = next(item for item in connections if item["id"] == "sis_browser")
@@ -198,6 +223,74 @@ class PlatformAPITests(unittest.TestCase):
         self.assertEqual(len(mismatch["missing"]), 1)
         self.assertEqual(len(mismatch["unexpected"]), 1)
 
+    def test_live_sis_preflight_matches_the_browser_cart(self):
+        expected_course = live_preflight_payload()["expected_courses"][0]
+        visible_course = {**expected_course, "class_number": "12345"}
+        inspect = AsyncMock(return_value=live_cart_snapshot(courses=[visible_course]))
+        self.container.connectors["sis_browser"].preflight_snapshot = inspect
+
+        response = self.client.post(
+            "/api/v1/browser/sis/preflight", json=live_preflight_payload()
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["task"]["status"], "completed")
+        self.assertTrue(body["result"]["ready"])
+        self.assertTrue(body["result"]["term_match"])
+        self.assertEqual(body["result"]["comparison_fields"], ["course_code", "section"])
+        self.assertEqual(body["result"]["matched_courses"], [visible_course])
+        self.assertFalse(body["result"]["simulated"])
+        self.assertEqual(body["result"]["sis_write_requests_sent"], 0)
+        inspect.assert_awaited_once()
+
+    def test_live_sis_preflight_reports_empty_cart_and_wrong_term(self):
+        inspect = AsyncMock(return_value=live_cart_snapshot(term_label="2026-27 Sem 1"))
+        self.container.connectors["sis_browser"].preflight_snapshot = inspect
+
+        result = self.client.post(
+            "/api/v1/browser/sis/preflight", json=live_preflight_payload()
+        ).json()["result"]
+
+        self.assertFalse(result["ready"])
+        self.assertFalse(result["term_match"])
+        self.assertEqual(len(result["missing_courses"]), 1)
+        self.assertEqual(result["unexpected_courses"], [])
+        self.assertIn("Current SIS term does not match", " ".join(result["issues"]))
+
+    def test_live_sis_preflight_rejects_ambiguous_class_numbers(self):
+        expected = live_preflight_payload()["expected_courses"][0]
+        courses = [
+            {**expected, "class_number": "12345"},
+            {**expected, "class_number": "67890"},
+        ]
+        inspect = AsyncMock(return_value=live_cart_snapshot(courses=courses))
+        self.container.connectors["sis_browser"].preflight_snapshot = inspect
+
+        result = self.client.post(
+            "/api/v1/browser/sis/preflight", json=live_preflight_payload()
+        ).json()["result"]
+
+        self.assertFalse(result["ready"])
+        self.assertEqual(len(result["duplicate_visible_courses"]), 2)
+        self.assertIn("more than one class number", " ".join(result["issues"]))
+
+    def test_live_sis_preflight_preserves_browser_error_codes(self):
+        inspect = AsyncMock(
+            side_effect=BrowserBridgeError(
+                "WRONG_SIS_PAGE", "Open the Temporary Course List before inspecting the cart."
+            )
+        )
+        self.container.connectors["sis_browser"].preflight_snapshot = inspect
+
+        body = self.client.post(
+            "/api/v1/browser/sis/preflight", json=live_preflight_payload()
+        ).json()
+
+        self.assertEqual(body["task"]["status"], "failed")
+        self.assertIsNone(body["result"])
+        self.assertEqual(body["task"]["error"]["code"], "WRONG_SIS_PAGE")
+
     def test_tasks_events_and_audit_are_persisted(self):
         task_id = self.client.post("/api/v1/sis/preflight", json=preflight_payload()).json()[
             "task"
@@ -227,6 +320,24 @@ class PlatformAPITests(unittest.TestCase):
         payload = preflight_payload()
         payload["term_label"] = "Sem 1"
         response = self.client.post("/api/v1/sis/preflight", json=payload)
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["error"]["code"], "INVALID_REQUEST")
+
+    def test_invalid_live_section_is_rejected_at_api_boundary(self):
+        payload = live_preflight_payload()
+        payload["expected_courses"][0]["section"] = "1A / invalid"
+
+        response = self.client.post("/api/v1/browser/sis/preflight", json=payload)
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["error"]["code"], "INVALID_REQUEST")
+
+    def test_live_preflight_rejects_user_supplied_class_number(self):
+        payload = live_preflight_payload()
+        payload["expected_courses"][0]["class_number"] = "12345"
+
+        response = self.client.post("/api/v1/browser/sis/preflight", json=payload)
+
         self.assertEqual(response.status_code, 422)
         self.assertEqual(response.json()["error"]["code"], "INVALID_REQUEST")
 

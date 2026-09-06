@@ -6,9 +6,10 @@ registered independently, and SQLite stores sanitized task and audit state. The
 existing **Agentic Retrieval-Augmented Generation (RAG)** system is retained as
 the lazily initialized `knowledge.answer` capability.
 
-The first SIS capability is a **simulator only**. It validates exact term,
-course, section, and class-number sets, sends no network requests, and does not
-connect to a browser or HKU SIS. Real enrollment writes are intentionally absent.
+The SIS integration provides both a zero-network simulator and a **live read-only
+preflight**. Live preflight reads structured state from an already-open,
+user-authenticated SIS Temporary Course List and compares the exact term, course,
+section, and class-number sets. Real enrollment writes are intentionally absent.
 
 
 ## Table of Contents
@@ -65,6 +66,7 @@ Core endpoints:
 | `POST /api/v1/browser/sis/bind` | Bind an open SIS tab through the read-only extension |
 | `GET /api/v1/browser/sis/page` | Read structured state from the bound SIS page |
 | `GET /api/v1/browser/sis/cart` | Read structured cart rows without submitting anything |
+| `POST /api/v1/browser/sis/preflight` | Compare user expectations with the live read-only SIS cart |
 | `POST /api/v1/chat` | Execute the existing Knowledge Agent through the platform boundary |
 | `POST /api/v1/sis/preflight` | Run the zero-network SIS simulator |
 | `GET /api/v1/tasks/{task_id}/events` | Stream task events over SSE |
@@ -83,6 +85,13 @@ The first browser integration is an unpacked Manifest V3 extension in
 `chrome://extensions` using **Developer mode → Load unpacked**, then open the
 GUI's **Connections** tab. Copy its process-local pairing token into the
 extension popup and bind an SIS tab that you logged into yourself.
+
+On **SIS Preflight**, open Enrollment Add Classes in SIS, bind the tab, enter the
+expected term and one `COURSE | SECTION` entry per line, then select **Run live
+read-only preflight**. Class numbers are read from SIS and shown in the matched or
+unexpected concrete course rows; users do not enter them. The result reports
+matched, missing, unexpected, and ambiguous entries. `ready: true` is returned
+only when the page, login state, term, and complete course/section set all match.
 
 The extension has no cookie, debugger, download, clipboard, web-request, or
 form-execution permission. It accepts a fixed read-only command set and sends

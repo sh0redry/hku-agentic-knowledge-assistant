@@ -27,8 +27,16 @@ class BrowserSISConnector(BaseConnector):
 
     async def inspect_cart(self) -> dict:
         data = await self._command(BrowserCommandName.INSPECT_CART)
+        return self._validate_cart(data)
+
+    async def preflight_snapshot(self) -> dict:
+        data = await self._command(BrowserCommandName.PREFLIGHT)
+        return self._validate_cart(data)
+
+    @staticmethod
+    def _validate_cart(data: dict) -> dict:
         snapshot = SISPageSnapshot.model_validate(data)
-        if snapshot.page_kind not in {"cart", "blocked", "unknown"}:
+        if snapshot.page_kind != "cart":
             raise BrowserBridgeError(
                 "WRONG_SIS_PAGE", "Open the Temporary Course List before inspecting the cart."
             )

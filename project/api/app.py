@@ -16,7 +16,7 @@ from agents.models import TERMINAL_TASK_STATUSES, TaskStatus
 from api.schemas import ActionConfirmRequest, ActionDraftRequest, ActionExecuteRequest, ChatRequest
 from application import ApplicationContainer
 from browser_bridge.service import BrowserBridgeError
-from connectors.sis.models import SISPreflightRequest
+from connectors.sis.models import SISLivePreflightRequest, SISPreflightRequest
 import config
 
 
@@ -227,6 +227,14 @@ def create_api_app(
     async def sis_preflight(body: SISPreflightRequest):
         record = await app.state.container.tasks.submit_and_wait(
             "sis.enrollment.preflight",
+            body.model_dump(mode="json"),
+        )
+        return {"task": _dump(record), "result": record.result}
+
+    @app.post("/api/v1/browser/sis/preflight")
+    async def live_sis_preflight(body: SISLivePreflightRequest):
+        record = await app.state.container.tasks.submit_and_wait(
+            "sis.enrollment.live_preflight",
             body.model_dump(mode="json"),
         )
         return {"task": _dump(record), "result": record.result}

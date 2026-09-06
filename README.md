@@ -55,8 +55,8 @@ This fork defaults to DeepSeek, with Gemini configured as the backup provider.
 It also includes a local-first HKU AGENTS platform skeleton: FastAPI, a capability
 registry, SQLite-backed tasks and audit events, confirmation gates, SSE task
 events, a zero-network SIS preflight simulator, and an authenticated read-only
-Chrome extension bridge for inspecting an already-open SIS tab. Real SIS
-enrollment writes are not implemented.
+Chrome extension bridge for inspecting and validating an already-open SIS
+Temporary Course List. Real SIS enrollment writes are not implemented.
 
 ```bash
 cp project/.env.example project/.env
@@ -72,6 +72,10 @@ python project/app.py
 For the optional read-only SIS connection, load `browser_runtime/extension` as
 an unpacked extension and pair it from the GUI's **Connections** tab. The
 extension has no cookie or SIS write permissions.
+
+The GUI's live preflight accepts only the expected term, course code, and section.
+The current SIS state and term-specific class number are always obtained from the
+bound browser tab and cannot be supplied by chat or by the user-facing form.
 
 Ollama is still available as an optional local provider by setting `LLM_PROVIDER=ollama`.
 

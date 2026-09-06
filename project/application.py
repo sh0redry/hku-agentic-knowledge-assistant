@@ -4,7 +4,7 @@ from pathlib import Path
 
 import config
 from browser_bridge.service import BrowserBridgeService
-from agents.enrollment.agent import SISPreflightCapability
+from agents.enrollment.agent import SISLivePreflightCapability, SISPreflightCapability
 from agents.knowledge.agent import KnowledgeAnswerCapability
 from agents.registry import CapabilityRegistry
 from connectors.sis.fake import FakeSISConnector
@@ -34,6 +34,7 @@ class ApplicationContainer:
 
         self.registry.register(KnowledgeAnswerCapability())
         self.registry.register(SISPreflightCapability(self.connectors["sis_simulator"]))
+        self.registry.register(SISLivePreflightCapability(self.connectors["sis_browser"]))
 
         self.tasks = TaskManager(self.registry, self.store)
         self.actions = ActionService(self.registry, self.store, self.tasks, self.policy)

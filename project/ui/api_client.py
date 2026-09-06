@@ -55,3 +55,6 @@ class HKUAgentsAPIClient:
 
     def sis_preflight(self, payload: dict) -> dict:
         return self._request("POST", "/api/v1/sis/preflight", json=payload)
+
+    def sis_live_preflight(self, payload: dict) -> dict:
+        return self._request("POST", "/api/v1/browser/sis/preflight", json=payload)
