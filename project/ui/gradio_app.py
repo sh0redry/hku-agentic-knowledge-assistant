@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import html
 import uuid
@@ -8,7 +9,7 @@ from datetime import datetime, timezone
 import gradio as gr
 
 import config
-from agents.models import TaskStatus
+from ui.api_client import HKUAgentsAPIClient
 
 
 def _pretty(value) -> str:
@@ -52,6 +53,10 @@ def _expected_course_rows(value: str) -> list[dict]:
 def create_gradio_ui(container):
     knowledge_capability = container.registry.get("knowledge.answer")
     sis_browser = container.connectors["sis_browser"]
+    api_client = HKUAgentsAPIClient(
+        config.API_BASE_URL,
+        integration_token=config.INTEGRATION_API_TOKEN,
+    )
 
     def bridge_websocket_url():
         base = config.API_BASE_URL.rstrip("/")
@@ -71,14 +76,13 @@ def create_gradio_ui(container):
     async def chat_handler(message, history, session_id):
         try:
             normalized_history = [item for item in (history or []) if isinstance(item, dict)]
-            task = await container.tasks.submit_and_wait(
-                "knowledge.answer",
-                {"message": message, "history": normalized_history},
-                session_id=session_id,
+            response = await asyncio.to_thread(
+                api_client.chat,
+                message,
+                normalized_history,
+                session_id,
             )
-            if task.status != TaskStatus.COMPLETED:
-                return f"Knowledge Agent error: {task.error}"
-            return (task.result or {}).get("answer") or "No answer was returned."
+            return response.get("answer") or "No answer was returned."
         except Exception as exc:
             return f"Knowledge Agent error: {exc}"
 
@@ -144,41 +148,24 @@ def create_gradio_ui(container):
                 "expected_courses": _course_rows(expected_text),
                 "visible_courses": _course_rows(visible_text),
             }
-            task = await container.tasks.submit_and_wait(
-                "sis.enrollment.preflight",
+            response = await asyncio.to_thread(
+                api_client.sis_preflight,
                 payload,
             )
-            return _pretty({"task": task.model_dump(mode="json"), "result": task.result})
+            return _pretty(response)
         except Exception as exc:
             return _pretty({"ok": False, "simulated": True, "error": str(exc)})
 
     async def live_preflight_handler(term_label, expected_text):
         try:
-            task = await container.tasks.submit_and_wait(
-                "sis.enrollment.live_preflight",
+            response = await asyncio.to_thread(
+                api_client.integration_sis_preflight,
                 {
                     "term_label": term_label.strip(),
                     "expected_courses": _expected_course_rows(expected_text),
                 },
             )
-            operation_completed = task.status == TaskStatus.COMPLETED
-            result = task.result or {}
-            return _pretty(
-                {
-                    "ok": operation_completed and bool(result.get("ready")),
-                    "operation_completed": operation_completed,
-                    "ready": bool(result.get("ready")),
-                    "read_only": True,
-                    "task": {
-                        "id": task.id,
-                        "capability": task.capability,
-                        "status": task.status.value,
-                        "phase": task.phase,
-                        "error": task.error,
-                    },
-                    "result": task.result,
-                }
-            )
+            return _pretty(response)
         except Exception as exc:
             return _pretty(
                 {
@@ -192,7 +179,7 @@ def create_gradio_ui(container):
     async def live_sis_call(action, operation):
         completed_at = lambda: datetime.now(timezone.utc).isoformat(timespec="seconds")
         try:
-            result = await operation()
+            result = await asyncio.to_thread(operation)
             response = {
                 "ok": True,
                 "read_only": True,
@@ -220,13 +207,26 @@ def create_gradio_ui(container):
             )
 
     async def bind_sis_tab():
-        return await live_sis_call("bind_tab", sis_browser.bind_tab)
+        return await live_sis_call("bind_tab", api_client.bind_sis_tab)
 
     async def inspect_sis_page():
-        return await live_sis_call("inspect_page", sis_browser.inspect_page)
+        return await live_sis_call("inspect_page", api_client.inspect_sis_page)
 
     async def inspect_sis_cart():
-        return await live_sis_call("inspect_cart", sis_browser.inspect_cart)
+        try:
+            return _pretty(await asyncio.to_thread(api_client.integration_sis_sync))
+        except Exception as exc:
+            return _pretty(
+                {
+                    "api_version": "v1",
+                    "ok": False,
+                    "read_only": True,
+                    "error": {
+                        "code": getattr(exc, "code", type(exc).__name__),
+                        "message": str(exc),
+                    },
+                }
+            )
 
     with gr.Blocks(title="HKU AGENTS") as demo:
         # A concrete value is deep-copied per browser session. Using a callable
@@ -248,8 +248,8 @@ def create_gradio_ui(container):
             health_button = gr.Button("Refresh health", variant="primary")
             health_button.click(
                 lambda: (
-                    _pretty({"status": "ok", "service": "hku-agents", "mode": "local-first"}),
-                    _pretty(sis_browser.health()),
+                    safe_call(api_client.health),
+                    safe_call(api_client.browser_status),
                 ),
                 outputs=[health_output, browser_health_output],
                 queue=False,
@@ -414,9 +414,7 @@ def create_gradio_ui(container):
             tasks_output = gr.Code(value="Press Refresh", language="json", label="Local tasks")
             tasks_button = gr.Button("Refresh tasks")
             tasks_button.click(
-                lambda: safe_call(
-                    lambda: {"tasks": [item.model_dump(mode="json") for item in container.store.list_tasks()]}
-                ),
+                lambda: safe_call(api_client.tasks),
                 outputs=tasks_output,
                 queue=False,
             )
@@ -438,6 +436,16 @@ def create_gradio_ui(container):
                 label="Local bridge address",
                 interactive=False,
             )
+            integration_api_token = gr.Textbox(
+                value=config.INTEGRATION_API_TOKEN,
+                label=f"Integration API token ({config.INTEGRATION_API_TOKEN_SOURCE})",
+                type="password",
+                interactive=False,
+            )
+            gr.Markdown(
+                "Use this separate bearer token only for trusted local DeepSeek Harness "
+                "or Hermes adapters. It is not the browser-extension pairing token."
+            )
             rotate_pairing_button = gr.Button("Rotate pairing token")
             connections_output = gr.Code(
                 value=_pretty({"connections": container.connection_status()}),
@@ -446,12 +454,12 @@ def create_gradio_ui(container):
             )
             connections_button = gr.Button("Refresh connections")
             rotate_pairing_button.click(
-                lambda: container.browser_bridge.rotate_pairing_token(),
+                lambda: api_client.rotate_browser_pairing()["pairing_token"],
                 outputs=pairing_token,
                 queue=False,
             )
             connections_button.click(
-                lambda: safe_call(lambda: {"connections": container.connection_status()}),
+                lambda: safe_call(api_client.integration_status),
                 outputs=connections_output,
                 queue=False,
             )
@@ -462,13 +470,7 @@ def create_gradio_ui(container):
             )
             capabilities_button = gr.Button("Refresh capabilities")
             capabilities_button.click(
-                lambda: safe_call(
-                    lambda: {
-                        "capabilities": [
-                            item.model_dump(mode="json") for item in container.registry.manifests()
-                        ]
-                    }
-                ),
+                lambda: safe_call(api_client.capabilities),
                 outputs=capabilities_output,
                 queue=False,
             )

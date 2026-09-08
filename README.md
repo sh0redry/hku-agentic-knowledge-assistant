@@ -58,6 +58,13 @@ events, a zero-network SIS preflight simulator, and an authenticated read-only
 Chrome extension bridge for inspecting and validating an already-open SIS
 Temporary Course List. Real SIS enrollment writes are not implemented.
 
+The local Gradio GUI remains the reference testing and visualization workbench.
+An authenticated, host-neutral `/api/v1/integration/*` boundary now exposes
+read-only status, SIS course-list synchronization, and live preflight for the GUI
+and future DeepSeek Harness or Hermes adapters. Configure a random
+`INTEGRATION_API_TOKEN` of at least 32 characters in `project/.env`, or use the
+process-local value shown in the GUI's **Connections** tab.
+
 ```bash
 cp project/.env.example project/.env
 ```

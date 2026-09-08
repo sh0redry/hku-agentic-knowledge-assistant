@@ -55,6 +55,11 @@ initialization progress. Initialization is process-wide and idempotent, so later
 Chat visits reuse the ready agent. If initialization fails, the GUI shows the
 error and offers an explicit retry.
 
+The local GUI is a supported testing, visualization, diagnostics, and recovery
+workbench. It remains available when external agent-host adapters are added.
+Browser course-list synchronization and live preflight use the same authenticated
+Integration API contract intended for DeepSeek Harness and Hermes adapters.
+
 Core endpoints:
 
 | Endpoint | Purpose |
@@ -67,10 +72,47 @@ Core endpoints:
 | `GET /api/v1/browser/sis/page` | Read structured state from the bound SIS page |
 | `GET /api/v1/browser/sis/cart` | Read structured cart rows without submitting anything |
 | `POST /api/v1/browser/sis/preflight` | Compare user expectations with the live read-only SIS cart |
+| `GET /api/v1/integration/status` | Authenticated host-neutral service, capability, and connection status |
+| `POST /api/v1/integration/sis/sync` | Authenticated read-only synchronization of temporary and scheduled courses |
+| `POST /api/v1/integration/sis/preflight` | Authenticated host-neutral live preflight |
 | `POST /api/v1/chat` | Execute the existing Knowledge Agent through the platform boundary |
 | `POST /api/v1/sis/preflight` | Run the zero-network SIS simulator |
 | `GET /api/v1/tasks/{task_id}/events` | Stream task events over SSE |
 | `POST /api/v1/actions/*` | Draft, validate, confirm, and execute governed actions |
+
+### Local Integration API
+
+The `/api/v1/integration/*` endpoints are the stable local boundary shared by
+the GUI and future DeepSeek Harness or Hermes adapters. They require:
+
+```http
+Authorization: Bearer <INTEGRATION_API_TOKEN>
+X-Correlation-ID: <optional-host-task-id>
+```
+
+Set a random value of at least 32 characters as `INTEGRATION_API_TOKEN` in
+`project/.env`. If it is blank, the application creates a process-local token;
+the current value and its source are visible in the GUI's **Connections** tab.
+This token is separate from the Chrome extension pairing token.
+
+Every Integration API response uses the same envelope:
+
+```json
+{
+  "api_version": "v1",
+  "ok": true,
+  "read_only": true,
+  "correlation_id": "host-task-id",
+  "result": {},
+  "task": null,
+  "error": null
+}
+```
+
+For preflight, `ok` means the operation completed. The domain decision remains
+in `result.ready`, so a valid mismatch is returned as `ok: true, ready: false`.
+Authentication, validation, bridge, and task failures use stable error codes and
+recovery text without exposing credentials, cookies, or private DOM.
 
 Run the platform tests without contacting HKU SIS or an LLM:
 

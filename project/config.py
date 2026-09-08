@@ -1,4 +1,5 @@
 import os
+import secrets
 
 # --- Directory Configuration ---
 _BASE_DIR = os.path.dirname(os.path.dirname(__file__))
@@ -24,6 +25,11 @@ APP_DB_PATH = (
 APP_HOST = os.environ.get("APP_HOST", "127.0.0.1")
 APP_PORT = int(os.environ.get("APP_PORT", "7860"))
 API_BASE_URL = os.environ.get("API_BASE_URL", f"http://{APP_HOST}:{APP_PORT}")
+_INTEGRATION_API_TOKEN_SETTING = os.environ.get("INTEGRATION_API_TOKEN", "").strip()
+INTEGRATION_API_TOKEN = _INTEGRATION_API_TOKEN_SETTING or secrets.token_urlsafe(32)
+INTEGRATION_API_TOKEN_SOURCE = (
+    "environment" if _INTEGRATION_API_TOKEN_SETTING else "process_generated"
+)
 CONFIRMATION_TTL_SECONDS = int(os.environ.get("CONFIRMATION_TTL_SECONDS", "300"))
 BROWSER_BRIDGE_ENABLED = os.environ.get("BROWSER_BRIDGE_ENABLED", "true").lower() == "true"
 BROWSER_HEARTBEAT_TIMEOUT_SECONDS = float(

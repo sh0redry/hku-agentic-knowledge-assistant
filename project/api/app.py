@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
+import uuid
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query, Request, WebSocket
@@ -13,6 +15,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from agents.errors import CapabilityError
 from agents.models import TERMINAL_TASK_STATUSES, TaskStatus
+from api.integration import IntegrationAPIError, create_integration_router
 from api.schemas import ActionConfirmRequest, ActionDraftRequest, ActionExecuteRequest, ChatRequest
 from application import ApplicationContainer
 from browser_bridge.service import BrowserBridgeError
@@ -28,6 +31,7 @@ def create_api_app(
     container: ApplicationContainer | None = None,
     *,
     db_path: str | Path | None = None,
+    integration_token: str | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="HKU AGENTS API",
@@ -39,6 +43,56 @@ def create_api_app(
         allowed_hosts=["127.0.0.1", "localhost", "testserver"],
     )
     app.state.container = container or ApplicationContainer(db_path=db_path)
+    app.state.integration_token = integration_token or config.INTEGRATION_API_TOKEN
+
+    @app.middleware("http")
+    async def correlation_id_middleware(request: Request, call_next):
+        supplied = request.headers.get("X-Correlation-ID", "")
+        request.state.correlation_id = (
+            supplied
+            if re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", supplied)
+            else str(uuid.uuid4())
+        )
+        response = await call_next(request)
+        response.headers["X-Correlation-ID"] = request.state.correlation_id
+        return response
+
+    def integration_error_content(
+        request: Request,
+        *,
+        code: str,
+        message: str,
+        recovery: str | None = None,
+        details=None,
+    ) -> dict:
+        return {
+            "api_version": "v1",
+            "ok": False,
+            "read_only": True,
+            "correlation_id": request.state.correlation_id,
+            "result": None,
+            "task": None,
+            "error": {
+                "code": code,
+                "message": message,
+                "recovery": recovery,
+                "details": details,
+            },
+        }
+
+    @app.exception_handler(IntegrationAPIError)
+    async def integration_api_error_handler(request: Request, exc: IntegrationAPIError):
+        headers = {"WWW-Authenticate": "Bearer"} if exc.status_code == 401 else None
+        return JSONResponse(
+            status_code=exc.status_code,
+            headers=headers,
+            content=integration_error_content(
+                request,
+                code=exc.code,
+                message=exc.message,
+                recovery=exc.recovery,
+            ),
+        )
 
     @app.exception_handler(CapabilityError)
     async def capability_error_handler(_request: Request, exc: CapabilityError):
@@ -53,11 +107,26 @@ def create_api_app(
         )
 
     @app.exception_handler(RequestValidationError)
-    async def request_error_handler(_request: Request, exc: RequestValidationError):
+    async def request_error_handler(request: Request, exc: RequestValidationError):
+        if request.url.path.startswith("/api/v1/integration/"):
+            return JSONResponse(
+                status_code=422,
+                content=jsonable_encoder(
+                    integration_error_content(
+                        request,
+                        code="INVALID_REQUEST",
+                        message="Request validation failed.",
+                        recovery="Correct the structured tool arguments and retry.",
+                        details=exc.errors(),
+                    )
+                ),
+            )
         return JSONResponse(
             status_code=422,
             content=jsonable_encoder({"error": {"code": "INVALID_REQUEST", "message": "Request validation failed.", "details": exc.errors()}}),
         )
+
+    app.include_router(create_integration_router(app.state.integration_token))
 
     @app.get("/api/v1/health")
     async def health():

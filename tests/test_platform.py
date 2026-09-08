@@ -115,7 +115,13 @@ class PlatformAPITests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory(dir=TEST_TEMP_ROOT)
         self.db_path = Path(self.temp_dir.name) / "test.db"
         self.container = ApplicationContainer(self.db_path)
-        self.client = TestClient(create_api_app(self.container))
+        self.integration_token = "test-integration-token-" + ("x" * 32)
+        self.client = TestClient(
+            create_api_app(
+                self.container,
+                integration_token=self.integration_token,
+            )
+        )
 
     def tearDown(self):
         self.client.close()
@@ -139,6 +145,101 @@ class PlatformAPITests(unittest.TestCase):
         browser = next(item for item in connections if item["id"] == "sis_browser")
         self.assertEqual(browser["status"], "disconnected")
         self.assertFalse(browser["safe_for_writes"])
+
+    def integration_headers(self, correlation_id: str | None = None) -> dict[str, str]:
+        headers = {"Authorization": f"Bearer {self.integration_token}"}
+        if correlation_id:
+            headers["X-Correlation-ID"] = correlation_id
+        return headers
+
+    def test_integration_api_requires_its_own_bearer_token(self):
+        missing = self.client.get("/api/v1/integration/status")
+        self.assertEqual(missing.status_code, 401)
+        self.assertEqual(missing.headers["www-authenticate"], "Bearer")
+        self.assertEqual(missing.json()["error"]["code"], "AUTH_REQUIRED")
+        self.assertEqual(missing.json()["api_version"], "v1")
+
+        invalid = self.client.get(
+            "/api/v1/integration/status",
+            headers={"Authorization": "Bearer " + ("z" * 64)},
+        )
+        self.assertEqual(invalid.status_code, 403)
+        self.assertEqual(invalid.json()["error"]["code"], "AUTH_INVALID")
+
+        status = self.client.get(
+            "/api/v1/integration/status",
+            headers=self.integration_headers("host-session-123"),
+        )
+        self.assertEqual(status.status_code, 200)
+        self.assertEqual(status.headers["x-correlation-id"], "host-session-123")
+        body = status.json()
+        self.assertTrue(body["ok"])
+        self.assertTrue(body["read_only"])
+        self.assertEqual(body["correlation_id"], "host-session-123")
+        self.assertEqual(body["result"]["auth_mode"], "bearer")
+        self.assertNotIn(self.integration_token, str(body))
+
+    def test_integration_sync_has_stable_success_and_error_envelopes(self):
+        disconnected = self.client.post(
+            "/api/v1/integration/sis/sync",
+            headers=self.integration_headers(),
+        )
+        self.assertEqual(disconnected.status_code, 409)
+        self.assertFalse(disconnected.json()["ok"])
+        self.assertEqual(disconnected.json()["error"]["code"], "BROWSER_NOT_CONNECTED")
+
+        visible = {
+            "course_code": "COMP3297",
+            "section": "2B",
+            "class_number": "1725",
+        }
+        inspect = AsyncMock(return_value=live_cart_snapshot(courses=[visible]))
+        self.container.connectors["sis_browser"].inspect_cart = inspect
+        synced = self.client.post(
+            "/api/v1/integration/sis/sync",
+            headers=self.integration_headers("sync-1"),
+        )
+        self.assertEqual(synced.status_code, 200)
+        body = synced.json()
+        self.assertTrue(body["ok"])
+        self.assertEqual(body["correlation_id"], "sync-1")
+        self.assertEqual(body["result"]["temporary_courses"], [visible])
+        self.assertEqual(body["result"]["schedule_courses"], [])
+        inspect.assert_awaited_once()
+
+    def test_integration_preflight_preserves_business_result_and_correlation(self):
+        inspect = AsyncMock(return_value=live_cart_snapshot(courses=[]))
+        self.container.connectors["sis_browser"].preflight_snapshot = inspect
+
+        response = self.client.post(
+            "/api/v1/integration/sis/preflight",
+            headers=self.integration_headers("preflight-1"),
+            json=live_preflight_payload(),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertTrue(body["ok"])
+        self.assertFalse(body["result"]["ready"])
+        self.assertEqual(body["correlation_id"], "preflight-1")
+        self.assertEqual(body["task"]["correlation_id"], "preflight-1")
+        self.assertEqual(body["result"]["sis_write_requests_sent"], 0)
+
+    def test_integration_validation_errors_use_the_versioned_envelope(self):
+        payload = live_preflight_payload()
+        payload["expected_courses"][0]["class_number"] = "12345"
+        response = self.client.post(
+            "/api/v1/integration/sis/preflight",
+            headers=self.integration_headers("invalid-1"),
+            json=payload,
+        )
+
+        self.assertEqual(response.status_code, 422)
+        body = response.json()
+        self.assertFalse(body["ok"])
+        self.assertEqual(body["api_version"], "v1")
+        self.assertEqual(body["correlation_id"], "invalid-1")
+        self.assertEqual(body["error"]["code"], "INVALID_REQUEST")
 
     def test_browser_pairing_requires_extension_origin_and_current_token(self):
         self.assertEqual(
@@ -550,9 +651,16 @@ class SafetyFrameworkTests(unittest.TestCase):
         command = BrowserCommand(command=BrowserCommandName.PREFLIGHT)
         self.assertEqual(command.protocol_version, 1)
         redacted = sanitize_for_log(
-            {"cookie": "secret", "nested": {"access_token": "token", "safe": "value"}}
+            {
+                "cookie": "secret",
+                "integration_api_token": "host-secret",
+                "pairing_token": "browser-secret",
+                "nested": {"access_token": "token", "safe": "value"},
+            }
         )
         self.assertEqual(redacted["cookie"], "[REDACTED]")
+        self.assertEqual(redacted["integration_api_token"], "[REDACTED]")
+        self.assertEqual(redacted["pairing_token"], "[REDACTED]")
         self.assertEqual(redacted["nested"]["access_token"], "[REDACTED]")
         self.assertEqual(redacted["nested"]["safe"], "value")
 

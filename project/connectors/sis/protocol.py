@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 PROTOCOL_VERSION = 1
 SIS_ORIGIN = "https://sis-main.hku.hk"
 SENSITIVE_KEY_PATTERN = re.compile(
-    r"password|passwd|pwd|cookie|authorization|access[_-]?token|refresh[_-]?token|secret",
+    r"password|passwd|pwd|cookie|authorization|(?:^|[_-])token(?:$|[_-])|secret",
     re.IGNORECASE,
 )
 

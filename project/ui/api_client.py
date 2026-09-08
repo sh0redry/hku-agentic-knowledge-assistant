@@ -10,9 +10,15 @@ class APIClientError(RuntimeError):
 
 
 class HKUAgentsAPIClient:
-    def __init__(self, base_url: str, timeout: float = 310):
+    def __init__(
+        self,
+        base_url: str,
+        timeout: float = 310,
+        integration_token: str | None = None,
+    ):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self.integration_token = integration_token
 
     def _request(self, method: str, path: str, **kwargs) -> dict:
         try:
@@ -42,6 +48,24 @@ class HKUAgentsAPIClient:
     def connections(self) -> dict:
         return self._request("GET", "/api/v1/connections")
 
+    def browser_pairing(self) -> dict:
+        return self._request("GET", "/api/v1/browser/pairing")
+
+    def rotate_browser_pairing(self) -> dict:
+        return self._request("POST", "/api/v1/browser/pairing/rotate")
+
+    def browser_status(self) -> dict:
+        return self._request("GET", "/api/v1/browser/status")
+
+    def bind_sis_tab(self) -> dict:
+        return self._request("POST", "/api/v1/browser/sis/bind")
+
+    def inspect_sis_page(self) -> dict:
+        return self._request("GET", "/api/v1/browser/sis/page")
+
+    def inspect_sis_cart(self) -> dict:
+        return self._request("GET", "/api/v1/browser/sis/cart")
+
     def tasks(self) -> dict:
         return self._request("GET", "/api/v1/tasks")
 
@@ -58,3 +82,19 @@ class HKUAgentsAPIClient:
 
     def sis_live_preflight(self, payload: dict) -> dict:
         return self._request("POST", "/api/v1/browser/sis/preflight", json=payload)
+
+    def _integration_request(self, method: str, path: str, **kwargs) -> dict:
+        if not self.integration_token:
+            raise APIClientError("The local Integration API token is not configured.")
+        headers = dict(kwargs.pop("headers", {}))
+        headers["Authorization"] = f"Bearer {self.integration_token}"
+        return self._request(method, f"/api/v1/integration{path}", headers=headers, **kwargs)
+
+    def integration_status(self) -> dict:
+        return self._integration_request("GET", "/status")
+
+    def integration_sis_sync(self) -> dict:
+        return self._integration_request("POST", "/sis/sync")
+
+    def integration_sis_preflight(self, payload: dict) -> dict:
+        return self._integration_request("POST", "/sis/preflight", json=payload)
