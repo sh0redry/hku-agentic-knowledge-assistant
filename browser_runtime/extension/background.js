@@ -39,7 +39,13 @@ function publicTabState() {
       course_count: 0
     };
   }
-  const { visible_courses: _courses, ...summary } = lastSnapshot;
+  const {
+    visible_courses: _visibleCourses,
+    temporary_courses: _temporaryCourses,
+    schedule_courses: _scheduleCourses,
+    diagnostics: _diagnostics,
+    ...summary
+  } = lastSnapshot;
   return summary;
 }
 

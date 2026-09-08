@@ -35,7 +35,7 @@ from agents.models import (
 from api.app import create_api_app
 from application import ApplicationContainer
 from agents.knowledge.agent import KnowledgeAnswerCapability
-from browser_bridge.models import HeartbeatMessage
+from browser_bridge.models import HeartbeatMessage, SISPageSnapshot
 from browser_bridge.service import BrowserBridgeError, BrowserBridgeService
 from connectors.sis.protocol import (
     BrowserCommand,
@@ -83,6 +83,8 @@ def live_cart_snapshot(*, term_label: str = "2026-27 Sem 2", courses=None) -> di
         "term_label": term_label,
         "course_count": len(courses or []),
         "visible_courses": courses or [],
+        "temporary_courses": courses or [],
+        "schedule_courses": [],
     }
 
 
@@ -431,6 +433,24 @@ class SafetyFrameworkTests(unittest.TestCase):
         with self.assertRaises(Exception):
             HeartbeatMessage.model_validate(
                 {"type": "heartbeat", "tab": None, "cookie": "must-not-enter-bridge"}
+            )
+        with self.assertRaises(Exception):
+            SISPageSnapshot.model_validate(
+                {
+                    "diagnostics": {
+                        "parser_version": "0.2.0",
+                        "document_count": 1,
+                        "table_count": 1,
+                        "row_count": 1,
+                        "cart_marker_found": True,
+                        "schedule_marker_found": True,
+                        "temporary_candidate_count": 0,
+                        "schedule_candidate_count": 0,
+                        "unclassified_candidate_count": 0,
+                        "unclassified_courses": [],
+                        "cookie": "must-not-enter-diagnostics",
+                    }
+                }
             )
 
     def test_extension_manifest_is_read_only_and_parser_handles_synthetic_row(self):

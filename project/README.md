@@ -93,6 +93,11 @@ unexpected concrete course rows; users do not enter them. The result reports
 matched, missing, unexpected, and ambiguous entries. `ready: true` is returned
 only when the page, login state, term, and complete course/section set all match.
 
+Browser inspection reports pending Step 2/3 selections in `temporary_courses`
+and already scheduled classes in `schedule_courses`. `visible_courses` remains a
+compatibility alias for `temporary_courses`; live preflight never compares against
+`schedule_courses`.
+
 The extension has no cookie, debugger, download, clipboard, web-request, or
 form-execution permission. It accepts a fixed read-only command set and sends
 only validated page type, login state, term label, and exact course identifiers.

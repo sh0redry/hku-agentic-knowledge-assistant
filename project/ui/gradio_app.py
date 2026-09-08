@@ -202,7 +202,9 @@ def create_gradio_ui(container):
             }
             if action == "inspect_cart":
                 response["cart_state"] = (
-                    "empty" if result.get("course_count", 0) == 0 else "courses_found"
+                    "empty"
+                    if result.get("temporary_course_count", result.get("course_count", 0)) == 0
+                    else "courses_found"
                 )
             return _pretty(response)
         except Exception as exc:

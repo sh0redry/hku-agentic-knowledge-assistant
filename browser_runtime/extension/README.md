@@ -26,4 +26,5 @@ in-memory development pin, or set `BROWSER_EXTENSION_IDS` explicitly in
 - Named read-only commands only; arbitrary JavaScript and arbitrary selectors are rejected.
 - Live preflight reads and compares the current cart but cannot modify it.
 - Only structured page state leaves the content script. Full HTML is never sent.
+- Temporary Course List rows and Class Schedule rows are returned in separate fields.
 - Real SIS POSTs and enrollment actions are outside this version.

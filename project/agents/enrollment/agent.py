@@ -67,7 +67,8 @@ class SISLivePreflightCapability(BaseCapability):
             raise CapabilityError(exc.code, str(exc)) from exc
 
         visible_courses = [
-            CourseSelection.model_validate(course) for course in snapshot["visible_courses"]
+            CourseSelection.model_validate(course)
+            for course in snapshot["temporary_courses"]
         ]
         return evaluate_preflight(
             requested_term_label=validated_input.term_label,

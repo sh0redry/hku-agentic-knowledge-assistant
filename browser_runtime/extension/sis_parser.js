@@ -4,7 +4,7 @@
   const SIS_ORIGIN = "https://sis-main.hku.hk";
   const COURSE_PATTERN = /\b([A-Z]{2,8})\s*([0-9]{3,5}[A-Z]?)\b/i;
   const COURSE_SECTION_PATTERN =
-    /\b([A-Z]{2,8})\s*([0-9]{3,5}[A-Z]?)\s*-\s*([A-Z0-9-]{1,20})\b/i;
+    /\b([A-Z]{2,8})\s*([0-9]{3,5}[A-Z]?)\s*[-\u2010-\u2015]\s*([A-Z0-9-]{1,20})\b/i;
   const CLASS_PATTERN = /\bclass\s*(?:nbr|number|no\.?|#)\s*:?\s*([0-9]{3,8})\b/i;
   const SECTION_PATTERN = /\bsection\s*:?\s*([A-Z0-9-]{1,20})\b/i;
 
@@ -21,6 +21,14 @@
     return index >= 0 && index < cells.length ? normalizeText(cells[index]) : "";
   }
 
+  function firstMatch(values, pattern) {
+    for (const value of values) {
+      const match = normalizeText(value).match(pattern);
+      if (match) return match;
+    }
+    return null;
+  }
+
   function parseCourseRow(cells, headers) {
     const normalizedCells = cells.map(normalizeText);
     const normalizedHeaders = headers.map(normalizeHeader);
@@ -31,8 +39,11 @@
       (header) =>
         header === "class" || header.includes("course") || header.includes("subject")
     );
-    const combinedCourseMatch = (courseCell || rowText).match(COURSE_SECTION_PATTERN);
-    const courseMatch = combinedCourseMatch || (courseCell || rowText).match(COURSE_PATTERN);
+    // PeopleSoft nests presentation tables. A header collected from an outer
+    // table can point at the wrong direct cell, so the full row must remain an
+    // independent fallback even when courseCell is non-empty.
+    const combinedCourseMatch = firstMatch([courseCell, rowText], COURSE_SECTION_PATTERN);
+    const courseMatch = combinedCourseMatch || firstMatch([courseCell, rowText], COURSE_PATTERN);
     if (!courseMatch) return null;
 
     const sectionCell = valueFromColumn(
@@ -40,18 +51,26 @@
       normalizedHeaders,
       (header) => header.includes("section") || header === "sec"
     );
-    const sectionMatch = (sectionCell || rowText).match(SECTION_PATTERN);
-    const section = sectionCell ||
-      (combinedCourseMatch ? combinedCourseMatch[3] : sectionMatch ? sectionMatch[1] : "");
+    const explicitSectionMatch = firstMatch([sectionCell, rowText], SECTION_PATTERN);
+    const plainSectionMatch = normalizeText(sectionCell).match(/^([A-Z0-9-]{1,20})$/i);
+    const section = plainSectionMatch ? plainSectionMatch[1] :
+      (combinedCourseMatch
+        ? combinedCourseMatch[3]
+        : explicitSectionMatch
+          ? explicitSectionMatch[1]
+          : "");
 
     const classCell = valueFromColumn(
       normalizedCells,
       normalizedHeaders,
       (header) => header.includes("class") && /nbr|number|no/.test(header)
     );
-    const classMatch = (classCell || rowText).match(CLASS_PATTERN);
-    const classNumberMatch = (classCell || "").match(/\b[0-9]{3,8}\b/);
-    const parenthesizedClassMatch = (courseCell || rowText).match(/\(([0-9]{3,8})\)/);
+    const classMatch = firstMatch([classCell, rowText], CLASS_PATTERN);
+    const classNumberMatch = normalizeText(classCell).match(/^([0-9]{3,8})$/);
+    const parenthesizedClassMatch = firstMatch(
+      [courseCell, rowText],
+      /\(([0-9]{3,8})\)/
+    );
     const classNumber = classNumberMatch
       ? classNumberMatch[0]
       : classMatch
@@ -103,32 +122,16 @@
     return "unknown";
   }
 
-  function extractCourses(documentObject, pageKind = "status") {
-    const bodyText = normalizeText(documentObject.body && documentObject.body.textContent);
-    if (pageKind === "cart" && /temporary course list is empty/i.test(bodyText)) return [];
+  function courseKey(course) {
+    return `${course.course_code}|${course.section}|${course.class_number}`;
+  }
 
-    const courses = [];
-    const seen = new Set();
-    for (const table of documentObject.querySelectorAll("table")) {
-      const headers = Array.from(table.querySelectorAll("thead th, tr:first-child th")).map(
-        (cell) => cell.textContent
-      );
-      for (const row of table.querySelectorAll("tbody tr, tr")) {
-        if (pageKind === "cart" && !isInsideTemporaryCourseList(row, documentObject)) continue;
-        const cells = Array.from(row.querySelectorAll(":scope > th, :scope > td")).map(
-          (cell) => cell.textContent
-        );
-        if (!cells.length) continue;
-        const course = parseCourseRow(cells, headers);
-        if (!course) continue;
-        const key = `${course.course_code}|${course.section}|${course.class_number}`;
-        if (!seen.has(key)) {
-          seen.add(key);
-          courses.push(course);
-        }
-      }
-    }
-    return courses.slice(0, 200);
+  function addUniqueCourse(target, seen, course) {
+    if (!course) return;
+    const key = courseKey(course);
+    if (seen.has(key)) return;
+    seen.add(key);
+    target.push(course);
   }
 
   function findShortMarker(documentObject, pattern) {
@@ -144,18 +147,114 @@
     return Boolean(marker.compareDocumentPosition(element) & 4);
   }
 
-  function isInsideTemporaryCourseList(row, documentObject) {
-    const cartMarker = findShortMarker(documentObject, /temporary course list/i);
-    if (!cartMarker) return false;
-    const scheduleMarker = findShortMarker(documentObject, /class schedule/i);
-    return isAfter(row, cartMarker) && (!scheduleMarker || !isAfter(row, scheduleMarker));
+  function createCourseBoundaries(documentObject) {
+    const cartMarker =
+      findShortMarker(
+        documentObject,
+        /\b20[0-9]{2}-[0-9]{2}\s+sem(?:ester)?\s+[12]\s+temporary course list\b/i
+      ) || findShortMarker(documentObject, /temporary course list/i);
+    // Deliberately require the dated "My ... Class Schedule" heading. The
+    // generic phrase also appears in the left navigation as Class Schedule Planner.
+    const scheduleMarker = findShortMarker(
+      documentObject,
+      /\bmy\s+20[0-9]{2}-[0-9]{2}\s+sem(?:ester)?\s+[12]\s+class schedule\b/i
+    );
+    const cartContainer = cartMarker && typeof cartMarker.closest === "function"
+      ? cartMarker.closest("table")
+      : null;
+    const scheduleContainer = scheduleMarker && typeof scheduleMarker.closest === "function"
+      ? scheduleMarker.closest("table")
+      : null;
+    return { cartMarker, scheduleMarker, cartContainer, scheduleContainer };
+  }
+
+  function classifyCourseRegion(element, boundaries) {
+    const { cartMarker, scheduleMarker, cartContainer, scheduleContainer } = boundaries;
+    const scheduleContainerIsSpecific = scheduleContainer &&
+      typeof scheduleContainer.contains === "function" &&
+      (!cartMarker || !scheduleContainer.contains(cartMarker));
+    if (scheduleContainerIsSpecific && scheduleContainer.contains(element)) return "schedule";
+
+    const cartContainerIsSpecific = cartContainer &&
+      typeof cartContainer.contains === "function" &&
+      (!scheduleMarker || !cartContainer.contains(scheduleMarker));
+    if (cartContainerIsSpecific && cartContainer.contains(element)) return "temporary";
+
+    if (scheduleMarker && isAfter(element, scheduleMarker)) return "schedule";
+    if (cartMarker && isAfter(element, cartMarker)) return "temporary";
+    return "unclassified";
+  }
+
+  function extractCartCourseGroups(documentObject, boundaries = null) {
+    const courseBoundaries = boundaries || createCourseBoundaries(documentObject);
+    const groups = { temporary: [], schedule: [], unclassified: [] };
+    const seen = {
+      temporary: new Set(),
+      schedule: new Set(),
+      unclassified: new Set()
+    };
+    for (const link of documentObject.querySelectorAll("a")) {
+      const text = normalizeText(link.textContent);
+      if (text.length === 0 || text.length > 120) continue;
+      if (!COURSE_SECTION_PATTERN.test(text) || !/\([0-9]{3,8}\)/.test(text)) continue;
+      const course = parseCourseRow([text], ["Class"]);
+      if (!course) continue;
+      const row = typeof link.closest === "function" ? link.closest("tr") : null;
+      const region = classifyCourseRegion(row || link, courseBoundaries);
+      addUniqueCourse(groups[region], seen[region], course);
+    }
+    return groups;
+  }
+
+  function extractCourses(documentObject, pageKind = "status", boundaries = null) {
+    if (pageKind === "cart") {
+      return extractCartCourseGroups(documentObject, boundaries).temporary.slice(0, 200);
+    }
+
+    const courses = [];
+    const seen = new Set();
+    const processedRows = new Set();
+    for (const table of documentObject.querySelectorAll("table")) {
+      const headers = Array.from(table.querySelectorAll("thead th, tr:first-child th")).map(
+        (cell) => cell.textContent
+      );
+      for (const row of table.querySelectorAll("tbody tr, tr")) {
+        if (processedRows.has(row)) continue;
+        processedRows.add(row);
+        const cells = Array.from(row.querySelectorAll(":scope > th, :scope > td")).map(
+          (cell) => cell.textContent
+        );
+        if (!cells.length) continue;
+        addUniqueCourse(courses, seen, parseCourseRow(cells, headers));
+      }
+    }
+    return courses.slice(0, 200);
+  }
+
+  function parserDiagnostics(documentObject, boundaries, groups) {
+    return {
+      parser_version: "0.2.0",
+      table_count: documentObject.querySelectorAll("table").length,
+      row_count: documentObject.querySelectorAll("tr").length,
+      cart_marker_found: Boolean(boundaries.cartMarker),
+      schedule_marker_found: Boolean(boundaries.scheduleMarker),
+      temporary_candidate_count: groups.temporary.length,
+      schedule_candidate_count: groups.schedule.length,
+      unclassified_candidate_count: groups.unclassified.length,
+      unclassified_courses: groups.unclassified.slice(0, 10)
+    };
   }
 
   function inspectDocument(documentObject, locationObject) {
     const pageKind = classifyPage(documentObject, locationObject.href || "");
-    const courses = pageKind === "cart" || pageKind === "status"
-      ? extractCourses(documentObject, pageKind)
-      : [];
+    const boundaries = createCourseBoundaries(documentObject);
+    const groups = pageKind === "cart"
+      ? extractCartCourseGroups(documentObject, boundaries)
+      : { temporary: [], schedule: [], unclassified: [] };
+    if (pageKind === "status") {
+      groups.schedule = extractCourses(documentObject, pageKind, boundaries);
+    }
+    const primaryCourses = pageKind === "cart" ? groups.temporary : groups.schedule;
     const sisMarker = Boolean(
       documentObject.querySelector("[id*='DERIVED_SSS'], [id*='SSR_'], form[action*='psp']")
     );
@@ -165,8 +264,13 @@
       logged_in: pageKind === "login" ? false : sisMarker ? true : null,
       page_kind: pageKind,
       term_label: selectedTerm(documentObject),
-      course_count: courses.length,
-      visible_courses: courses
+      course_count: primaryCourses.length,
+      temporary_course_count: groups.temporary.length,
+      schedule_course_count: groups.schedule.length,
+      visible_courses: groups.temporary,
+      temporary_courses: groups.temporary,
+      schedule_courses: groups.schedule,
+      diagnostics: parserDiagnostics(documentObject, boundaries, groups)
     };
   }
 
@@ -216,12 +320,17 @@
     const snapshots = collectSameOriginDocuments(documentObject).map((candidate) =>
       inspectDocument(candidate, locationObject)
     );
-    return chooseBestSnapshot(snapshots);
+    const best = chooseBestSnapshot(snapshots);
+    return {
+      ...best,
+      diagnostics: { ...best.diagnostics, document_count: snapshots.length }
+    };
   }
 
   const api = {
     chooseBestSnapshot,
     classifyPage,
+    extractCartCourseGroups,
     extractCourses,
     inspect,
     normalizeText,
