@@ -61,7 +61,9 @@ Temporary Course List. Real SIS enrollment writes are not implemented.
 The local Gradio GUI remains the reference testing and visualization workbench.
 An authenticated, host-neutral `/api/v1/integration/*` boundary now exposes
 read-only status, SIS course-list synchronization, and live preflight for the GUI
-and future DeepSeek Harness or Hermes adapters. Configure a random
+and external agent hosts. A first-party read-only DeepSeek Harness/Cordis adapter
+is available in `integrations/deepseek_harness`; the same API remains suitable
+for a future Hermes adapter. Configure a random
 `INTEGRATION_API_TOKEN` of at least 32 characters in `project/.env`, or use the
 process-local value shown in the GUI's **Connections** tab.
 

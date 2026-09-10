@@ -14,6 +14,9 @@ __pycache__/
 .vscode/
 browser_runtime/extension/dist/
 browser_runtime/extension/*.pem
+node_modules/
+integrations/deepseek_harness/coverage/
+integrations/deepseek_harness/*.tgz
 
 # Local secrets and API keys
 .env

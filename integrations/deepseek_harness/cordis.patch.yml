@@ -1,0 +1,7 @@
+- insert:
+    - id: hku-agents
+      name: dsh-hku-agents
+      config:
+        baseUrl: !!js process.env.HKU_AGENTS_API_BASE_URL ?? 'http://127.0.0.1:7860'
+        tokenEnv: INTEGRATION_API_TOKEN
+        timeoutMs: 15000

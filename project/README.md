@@ -9,7 +9,8 @@ the lazily initialized `knowledge.answer` capability.
 The SIS integration provides both a zero-network simulator and a **live read-only
 preflight**. Live preflight reads structured state from an already-open,
 user-authenticated SIS Temporary Course List and compares the exact term, course,
-section, and class-number sets. Real enrollment writes are intentionally absent.
+and section sets. SIS class numbers are returned as read-only metadata rather
+than accepted as user input. Real enrollment writes are intentionally absent.
 
 
 ## Table of Contents
@@ -58,7 +59,8 @@ error and offers an explicit retry.
 The local GUI is a supported testing, visualization, diagnostics, and recovery
 workbench. It remains available when external agent-host adapters are added.
 Browser course-list synchronization and live preflight use the same authenticated
-Integration API contract intended for DeepSeek Harness and Hermes adapters.
+Integration API contract used by the DeepSeek Harness adapter and intended for a
+future Hermes adapter. See `integrations/deepseek_harness/README.md` for setup.
 
 Core endpoints:
 
@@ -83,7 +85,7 @@ Core endpoints:
 ### Local Integration API
 
 The `/api/v1/integration/*` endpoints are the stable local boundary shared by
-the GUI and future DeepSeek Harness or Hermes adapters. They require:
+the GUI, the DeepSeek Harness adapter, and future host adapters. They require:
 
 ```http
 Authorization: Bearer <INTEGRATION_API_TOKEN>
