@@ -93,6 +93,9 @@ export class HKUAgentsClient {
     navigateToEnrollmentAddClasses(input, signal) {
         return this.request('POST', '/api/v1/integration/sis/navigate', input, signal);
     }
+    navigateAndPreflight(input, signal) {
+        return this.request('POST', '/api/v1/integration/sis/navigate-and-preflight', input, signal);
+    }
     preflight(input, signal) {
         return this.request('POST', '/api/v1/integration/sis/preflight', input, signal);
     }

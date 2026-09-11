@@ -19,6 +19,27 @@ from connectors.sis.models import (
 from connectors.sis.validation import evaluate_preflight
 
 
+def _evaluate_live_snapshot(
+    request: SISLivePreflightRequest,
+    snapshot: dict,
+) -> dict:
+    visible_courses = [
+        CourseSelection.model_validate(course)
+        for course in snapshot["temporary_courses"]
+    ]
+    return evaluate_preflight(
+        requested_term_label=request.term_label,
+        expected_courses=request.expected_courses,
+        origin=snapshot.get("origin"),
+        logged_in=snapshot.get("logged_in"),
+        page_kind=snapshot.get("page_kind", "unknown"),
+        current_term_label=snapshot.get("term_label"),
+        visible_courses=visible_courses,
+        simulated=False,
+        match_class_number=False,
+    )
+
+
 class SISPreflightCapability(BaseCapability):
     input_model = SISPreflightRequest
     manifest = CapabilityManifest(
@@ -71,21 +92,66 @@ class SISLivePreflightCapability(BaseCapability):
         except BrowserBridgeError as exc:
             raise CapabilityError(exc.code, str(exc)) from exc
 
-        visible_courses = [
-            CourseSelection.model_validate(course)
-            for course in snapshot["temporary_courses"]
-        ]
-        return evaluate_preflight(
-            requested_term_label=validated_input.term_label,
-            expected_courses=validated_input.expected_courses,
-            origin=snapshot.get("origin"),
-            logged_in=snapshot.get("logged_in"),
-            page_kind=snapshot.get("page_kind", "unknown"),
-            current_term_label=snapshot.get("term_label"),
-            visible_courses=visible_courses,
-            simulated=False,
-            match_class_number=False,
-        )
+        return _evaluate_live_snapshot(validated_input, snapshot)
+
+
+class SISNavigateAndPreflightCapability(BaseCapability):
+    """Compose restricted navigation and strict cart comparison into one read-only task."""
+
+    input_model = SISLivePreflightRequest
+    manifest = CapabilityManifest(
+        id="sis.enrollment.navigate_and_preflight",
+        agent="enrollment",
+        title="Navigate to SIS and Run Enrollment Preflight",
+        description=(
+            "From an authenticated HKU Portal tab, follow the fixed SIS navigation path, "
+            "select the exact requested term, read the Temporary Course List, and compare "
+            "it with the expected course/section set without changing enrollment data."
+        ),
+        mode=CapabilityMode.READ,
+        risk=RiskLevel.MEDIUM,
+        confirmation=ConfirmationMode.NONE,
+        required_connections=["sis_browser"],
+        availability="local_browser_restricted_navigation_read_only",
+        input_schema="SISLivePreflightRequest",
+        output_schema="SISNavigateAndPreflightResult",
+        timeout_seconds=42,
+    )
+
+    def __init__(self, connector: BrowserSISConnector):
+        self.connector = connector
+
+    async def execute(
+        self, validated_input: SISLivePreflightRequest, context: ExecutionContext
+    ) -> dict:
+        try:
+            binding = await self.connector.bind_hku_tab()
+            navigation = await self.connector.open_enrollment_add_classes(
+                validated_input.term_label
+            )
+        except BrowserBridgeError as exc:
+            raise CapabilityError(exc.code, str(exc)) from exc
+
+        snapshot = navigation["snapshot"]
+        preflight = _evaluate_live_snapshot(validated_input, snapshot)
+        navigation_summary = {
+            key: value for key, value in navigation.items() if key != "snapshot"
+        }
+        return {
+            "ok": preflight["ok"],
+            "ready": preflight["ready"],
+            "read_only": True,
+            "simulated": False,
+            "sis_write_requests_sent": 0,
+            "binding": {
+                "origin": binding.get("origin"),
+                "page_kind": binding.get("page_kind"),
+                "logged_in": binding.get("logged_in"),
+            },
+            "navigation": navigation_summary,
+            "course_lists": snapshot,
+            "preflight": preflight,
+        }
 
 
 class SISOpenEnrollmentAddClassesCapability(BaseCapability):

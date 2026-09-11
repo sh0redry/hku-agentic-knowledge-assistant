@@ -7,10 +7,11 @@ existing **Agentic Retrieval-Augmented Generation (RAG)** system is retained as
 the lazily initialized `knowledge.answer` capability.
 
 The SIS integration provides both a zero-network simulator and a **live read-only
-preflight**. Live preflight reads structured state from an already-open,
-user-authenticated SIS Temporary Course List and compares the exact term, course,
-and section sets. SIS class numbers are returned as read-only metadata rather
-than accepted as user input. Real enrollment writes are intentionally absent.
+preflight**. Its preferred combined capability starts from an authenticated HKU
+Portal tab, binds that verified page, follows the fixed SIS path, selects one exact term, reads the
+Temporary Course List, and compares the exact course and section sets in one
+audited task. SIS class numbers are returned as read-only metadata rather than
+accepted as user input. Real enrollment writes are intentionally absent.
 
 
 ## Table of Contents
@@ -77,10 +78,12 @@ Core endpoints:
 | `GET /api/v1/browser/sis/page` | Read structured state from the bound SIS page |
 | `GET /api/v1/browser/sis/cart` | Read structured cart rows without submitting anything |
 | `POST /api/v1/browser/sis/preflight` | Compare user expectations with the live read-only SIS cart |
+| `POST /api/v1/browser/sis/navigate-and-preflight` | Compose restricted navigation and strict preflight in one task |
 | `GET /api/v1/integration/status` | Authenticated host-neutral service, capability, and connection status |
 | `POST /api/v1/integration/sis/sync` | Authenticated read-only synchronization of temporary and scheduled courses |
 | `POST /api/v1/integration/sis/navigate` | Audited restricted navigation from Portal/SIS to Enrollment Add Classes |
 | `POST /api/v1/integration/sis/preflight` | Authenticated host-neutral live preflight |
+| `POST /api/v1/integration/sis/navigate-and-preflight` | Preferred authenticated one-step Portal navigation and preflight |
 | `POST /api/v1/chat` | Execute the existing Knowledge Agent through the platform boundary |
 | `POST /api/v1/sis/preflight` | Run the zero-network SIS simulator |
 | `GET /api/v1/tasks/{task_id}/events` | Stream task events over SSE |
@@ -137,15 +140,17 @@ extension popup and bind an SIS tab that you logged into yourself.
 After completing Portal login and MFA yourself, keep the Portal tab active and
 select **Bind active HKU tab**, then **Open Enrollment Add Classes**. Both the
 authenticated modern `studentportal.hku.hk` host and the legacy Portal redirect
-host are recognized. The command opens the verified SIS sign-on destination in
-the already-bound tab and,
-after confirming the SIS session, opens the hard-coded Add Classes component. It accepts
+host are recognized. The command activates the verified native Portal SIS entry,
+then binds the resulting verified SIS tab and opens the hard-coded Add Classes
+component after confirming the SIS session. It accepts
 only one validated target term label—never a URL, selector, coordinate, script,
 or course—and stops safely on unknown or ambiguous pages.
 
 On **SIS Preflight**, enter the expected term and one `COURSE | SECTION` entry
-per line, then select **Run live read-only preflight**. Class numbers are read
-from SIS and shown in the matched or
+per line, then select **Navigate from Portal and run preflight** for the complete
+one-step flow. The older manual controls remain available for diagnostics and
+can run preflight against an already-open SIS cart. Class numbers are read from
+SIS and shown in the matched or
 unexpected concrete course rows; users do not enter them. The result reports
 matched, missing, unexpected, and ambiguous entries. `ready: true` is returned
 only when the page, login state, term, and complete course/section set all match.

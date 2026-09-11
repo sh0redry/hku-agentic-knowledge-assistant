@@ -60,6 +60,13 @@ export declare class HKUAgentsClient {
     navigateToEnrollmentAddClasses(input: {
         term_label: string;
     }, signal?: AbortSignal): Promise<IntegrationEnvelope>;
+    navigateAndPreflight(input: {
+        term_label: string;
+        expected_courses: Array<{
+            course_code: string;
+            section: string;
+        }>;
+    }, signal?: AbortSignal): Promise<IntegrationEnvelope>;
     preflight(input: {
         term_label: string;
         expected_courses: Array<{

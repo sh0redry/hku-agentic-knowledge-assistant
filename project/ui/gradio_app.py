@@ -176,6 +176,31 @@ def create_gradio_ui(container):
                 }
             )
 
+    async def navigate_and_preflight_handler(term_label, expected_text):
+        try:
+            response = await asyncio.to_thread(
+                api_client.integration_sis_navigate_and_preflight,
+                {
+                    "term_label": term_label.strip(),
+                    "expected_courses": _expected_course_rows(expected_text),
+                },
+            )
+            return _pretty(response)
+        except Exception as exc:
+            return _pretty(
+                {
+                    "api_version": "v1",
+                    "ok": False,
+                    "read_only": True,
+                    "result": None,
+                    "task": None,
+                    "error": {
+                        "code": getattr(exc, "code", type(exc).__name__),
+                        "message": str(exc),
+                    },
+                }
+            )
+
     async def live_sis_call(action, operation):
         completed_at = lambda: datetime.now(timezone.utc).isoformat(timespec="seconds")
         try:
@@ -392,9 +417,10 @@ def create_gradio_ui(container):
             )
 
             gr.Markdown(
-                "## Live enrollment preflight (read-only)\n"
-                "Enter only the courses you expect. HKU AGENTS reads the current term and "
-                "Temporary Course List directly from the bound SIS tab."
+                "## One-step enrollment preflight (read-only)\n"
+                "Enter only the courses you expect. The preferred action starts from the "
+                "authenticated Portal, binds it automatically, opens the requested SIS term, reads the Temporary "
+                "Course List, and performs strict comparison in one task."
             )
             with gr.Row():
                 live_expected = gr.Textbox(
@@ -402,8 +428,31 @@ def create_gradio_ui(container):
                     lines=5,
                     label="Expected: COURSE | SECTION",
                 )
+            navigate_and_preflight_button = gr.Button(
+                "Navigate from Portal and run preflight", variant="primary"
+            )
+            navigate_and_preflight_output = gr.Code(
+                value=(
+                    "Keep the authenticated Portal tab active, then run the combined "
+                    "read-only check."
+                ),
+                language="json",
+                label="Automatic navigation and preflight result",
+            )
+            navigate_and_preflight_button.click(
+                navigate_and_preflight_handler,
+                inputs=[live_term_label, live_expected],
+                outputs=navigate_and_preflight_output,
+                show_progress="minimal",
+                queue=False,
+            )
+
+            gr.Markdown(
+                "Use the manual preflight below only when Enrollment Add Classes is "
+                "already open and bound."
+            )
             live_preflight_button = gr.Button(
-                "Run live read-only preflight", variant="primary"
+                "Run preflight on current SIS page"
             )
             live_preflight_output = gr.Code(
                 value="Bind the SIS tab and open Enrollment Add Classes first.",

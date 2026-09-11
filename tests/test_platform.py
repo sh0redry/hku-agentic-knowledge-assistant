@@ -157,6 +157,7 @@ class PlatformAPITests(unittest.TestCase):
                 "knowledge.answer",
                 "sis.enrollment.preflight",
                 "sis.enrollment.live_preflight",
+                "sis.enrollment.navigate_and_preflight",
                 "sis.navigation.open_enrollment_add_classes",
             },
         )
@@ -297,6 +298,86 @@ class PlatformAPITests(unittest.TestCase):
         body = response.json()
         self.assertFalse(body["ok"])
         self.assertEqual(body["error"]["code"], "INVALID_REQUEST")
+
+    def test_integration_navigate_and_preflight_composes_one_read_only_task(self):
+        visible = {
+            "course_code": "COMP2119",
+            "section": "1A",
+            "class_number": "12345",
+        }
+        navigation = navigation_result()
+        navigation["snapshot"] = live_cart_snapshot(courses=[visible])
+        bind = AsyncMock(
+            return_value={
+                "origin": "https://studentportal.hku.hk",
+                "page_kind": "portal_home",
+                "logged_in": True,
+            }
+        )
+        navigate = AsyncMock(return_value=navigation)
+        self.container.connectors["sis_browser"].bind_hku_tab = bind
+        self.container.connectors["sis_browser"].open_enrollment_add_classes = navigate
+
+        response = self.client.post(
+            "/api/v1/integration/sis/navigate-and-preflight",
+            headers=self.integration_headers("combined-1"),
+            json=live_preflight_payload(),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertTrue(body["ok"])
+        self.assertTrue(body["read_only"])
+        self.assertEqual(
+            body["task"]["capability"], "sis.enrollment.navigate_and_preflight"
+        )
+        self.assertEqual(body["task"]["correlation_id"], "combined-1")
+        self.assertTrue(body["result"]["ready"])
+        self.assertEqual(body["result"]["sis_write_requests_sent"], 0)
+        self.assertEqual(
+            body["result"]["binding"]["origin"], "https://studentportal.hku.hk"
+        )
+        self.assertEqual(
+            body["result"]["navigation"]["steps"],
+            [
+                "portal_to_sis",
+                "sis_fixed_route_to_enrollment_add_classes",
+                "sis_select_term",
+            ],
+        )
+        self.assertEqual(body["result"]["course_lists"]["temporary_courses"], [visible])
+        self.assertEqual(body["result"]["preflight"]["matched_courses"], [visible])
+        bind.assert_awaited_once_with()
+        navigate.assert_awaited_once_with("2026-27 Sem 2")
+
+    def test_integration_navigate_and_preflight_preserves_domain_mismatch(self):
+        bind = AsyncMock(
+            return_value={
+                "origin": "https://studentportal.hku.hk",
+                "page_kind": "portal_home",
+                "logged_in": True,
+            }
+        )
+        navigate = AsyncMock(return_value=navigation_result())
+        self.container.connectors["sis_browser"].bind_hku_tab = bind
+        self.container.connectors["sis_browser"].open_enrollment_add_classes = navigate
+
+        response = self.client.post(
+            "/api/v1/integration/sis/navigate-and-preflight",
+            headers=self.integration_headers("combined-mismatch"),
+            json=live_preflight_payload(),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertTrue(body["ok"])
+        self.assertFalse(body["result"]["ready"])
+        self.assertFalse(body["result"]["preflight"]["ready"])
+        self.assertEqual(
+            body["result"]["preflight"]["missing_courses"],
+            [{"course_code": "COMP2119", "section": "1A"}],
+        )
+        self.assertEqual(body["result"]["sis_write_requests_sent"], 0)
 
     def test_integration_validation_errors_use_the_versioned_envelope(self):
         payload = live_preflight_payload()

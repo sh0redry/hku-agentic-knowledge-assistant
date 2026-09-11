@@ -116,7 +116,7 @@ test('client preserves stable API errors without leaking the token', async () =>
   }
 })
 
-test('plugin registers exactly four restricted HKU tools and forwards preflight input', async () => {
+test('plugin registers exactly five restricted HKU tools and forwards preflight input', async () => {
   const previous = process.env.INTEGRATION_API_TOKEN
   process.env.INTEGRATION_API_TOKEN = TOKEN
   let receivedBody
@@ -139,6 +139,7 @@ test('plugin registers exactly four restricted HKU tools and forwards preflight 
           tools.map(tool => tool.name),
           [
             'hku_sis_status',
+            'hku_sis_navigate_and_preflight',
             'hku_sis_open_enrollment_add_classes',
             'hku_sis_sync_course_lists',
             'hku_sis_preflight',
@@ -205,6 +206,55 @@ test('navigation tool sends only the validated target term to the fixed local en
           term_label: '2026-27 Sem 2',
         })
         assert.equal(result.result.navigation_only, true)
+        assert.equal(result.result.sis_write_requests_sent, 0)
+      },
+    )
+  } finally {
+    if (previous === undefined) delete process.env.INTEGRATION_API_TOKEN
+    else process.env.INTEGRATION_API_TOKEN = previous
+  }
+})
+
+test('combined tool forwards only term and expected course intent', async () => {
+  const previous = process.env.INTEGRATION_API_TOKEN
+  process.env.INTEGRATION_API_TOKEN = TOKEN
+  try {
+    await withServer(
+      (request, response) => {
+        assert.equal(request.method, 'POST')
+        assert.equal(request.url, '/api/v1/integration/sis/navigate-and-preflight')
+        const chunks = []
+        request.on('data', chunk => chunks.push(chunk))
+        request.on('end', () => {
+          assert.deepEqual(JSON.parse(Buffer.concat(chunks).toString('utf8')), {
+            term_label: '2026-27 Sem 2',
+            expected_courses: [{ course_code: 'COMP3297', section: '2B' }],
+          })
+          response.setHeader('content-type', 'application/json')
+          response.end(
+            JSON.stringify(
+              envelope({
+                ready: true,
+                read_only: true,
+                sis_write_requests_sent: 0,
+              }),
+            ),
+          )
+        })
+      },
+      async baseUrl => {
+        const tools = []
+        const ctx = { tools: { register(tool) { tools.push(tool) } } }
+        apply(ctx, { baseUrl, tokenEnv: 'INTEGRATION_API_TOKEN', timeoutMs: 5000 })
+        const combined = tools.find(tool => tool.name === 'hku_sis_navigate_and_preflight')
+        const result = await combined.execute(
+          {
+            term_label: '2026-27 Sem 2',
+            expected_courses: [{ course_code: 'COMP3297', section: '2B' }],
+          },
+          { signal: new AbortController().signal },
+        )
+        assert.equal(result.result.ready, true)
         assert.equal(result.result.sis_write_requests_sent, 0)
       },
     )

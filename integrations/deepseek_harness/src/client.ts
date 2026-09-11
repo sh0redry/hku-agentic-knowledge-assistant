@@ -170,6 +170,21 @@ export class HKUAgentsClient {
     return this.request('POST', '/api/v1/integration/sis/navigate', input, signal)
   }
 
+  navigateAndPreflight(
+    input: {
+      term_label: string
+      expected_courses: Array<{ course_code: string; section: string }>
+    },
+    signal?: AbortSignal,
+  ): Promise<IntegrationEnvelope> {
+    return this.request(
+      'POST',
+      '/api/v1/integration/sis/navigate-and-preflight',
+      input,
+      signal,
+    )
+  }
+
   preflight(
     input: {
       term_label: string

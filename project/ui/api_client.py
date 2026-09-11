@@ -105,3 +105,8 @@ class HKUAgentsAPIClient:
 
     def integration_sis_preflight(self, payload: dict) -> dict:
         return self._integration_request("POST", "/sis/preflight", json=payload)
+
+    def integration_sis_navigate_and_preflight(self, payload: dict) -> dict:
+        return self._integration_request(
+            "POST", "/sis/navigate-and-preflight", json=payload
+        )

@@ -6,7 +6,7 @@ export const inject = ['tools'];
 export const Config = Schema.object({
     baseUrl: Schema.string().default('http://127.0.0.1:7860'),
     tokenEnv: Schema.string().default('INTEGRATION_API_TOKEN'),
-    timeoutMs: Schema.number().default(40000),
+    timeoutMs: Schema.number().default(45000),
 });
 const envelopeOutput = {
     schema: { type: 'json' },
@@ -24,6 +24,43 @@ export function apply(ctx, config) {
         timeoutMs: config.timeoutMs,
         async execute(_args, execution) {
             return client.status(execution.signal);
+        },
+    }));
+    ctx.tools.register(defineTool({
+        name: 'hku_sis_navigate_and_preflight',
+        description: 'Preferred one-step read-only SIS check. After the user manually completes HKU Portal login and MFA, bind the available verified Portal tab, follow only the fixed Portal-to-SIS path, select the exact requested term, read the Temporary Course List, and strictly compare it with the complete expected course/section set. Check result.ready for the domain decision. This cannot search, add, delete, enter Step 2/3, or submit.',
+        parameters: {
+            term_label: {
+                type: 'string',
+                required: true,
+                description: 'Exact SIS term label to select, for example 2026-27 Sem 2.',
+            },
+            expected_courses: {
+                type: 'array',
+                required: true,
+                description: 'Complete expected Temporary Course List as course code and section pairs.',
+                items: {
+                    type: 'object',
+                    additionalProperties: false,
+                    properties: {
+                        course_code: {
+                            type: 'string',
+                            required: true,
+                            description: 'HKU course code, for example COMP3297.',
+                        },
+                        section: {
+                            type: 'string',
+                            required: true,
+                            description: 'SIS section identifier, for example 2B.',
+                        },
+                    },
+                },
+            },
+        },
+        output: envelopeOutput,
+        timeoutMs: config.timeoutMs,
+        async execute(args, execution) {
+            return client.navigateAndPreflight(args, execution.signal);
         },
     }));
     ctx.tools.register(defineTool({

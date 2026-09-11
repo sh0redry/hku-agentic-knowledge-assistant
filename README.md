@@ -62,8 +62,9 @@ course search, Step 2/3, and all SIS enrollment writes remain outside automation
 
 The local Gradio GUI remains the reference testing and visualization workbench.
 An authenticated, host-neutral `/api/v1/integration/*` boundary now exposes
-read-only status, SIS course-list synchronization, and live preflight for the GUI
-and external agent hosts. A first-party read-only DeepSeek Harness/Cordis adapter
+read-only status, SIS course-list synchronization, live preflight, and a combined
+Portal-navigation-plus-preflight task for the GUI and external agent hosts. A
+first-party read-only DeepSeek Harness/Cordis adapter
 is available in `integrations/deepseek_harness`; the same API remains suitable
 for a future Hermes adapter. Configure a random
 `INTEGRATION_API_TOKEN` of at least 32 characters in `project/.env`, or use the
@@ -84,7 +85,8 @@ For the optional read-only SIS connection, load `browser_runtime/extension` as
 an unpacked extension and pair it from the GUI's **Connections** tab. The
 extension has no cookie or SIS write permissions.
 
-The GUI's live preflight accepts only the expected term, course code, and section.
+The GUI's preferred one-step preflight accepts only the expected term, course
+code, and section, then performs fixed Portal-to-SIS navigation before reading.
 The current SIS state and term-specific class number are always obtained from the
 bound browser tab and cannot be supplied by chat or by the user-facing form.
 

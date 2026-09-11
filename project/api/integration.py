@@ -187,4 +187,42 @@ def create_integration_router(expected_token: str) -> APIRouter:
             result=record.result,
         )
 
+    @router.post("/sis/navigate-and-preflight", response_model=IntegrationResponse)
+    async def navigate_and_preflight(
+        body: SISLivePreflightRequest,
+        request: Request,
+        correlation_id: str = Depends(authorize),
+    ):
+        record = await request.app.state.container.tasks.submit_and_wait(
+            "sis.enrollment.navigate_and_preflight",
+            body.model_dump(mode="json"),
+            correlation_id=correlation_id,
+        )
+        if record.status != TaskStatus.COMPLETED:
+            task_error = record.error or {
+                "code": "TASK_FAILED",
+                "message": "Automatic SIS navigation and preflight did not complete.",
+            }
+            error_code = task_error.get("code", "TASK_FAILED")
+            if error_code in {"TERM_NOT_AVAILABLE", "TERM_MISMATCH"}:
+                recovery = "Choose one of the term labels currently shown by SIS."
+            else:
+                recovery = (
+                    "Keep the authenticated HKU Portal tab active, verify the extension "
+                    "connection, and retry. Login and MFA always remain manual."
+                )
+            return response(
+                correlation_id,
+                ok=False,
+                task=record,
+                error={
+                    "code": error_code,
+                    "message": task_error.get(
+                        "message", "Automatic SIS navigation and preflight failed."
+                    ),
+                    "recovery": recovery,
+                },
+            )
+        return response(correlation_id, ok=True, task=record, result=record.result)
+
     return router

@@ -335,4 +335,12 @@ def create_api_app(
         )
         return {"task": _dump(record), "result": record.result}
 
+    @app.post("/api/v1/browser/sis/navigate-and-preflight")
+    async def navigate_and_preflight(body: SISLivePreflightRequest):
+        record = await app.state.container.tasks.submit_and_wait(
+            "sis.enrollment.navigate_and_preflight",
+            body.model_dump(mode="json"),
+        )
+        return {"task": _dump(record), "result": record.result}
+
     return app
