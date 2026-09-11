@@ -206,8 +206,34 @@ def create_gradio_ui(container):
                 }
             )
 
-    async def bind_sis_tab():
-        return await live_sis_call("bind_tab", api_client.bind_sis_tab)
+    async def bind_hku_tab():
+        return await live_sis_call("bind_hku_tab", api_client.bind_hku_tab)
+
+    async def open_enrollment_add_classes(term_label: str):
+        try:
+            # This call already returns the versioned Integration API envelope.
+            # Return it directly so a domain/API failure is not hidden under an
+            # outer GUI-level `ok: true` wrapper.
+            return _pretty(
+                await asyncio.to_thread(
+                    api_client.open_enrollment_add_classes,
+                    term_label,
+                )
+            )
+        except Exception as exc:
+            return _pretty(
+                {
+                    "api_version": "v1",
+                    "ok": False,
+                    "read_only": True,
+                    "result": None,
+                    "task": None,
+                    "error": {
+                        "code": getattr(exc, "code", type(exc).__name__),
+                        "message": str(exc),
+                    },
+                }
+            )
 
     async def inspect_sis_page():
         return await live_sis_call("inspect_page", api_client.inspect_sis_page)
@@ -322,12 +348,18 @@ def create_gradio_ui(container):
 
         with gr.Tab("SIS Preflight"):
             gr.Markdown(
-                "## Live browser inspection (read-only)\n"
-                "Bind an already-open SIS tab or inspect its structured page state. "
-                "These commands cannot click controls or submit forms."
+                "## Restricted Portal navigation and live inspection\n"
+                "After you complete Portal login and MFA, bind the active HKU tab. "
+                "HKU AGENTS may open only the fixed SIS and Enrollment Add Classes "
+                "targets. It cannot search courses, enter Step 2/3, or submit forms."
+            )
+            live_term_label = gr.Textbox(
+                value="2026-27 Sem 2",
+                label="Target SIS term",
             )
             with gr.Row():
-                bind_sis_button = gr.Button("Bind open SIS tab", variant="primary")
+                bind_hku_button = gr.Button("Bind active HKU tab", variant="primary")
+                navigate_sis_button = gr.Button("Open Enrollment Add Classes")
                 inspect_sis_button = gr.Button("Inspect current SIS page")
                 inspect_cart_button = gr.Button("Inspect cart")
             live_sis_output = gr.Code(
@@ -335,9 +367,16 @@ def create_gradio_ui(container):
                 language="json",
                 label="Live read-only result",
             )
-            bind_sis_button.click(
-                bind_sis_tab,
+            bind_hku_button.click(
+                bind_hku_tab,
                 outputs=live_sis_output,
+                queue=False,
+            )
+            navigate_sis_button.click(
+                open_enrollment_add_classes,
+                inputs=live_term_label,
+                outputs=live_sis_output,
+                show_progress="minimal",
                 queue=False,
             )
             inspect_sis_button.click(
@@ -358,9 +397,6 @@ def create_gradio_ui(container):
                 "Temporary Course List directly from the bound SIS tab."
             )
             with gr.Row():
-                live_term_label = gr.Textbox(
-                    value="2026-27 Sem 2", label="Expected SIS term"
-                )
                 live_expected = gr.Textbox(
                     value="COMP2119 | 1A",
                     lines=5,

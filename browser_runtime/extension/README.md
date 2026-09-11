@@ -1,8 +1,11 @@
-# HKU AGENTS SIS Bridge (read-only)
+# HKU AGENTS Portal/SIS Bridge
 
-This unpacked Manifest V3 extension connects an already-open HKU SIS tab to the
-local HKU AGENTS process. It never enters credentials, reads cookies, clicks SIS
-controls, or submits forms.
+This unpacked Manifest V3 extension connects authenticated HKU Portal and SIS
+tabs to the local HKU AGENTS process. It can follow only two fixed navigation
+targets: the Portal SIS sign-on entry and the exact SIS `Enrollment Add Classes`
+component route. It
+never enters credentials, reads cookies, searches courses, enters Step 2/3, or
+submits forms.
 
 ## Install for local development
 
@@ -11,8 +14,15 @@ controls, or submits forms.
 3. Select this `browser_runtime/extension` directory.
 4. In HKU AGENTS, open **Connections** and copy the current pairing token.
 5. Open the extension popup, paste the token, and select **Save and connect**.
-6. Log in to HKU SIS yourself, then select **Bind open SIS tab**.
-7. Open **Enrollment Add Classes** before inspecting the cart or running live preflight.
+6. Log in to HKU Portal and complete MFA yourself. The authenticated modern
+   Portal is served from `https://studentportal.hku.hk`; the legacy
+   `https://hkuportal.hku.hk` redirect origin is also allowed.
+7. Keep the authenticated Portal tab active and select **Bind active HKU tab**.
+8. In the GUI or Harness, run **Open Enrollment Add Classes**. The extension
+   activates the Portal's exact verified SIS entry so its SSO flow is preserved,
+   binds only the newly opened verified SIS tab (or the bound tab if it navigates
+   in place), opens the hard-coded Add Classes component route after SIS
+   authentication, then verifies the cart page before returning.
 
 When the unpacked extension receives a new ID, restart HKU AGENTS to clear the
 in-memory development pin, or set `BROWSER_EXTENSION_IDS` explicitly in
@@ -20,11 +30,20 @@ in-memory development pin, or set `BROWSER_EXTENSION_IDS` explicitly in
 
 ## Security contract
 
-- Exact SIS host permission only: `https://sis-main.hku.hk/*`.
+- Exact HKU host permissions only: `https://studentportal.hku.hk/*`,
+  `https://hkuportal.hku.hk/*`, and `https://sis-main.hku.hk/*`.
 - Local companion permission only: `http://127.0.0.1/*`.
 - No `tabs`, cookies, downloads, clipboard, debugger, webRequest, or form-control permissions.
-- Named read-only commands only; arbitrary JavaScript and arbitrary selectors are rejected.
+- Named commands only; arbitrary JavaScript, selectors, URLs, coordinates, and
+  course values are rejected. A term must match an exact SIS term label.
+- The Portal entry click is restricted to a uniquely resolved, allow-listed SIS
+  sign-on destination; unrelated Portal controls cannot be clicked.
+- Navigation stops when login is incomplete, the target is missing or ambiguous,
+  an origin differs, or the verified destination does not become ready in time.
 - Live preflight reads and compares the current cart but cannot modify it.
 - Only structured page state leaves the content script. Full HTML is never sent.
 - Temporary Course List rows and Class Schedule rows are returned in separate fields.
-- Real SIS POSTs and enrollment actions are outside this version.
+- The SIS listener loads at `document_start` so legacy PeopleSoft frame pages can
+  be observed even when their top-level document does not promptly become idle.
+- Only an exact validated term exposed by the SIS Select Term page may be
+  selected. Course search, delete, Step 2/3, and all enrollment writes remain absent.

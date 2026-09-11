@@ -18,9 +18,15 @@ SENSITIVE_KEY_PATTERN = re.compile(
 
 class BrowserCommandName(str, Enum):
     HEALTH = "browser.health"
+    BIND_HKU_TAB = "hku.bind_tab"
+    INSPECT_PORTAL = "hku.inspect_portal"
+    OPEN_SIS = "hku.open_sis"
+    OPEN_ENROLLMENT_ADD_CLASSES = "hku.open_enrollment_add_classes"
     BIND_SIS_TAB = "sis.bind_tab"
     INSPECT_PAGE = "sis.inspect_page"
     INSPECT_CART = "sis.inspect_cart"
+    OPEN_SIS_ENROLLMENT_ADD_CLASSES = "sis.open_enrollment_add_classes"
+    SELECT_TERM = "sis.select_term"
     PREFLIGHT = "sis.preflight"
     GET_STATUS = "sis.get_status"
 

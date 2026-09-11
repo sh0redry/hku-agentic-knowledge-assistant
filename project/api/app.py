@@ -19,7 +19,11 @@ from api.integration import IntegrationAPIError, create_integration_router
 from api.schemas import ActionConfirmRequest, ActionDraftRequest, ActionExecuteRequest, ChatRequest
 from application import ApplicationContainer
 from browser_bridge.service import BrowserBridgeError
-from connectors.sis.models import SISLivePreflightRequest, SISPreflightRequest
+from connectors.sis.models import (
+    SISLivePreflightRequest,
+    SISNavigationRequest,
+    SISPreflightRequest,
+)
 import config
 
 
@@ -183,6 +187,29 @@ def create_api_app(
     async def bind_sis_tab():
         try:
             return await app.state.container.connectors["sis_browser"].bind_tab()
+        except BrowserBridgeError as exc:
+            raise bridge_http_error(exc) from exc
+
+    @app.post("/api/v1/browser/hku/bind")
+    async def bind_hku_tab():
+        try:
+            return await app.state.container.connectors["sis_browser"].bind_hku_tab()
+        except BrowserBridgeError as exc:
+            raise bridge_http_error(exc) from exc
+
+    @app.post("/api/v1/browser/hku/open-sis")
+    async def open_sis_from_portal():
+        try:
+            return await app.state.container.connectors["sis_browser"].open_sis()
+        except BrowserBridgeError as exc:
+            raise bridge_http_error(exc) from exc
+
+    @app.post("/api/v1/browser/sis/open-enrollment-add-classes")
+    async def open_enrollment_add_classes(body: SISNavigationRequest | None = None):
+        try:
+            return await app.state.container.connectors[
+                "sis_browser"
+            ].open_enrollment_add_classes(body.term_label if body else None)
         except BrowserBridgeError as exc:
             raise bridge_http_error(exc) from exc
 

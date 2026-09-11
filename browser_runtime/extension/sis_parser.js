@@ -105,16 +105,34 @@
     return null;
   }
 
+  function availableTerms(documentObject) {
+    const pageText = normalizeText(documentObject.body && documentObject.body.textContent);
+    const terms = [];
+    const seen = new Set();
+    const pattern = /\b(20[0-9]{2}-[0-9]{2})\s+Sem(?:ester)?\s+([12])\b/gi;
+    for (const match of pageText.matchAll(pattern)) {
+      const term = `${match[1]} Sem ${match[2]}`;
+      if (!seen.has(term)) {
+        seen.add(term);
+        terms.push(term);
+      }
+    }
+    return terms.slice(0, 10);
+  }
+
   function classifyPage(documentObject, url) {
     const bodyText = normalizeText(documentObject.body && documentObject.body.textContent).toLowerCase();
     const hasPassword = Boolean(documentObject.querySelector("input[type='password']"));
     if (hasPassword || /sign in|log in/.test(bodyText.slice(0, 2500))) return "login";
     if (/access denied|not authorized|session (?:has )?expired/.test(bodyText)) return "blocked";
-    if (
-      /temporary course list|enrollment shopping cart|course shopping cart|enrollment add classes/.test(
-        bodyText
-      )
-    ) {
+    if (/select term/.test(bodyText) && /select a term then select continue/.test(bodyText)) {
+      return "term_selection";
+    }
+    // The left SIS navigation frame always contains the text "Enrollment Add
+    // Classes". It is therefore not sufficient evidence that the main cart
+    // page is open. The target page itself always exposes a course-list/cart
+    // marker, which avoids treating the menu frame as a successful target.
+    if (/temporary course list|enrollment shopping cart|course shopping cart/.test(bodyText)) {
       return "cart";
     }
     if (/enrollment status|class schedule/.test(bodyText)) return "status";
@@ -233,7 +251,7 @@
 
   function parserDiagnostics(documentObject, boundaries, groups) {
     return {
-      parser_version: "0.2.0",
+      parser_version: "0.2.2",
       table_count: documentObject.querySelectorAll("table").length,
       row_count: documentObject.querySelectorAll("tr").length,
       cart_marker_found: Boolean(boundaries.cartMarker),
@@ -247,6 +265,7 @@
 
   function inspectDocument(documentObject, locationObject) {
     const pageKind = classifyPage(documentObject, locationObject.href || "");
+    const terms = pageKind === "term_selection" ? availableTerms(documentObject) : [];
     const boundaries = createCourseBoundaries(documentObject);
     const groups = pageKind === "cart"
       ? extractCartCourseGroups(documentObject, boundaries)
@@ -263,7 +282,8 @@
       origin: SIS_ORIGIN,
       logged_in: pageKind === "login" ? false : sisMarker ? true : null,
       page_kind: pageKind,
-      term_label: selectedTerm(documentObject),
+      term_label: pageKind === "term_selection" ? null : selectedTerm(documentObject),
+      available_terms: terms,
       course_count: primaryCourses.length,
       temporary_course_count: groups.temporary.length,
       schedule_course_count: groups.schedule.length,
@@ -275,7 +295,15 @@
   }
 
   function snapshotScore(snapshot) {
-    const kindScore = { cart: 500, status: 400, home: 300, blocked: 250, login: 200, unknown: 0 };
+    const kindScore = {
+      cart: 500,
+      term_selection: 450,
+      status: 400,
+      home: 300,
+      blocked: 250,
+      login: 200,
+      unknown: 0
+    };
     return (kindScore[snapshot.page_kind] || 0) +
       (snapshot.term_label ? 40 : 0) +
       Math.min(snapshot.course_count, 20);
@@ -330,12 +358,14 @@
   const api = {
     chooseBestSnapshot,
     classifyPage,
+    collectSameOriginDocuments,
     extractCartCourseGroups,
     extractCourses,
     inspect,
     normalizeText,
     parseCourseRow,
-    selectedTerm
+    selectedTerm,
+    availableTerms
   };
   root.HKUSISParser = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;

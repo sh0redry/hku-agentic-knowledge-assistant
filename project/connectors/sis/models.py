@@ -65,3 +65,14 @@ class SISLivePreflightRequest(BaseModel):
 
     term_label: str = Field(pattern=r"^\d{4}-\d{2}\s+Sem\s+[12]$")
     expected_courses: list[ExpectedCourseSelection] = Field(min_length=1, max_length=50)
+
+
+class SISNavigationRequest(BaseModel):
+    """Optional validated term intent; no URL, selector, or script is accepted."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    term_label: str | None = Field(
+        default=None,
+        pattern=r"^\d{4}-\d{2}\s+Sem\s+[12]$",
+    )

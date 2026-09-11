@@ -60,6 +60,13 @@ class HKUAgentsAPIClient:
     def bind_sis_tab(self) -> dict:
         return self._request("POST", "/api/v1/browser/sis/bind")
 
+    def bind_hku_tab(self) -> dict:
+        return self._request("POST", "/api/v1/browser/hku/bind")
+
+    def open_enrollment_add_classes(self, term_label: str | None = None) -> dict:
+        payload = {} if term_label is None else {"term_label": term_label}
+        return self._integration_request("POST", "/sis/navigate", json=payload)
+
     def inspect_sis_page(self) -> dict:
         return self._request("GET", "/api/v1/browser/sis/page")
 

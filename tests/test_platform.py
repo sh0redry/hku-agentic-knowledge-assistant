@@ -35,7 +35,7 @@ from agents.models import (
 from api.app import create_api_app
 from application import ApplicationContainer
 from agents.knowledge.agent import KnowledgeAnswerCapability
-from browser_bridge.models import HeartbeatMessage, SISPageSnapshot
+from browser_bridge.models import HeartbeatMessage, SISNavigationResult, SISPageSnapshot
 from browser_bridge.service import BrowserBridgeError, BrowserBridgeService
 from connectors.sis.protocol import (
     BrowserCommand,
@@ -85,6 +85,24 @@ def live_cart_snapshot(*, term_label: str = "2026-27 Sem 2", courses=None) -> di
         "visible_courses": courses or [],
         "temporary_courses": courses or [],
         "schedule_courses": [],
+    }
+
+
+def navigation_result() -> dict:
+    return {
+        "read_only": True,
+        "navigation_only": True,
+        "sis_write_requests_sent": 0,
+        "source_origin": "https://studentportal.hku.hk",
+        "source_page_kind": "portal_home",
+        "target_origin": "https://sis-main.hku.hk",
+        "target_page_kind": "cart",
+        "steps": [
+            "portal_to_sis",
+            "sis_fixed_route_to_enrollment_add_classes",
+            "sis_select_term",
+        ],
+        "snapshot": live_cart_snapshot(),
     }
 
 
@@ -139,6 +157,7 @@ class PlatformAPITests(unittest.TestCase):
                 "knowledge.answer",
                 "sis.enrollment.preflight",
                 "sis.enrollment.live_preflight",
+                "sis.navigation.open_enrollment_add_classes",
             },
         )
         connections = self.client.get("/api/v1/connections").json()["connections"]
@@ -224,6 +243,60 @@ class PlatformAPITests(unittest.TestCase):
         self.assertEqual(body["correlation_id"], "preflight-1")
         self.assertEqual(body["task"]["correlation_id"], "preflight-1")
         self.assertEqual(body["result"]["sis_write_requests_sent"], 0)
+
+    def test_integration_navigation_is_audited_and_accepts_only_term_intent(self):
+        navigate = AsyncMock(return_value=navigation_result())
+        self.container.connectors["sis_browser"].open_enrollment_add_classes = navigate
+
+        response = self.client.post(
+            "/api/v1/integration/sis/navigate",
+            headers=self.integration_headers("navigate-1"),
+            json={"term_label": "2026-27 Sem 2"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertTrue(body["ok"])
+        self.assertTrue(body["read_only"])
+        self.assertTrue(body["result"]["navigation_only"])
+        self.assertEqual(body["result"]["sis_write_requests_sent"], 0)
+        self.assertEqual(body["result"]["target_page_kind"], "cart")
+        self.assertEqual(body["task"]["correlation_id"], "navigate-1")
+        self.assertEqual(body["task"]["capability"], "sis.navigation.open_enrollment_add_classes")
+        navigate.assert_awaited_once_with("2026-27 Sem 2")
+        audit = self.client.get("/api/v1/audit").json()["events"]
+        self.assertTrue(any(item["task_id"] == body["task"]["id"] for item in audit))
+
+    def test_integration_navigation_fails_closed_with_stable_browser_error(self):
+        navigate = AsyncMock(
+            side_effect=BrowserBridgeError(
+                "NAVIGATION_TARGET_AMBIGUOUS",
+                "Enrollment Add Classes is ambiguous; navigation stopped safely.",
+            )
+        )
+        self.container.connectors["sis_browser"].open_enrollment_add_classes = navigate
+
+        body = self.client.post(
+            "/api/v1/integration/sis/navigate",
+            headers=self.integration_headers(),
+        ).json()
+
+        self.assertFalse(body["ok"])
+        self.assertEqual(body["task"]["status"], "failed")
+        self.assertEqual(body["error"]["code"], "NAVIGATION_TARGET_AMBIGUOUS")
+        self.assertIsNone(body["result"])
+
+    def test_integration_navigation_rejects_invalid_term_label(self):
+        response = self.client.post(
+            "/api/v1/integration/sis/navigate",
+            headers=self.integration_headers("navigate-invalid"),
+            json={"term_label": "Sem 2"},
+        )
+
+        self.assertEqual(response.status_code, 422)
+        body = response.json()
+        self.assertFalse(body["ok"])
+        self.assertEqual(body["error"]["code"], "INVALID_REQUEST")
 
     def test_integration_validation_errors_use_the_versioned_envelope(self):
         payload = live_preflight_payload()
@@ -536,6 +609,10 @@ class SafetyFrameworkTests(unittest.TestCase):
                 {"type": "heartbeat", "tab": None, "cookie": "must-not-enter-bridge"}
             )
         with self.assertRaises(Exception):
+            SISNavigationResult.model_validate(
+                {**navigation_result(), "sis_write_requests_sent": 1}
+            )
+        with self.assertRaises(Exception):
             SISPageSnapshot.model_validate(
                 {
                     "diagnostics": {
@@ -571,12 +648,33 @@ class SafetyFrameworkTests(unittest.TestCase):
                 }
             )
         )
+        content_matches = {
+            match
+            for content_script in manifest["content_scripts"]
+            for match in content_script["matches"]
+        }
         self.assertEqual(
-            manifest["content_scripts"][0]["matches"], ["https://sis-main.hku.hk/*"]
+            content_matches,
+            {
+                "https://hkuportal.hku.hk/*",
+                "https://studentportal.hku.hk/*",
+                "https://sis-main.hku.hk/*",
+            },
         )
+        sis_content_script = next(
+            item
+            for item in manifest["content_scripts"]
+            if item["matches"] == ["https://sis-main.hku.hk/*"]
+        )
+        self.assertEqual(sis_content_script["run_at"], "document_start")
         self.assertEqual(
             manifest["host_permissions"],
-            ["https://sis-main.hku.hk/*", "http://127.0.0.1/*"],
+            [
+                "https://hkuportal.hku.hk/*",
+                "https://studentportal.hku.hk/*",
+                "https://sis-main.hku.hk/*",
+                "http://127.0.0.1/*",
+            ],
         )
 
         node = shutil.which("node")
@@ -590,6 +688,18 @@ class SafetyFrameworkTests(unittest.TestCase):
             check=False,
         )
         self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+        navigation_result_process = subprocess.run(
+            [node, str(ROOT / "tests" / "navigation.test.js")],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(
+            navigation_result_process.returncode,
+            0,
+            navigation_result_process.stderr or navigation_result_process.stdout,
+        )
 
     def test_knowledge_initialization_starts_once_in_the_background(self):
         capability = KnowledgeAnswerCapability()
@@ -650,6 +760,11 @@ class SafetyFrameworkTests(unittest.TestCase):
     def test_named_browser_protocol_and_redaction(self):
         command = BrowserCommand(command=BrowserCommandName.PREFLIGHT)
         self.assertEqual(command.protocol_version, 1)
+        navigation_command = BrowserCommand(
+            command=BrowserCommandName.OPEN_ENROLLMENT_ADD_CLASSES,
+            payload={"term_label": "2026-27 Sem 2"},
+        )
+        self.assertEqual(navigation_command.payload, {"term_label": "2026-27 Sem 2"})
         redacted = sanitize_for_log(
             {
                 "cookie": "secret",

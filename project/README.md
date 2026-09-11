@@ -71,11 +71,15 @@ Core endpoints:
 | `GET /api/v1/connections` | Connector and future browser-runtime status |
 | `GET /api/v1/browser/pairing` | Current local extension pairing information |
 | `POST /api/v1/browser/sis/bind` | Bind an open SIS tab through the read-only extension |
+| `POST /api/v1/browser/hku/bind` | Bind the active verified HKU Portal or SIS tab |
+| `POST /api/v1/browser/hku/open-sis` | Follow the fixed Portal SIS entry after manual login/MFA |
+| `POST /api/v1/browser/sis/open-enrollment-add-classes` | Follow the exact SIS Enrollment Add Classes menu item |
 | `GET /api/v1/browser/sis/page` | Read structured state from the bound SIS page |
 | `GET /api/v1/browser/sis/cart` | Read structured cart rows without submitting anything |
 | `POST /api/v1/browser/sis/preflight` | Compare user expectations with the live read-only SIS cart |
 | `GET /api/v1/integration/status` | Authenticated host-neutral service, capability, and connection status |
 | `POST /api/v1/integration/sis/sync` | Authenticated read-only synchronization of temporary and scheduled courses |
+| `POST /api/v1/integration/sis/navigate` | Audited restricted navigation from Portal/SIS to Enrollment Add Classes |
 | `POST /api/v1/integration/sis/preflight` | Authenticated host-neutral live preflight |
 | `POST /api/v1/chat` | Execute the existing Knowledge Agent through the platform boundary |
 | `POST /api/v1/sis/preflight` | Run the zero-network SIS simulator |
@@ -122,7 +126,7 @@ Run the platform tests without contacting HKU SIS or an LLM:
 python -m unittest discover -s tests -v
 ```
 
-### Connect the read-only SIS extension
+### Connect the restricted Portal/SIS extension
 
 The first browser integration is an unpacked Manifest V3 extension in
 `browser_runtime/extension`. Start HKU AGENTS, load that directory from
@@ -130,9 +134,18 @@ The first browser integration is an unpacked Manifest V3 extension in
 GUI's **Connections** tab. Copy its process-local pairing token into the
 extension popup and bind an SIS tab that you logged into yourself.
 
-On **SIS Preflight**, open Enrollment Add Classes in SIS, bind the tab, enter the
-expected term and one `COURSE | SECTION` entry per line, then select **Run live
-read-only preflight**. Class numbers are read from SIS and shown in the matched or
+After completing Portal login and MFA yourself, keep the Portal tab active and
+select **Bind active HKU tab**, then **Open Enrollment Add Classes**. Both the
+authenticated modern `studentportal.hku.hk` host and the legacy Portal redirect
+host are recognized. The command opens the verified SIS sign-on destination in
+the already-bound tab and,
+after confirming the SIS session, opens the hard-coded Add Classes component. It accepts
+only one validated target term label—never a URL, selector, coordinate, script,
+or course—and stops safely on unknown or ambiguous pages.
+
+On **SIS Preflight**, enter the expected term and one `COURSE | SECTION` entry
+per line, then select **Run live read-only preflight**. Class numbers are read
+from SIS and shown in the matched or
 unexpected concrete course rows; users do not enter them. The result reports
 matched, missing, unexpected, and ambiguous entries. `ready: true` is returned
 only when the page, login state, term, and complete course/section set all match.
@@ -142,9 +155,11 @@ and already scheduled classes in `schedule_courses`. `visible_courses` remains a
 compatibility alias for `temporary_courses`; live preflight never compares against
 `schedule_courses`.
 
-The extension has no cookie, debugger, download, clipboard, web-request, or
-form-execution permission. It accepts a fixed read-only command set and sends
-only validated page type, login state, term label, and exact course identifiers.
+The extension has no cookie, debugger, download, clipboard, web-request, tabs,
+or form-execution permission. It accepts a fixed command set and sends only
+validated page type, login state, term label, exact course identifiers, and
+sanitized navigation status. Course search, Step 2/3, and all
+enrollment writes remain unavailable.
 See `browser_runtime/extension/README.md` for setup and security details.
 
 ### Build the HKU Knowledge Base

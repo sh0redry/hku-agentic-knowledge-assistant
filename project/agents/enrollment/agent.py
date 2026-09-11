@@ -10,7 +10,12 @@ from agents.models import (
 from browser_bridge.service import BrowserBridgeError
 from connectors.sis.browser import BrowserSISConnector
 from connectors.sis.fake import FakeSISConnector
-from connectors.sis.models import CourseSelection, SISLivePreflightRequest, SISPreflightRequest
+from connectors.sis.models import (
+    CourseSelection,
+    SISLivePreflightRequest,
+    SISNavigationRequest,
+    SISPreflightRequest,
+)
 from connectors.sis.validation import evaluate_preflight
 
 
@@ -81,3 +86,36 @@ class SISLivePreflightCapability(BaseCapability):
             simulated=False,
             match_class_number=False,
         )
+
+
+class SISOpenEnrollmentAddClassesCapability(BaseCapability):
+    input_model = SISNavigationRequest
+    manifest = CapabilityManifest(
+        id="sis.navigation.open_enrollment_add_classes",
+        agent="enrollment",
+        title="Open SIS Enrollment Add Classes",
+        description=(
+            "Navigate from an authenticated HKU Portal or SIS tab to Enrollment Add "
+            "Classes through fixed browser-side targets, selecting only the exact "
+            "validated term when SIS requests it, without changing enrollment data."
+        ),
+        mode=CapabilityMode.READ,
+        risk=RiskLevel.MEDIUM,
+        confirmation=ConfirmationMode.NONE,
+        required_connections=["sis_browser"],
+        availability="local_browser_restricted_navigation",
+        input_schema="SISNavigationRequest",
+        output_schema="SISNavigationResult",
+        timeout_seconds=38,
+    )
+
+    def __init__(self, connector: BrowserSISConnector):
+        self.connector = connector
+
+    async def execute(self, validated_input: SISNavigationRequest, context: ExecutionContext) -> dict:
+        try:
+            return await self.connector.open_enrollment_add_classes(
+                validated_input.term_label
+            )
+        except BrowserBridgeError as exc:
+            raise CapabilityError(exc.code, str(exc)) from exc

@@ -56,7 +56,9 @@ It also includes a local-first HKU AGENTS platform skeleton: FastAPI, a capabili
 registry, SQLite-backed tasks and audit events, confirmation gates, SSE task
 events, a zero-network SIS preflight simulator, and an authenticated read-only
 Chrome extension bridge for inspecting and validating an already-open SIS
-Temporary Course List. Real SIS enrollment writes are not implemented.
+Temporary Course List. The extension can also follow a fixed, verified path from
+an authenticated HKU Portal tab to SIS Enrollment Add Classes. Login, MFA,
+course search, Step 2/3, and all SIS enrollment writes remain outside automation.
 
 The local Gradio GUI remains the reference testing and visualization workbench.
 An authenticated, host-neutral `/api/v1/integration/*` boundary now exposes

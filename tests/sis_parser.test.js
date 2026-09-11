@@ -37,12 +37,35 @@ assert.equal(parser.classifyPage(fakeDocument("Temporary Course List"), ""), "ca
 assert.equal(parser.classifyPage(fakeDocument("Sign In", true), ""), "login");
 assert.equal(parser.classifyPage(fakeDocument("Unrecognized content"), ""), "unknown");
 assert.equal(
+  parser.classifyPage(
+    fakeDocument(
+      "Add Classes Select Term Select a term then select Continue. " +
+      "2026-27 Sem 1 2026-27 Sem 2"
+    ),
+    ""
+  ),
+  "term_selection"
+);
+assert.deepEqual(
+  parser.availableTerms(
+    fakeDocument("2026-27 Sem 1 2026-27 Sem 2 2026-27 Sem 2")
+  ),
+  ["2026-27 Sem 1", "2026-27 Sem 2"]
+);
+assert.equal(
+  parser.classifyPage(fakeDocument("SIS Menu Enrollment Add Classes Enrollment Status"), ""),
+  "status"
+);
+assert.equal(
   parser.selectedTerm(fakeDocument("Enrollment Add Classes 2026-27 Sem 2")),
   "2026-27 Sem 2"
 );
 
 assert.equal(
-  parser.classifyPage(fakeDocument("Enrollment Add Classes 2026-27 Sem 1"), ""),
+  parser.classifyPage(
+    fakeDocument("Enrollment Add Classes 2026-27 Sem 1 Temporary Course List"),
+    ""
+  ),
   "cart"
 );
 
@@ -193,6 +216,32 @@ assert.deepEqual(
   {
     page_kind: "cart",
     term_label: "2026-27 Sem 1",
+    course_count: 0,
+    logged_in: true
+  }
+);
+
+assert.deepEqual(
+  parser.chooseBestSnapshot([
+    {
+      page_kind: "status",
+      term_label: null,
+      available_terms: [],
+      course_count: 0,
+      logged_in: true
+    },
+    {
+      page_kind: "term_selection",
+      term_label: null,
+      available_terms: ["2026-27 Sem 1", "2026-27 Sem 2"],
+      course_count: 0,
+      logged_in: null
+    }
+  ]),
+  {
+    page_kind: "term_selection",
+    term_label: null,
+    available_terms: ["2026-27 Sem 1", "2026-27 Sem 2"],
     course_count: 0,
     logged_in: true
   }

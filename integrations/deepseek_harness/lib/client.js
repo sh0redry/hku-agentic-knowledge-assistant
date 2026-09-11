@@ -90,6 +90,9 @@ export class HKUAgentsClient {
     syncCourseLists(signal) {
         return this.request('POST', '/api/v1/integration/sis/sync', undefined, signal);
     }
+    navigateToEnrollmentAddClasses(input, signal) {
+        return this.request('POST', '/api/v1/integration/sis/navigate', input, signal);
+    }
     preflight(input, signal) {
         return this.request('POST', '/api/v1/integration/sis/preflight', input, signal);
     }

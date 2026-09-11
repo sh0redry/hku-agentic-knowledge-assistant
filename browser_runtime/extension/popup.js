@@ -11,7 +11,9 @@ function showStatus(message, isError = false) {
 
 async function refreshStatus() {
   const status = await chrome.runtime.sendMessage({ type: "status" });
-  showStatus(`Bridge: ${status.status} · SIS tab: ${status.bound ? status.pageKind : "not bound"}`);
+  showStatus(
+    `Bridge: ${status.status} | HKU tab: ${status.bound ? status.pageKind : "not bound"}`
+  );
 }
 
 document.getElementById("connect").addEventListener("click", async () => {
@@ -23,18 +25,18 @@ document.getElementById("connect").addEventListener("click", async () => {
   }
   await chrome.runtime.sendMessage({ type: "configure", pairingToken, bridgePort });
   tokenInput.value = "";
-  showStatus("Pairing…");
+  showStatus("Pairing...");
   setTimeout(refreshStatus, 800);
 });
 
 document.getElementById("bind").addEventListener("click", async () => {
-  showStatus("Looking for an open HKU SIS tab…");
+  showStatus("Looking for the active HKU Portal or SIS tab...");
   const result = await chrome.runtime.sendMessage({ type: "bind" });
   if (!result.ok) {
     showStatus(result.error.message, true);
     return;
   }
-  showStatus(`Bound read-only · page: ${result.data.page_kind}`);
+  showStatus(`Bound | page: ${result.data.page_kind}`);
 });
 
 chrome.storage.local.get({ bridgePort: 7860 }).then(({ bridgePort }) => {

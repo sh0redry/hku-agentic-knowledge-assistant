@@ -1,14 +1,17 @@
 # HKU AGENTS for DeepSeek Harness
 
-This package contributes three read-only HKU SIS tools to DeepSeek Harness:
+This package contributes four restricted HKU SIS tools to DeepSeek Harness:
 
 - `hku_sis_status`
+- `hku_sis_open_enrollment_add_classes`
 - `hku_sis_sync_course_lists`
 - `hku_sis_preflight`
 
 It is a thin adapter over the authenticated HKU AGENTS Integration API. It does
-not parse SIS HTML, hold browser cookies, navigate Portal, or perform SIS writes.
-The local HKU AGENTS app and Chrome extension must be running separately.
+not parse HTML, hold browser cookies, choose URLs or selectors, or perform SIS
+writes. The local HKU AGENTS app and Chrome extension own deterministic Portal
+navigation and must be running separately. Login, password entry, CAPTCHA, and
+MFA always remain manual.
 
 ## Prerequisites
 
@@ -44,7 +47,7 @@ From the repository root, with the `dsh` CLI installed:
 cd integrations/deepseek_harness
 npm run build
 npm pack
-dsh plugin --profile web add ./dsh-hku-agents-0.1.0.tgz
+dsh plugin --profile web add ./dsh-hku-agents-0.3.0.tgz
 dsh --profile web --dump-config
 dsh --profile web
 ```
@@ -60,7 +63,7 @@ The bundle defaults are:
 ```yaml
 baseUrl: http://127.0.0.1:7860
 tokenEnv: INTEGRATION_API_TOKEN
-timeoutMs: 15000
+timeoutMs: 40000
 ```
 
 Override the complete `hku-agents` row in the profile or home
@@ -73,4 +76,7 @@ Cordis configuration; do not put the token value in YAML.
 - Redirects are rejected so the bearer token cannot cross origins.
 - Responses are size-limited and must match Integration API v1.
 - Harness cancellation is forwarded to the local HTTP request.
-- The tool set contains no click, form-fill, add, drop, enroll, or submit command.
+- The navigation tool accepts only an exact validated term label. It can follow
+  fixed browser-side targets and select that term on the SIS Select Term page.
+- The tool set contains no search, form-fill, add, drop, Step 2/3, enroll, or
+  submit command.

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from browser_bridge.models import SISPageSnapshot
+from browser_bridge.models import PortalPageSnapshot, SISNavigationResult, SISPageSnapshot
 from browser_bridge.service import BrowserBridgeError, BrowserBridgeService
 from connectors.base import BaseConnector
 from connectors.sis.protocol import BrowserCommand, BrowserCommandName
@@ -16,6 +16,31 @@ class BrowserSISConnector(BaseConnector):
 
     def health(self) -> dict:
         return self.bridge.status()
+
+    async def bind_hku_tab(self) -> dict:
+        data = await self._command(BrowserCommandName.BIND_HKU_TAB)
+        if data.get("origin") in {
+            "https://hkuportal.hku.hk",
+            "https://studentportal.hku.hk",
+        }:
+            return PortalPageSnapshot.model_validate(data).model_dump(mode="json")
+        return SISPageSnapshot.model_validate(data).model_dump(mode="json")
+
+    async def inspect_portal(self) -> dict:
+        data = await self._command(BrowserCommandName.INSPECT_PORTAL)
+        return PortalPageSnapshot.model_validate(data).model_dump(mode="json")
+
+    async def open_sis(self) -> dict:
+        data = await self._command(BrowserCommandName.OPEN_SIS)
+        return SISPageSnapshot.model_validate(data).model_dump(mode="json")
+
+    async def open_enrollment_add_classes(self, term_label: str | None = None) -> dict:
+        payload = {} if term_label is None else {"term_label": term_label}
+        data = await self._command(
+            BrowserCommandName.OPEN_ENROLLMENT_ADD_CLASSES,
+            payload=payload,
+        )
+        return SISNavigationResult.model_validate(data).model_dump(mode="json")
 
     async def bind_tab(self) -> dict:
         data = await self._command(BrowserCommandName.BIND_SIS_TAB)
@@ -42,8 +67,10 @@ class BrowserSISConnector(BaseConnector):
             )
         return snapshot.model_dump(mode="json")
 
-    async def _command(self, name: BrowserCommandName) -> dict:
-        result = await self.bridge.request(BrowserCommand(command=name))
+    async def _command(self, name: BrowserCommandName, payload: dict | None = None) -> dict:
+        result = await self.bridge.request(
+            BrowserCommand(command=name, payload=payload or {})
+        )
         if not result.ok:
             error = result.error or {}
             raise BrowserBridgeError(

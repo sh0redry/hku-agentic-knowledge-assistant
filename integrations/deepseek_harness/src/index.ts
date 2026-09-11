@@ -16,7 +16,7 @@ export interface Config {
 export const Config: Schema<Config> = Schema.object({
   baseUrl: Schema.string().default('http://127.0.0.1:7860'),
   tokenEnv: Schema.string().default('INTEGRATION_API_TOKEN'),
-  timeoutMs: Schema.number().default(15000),
+  timeoutMs: Schema.number().default(40000),
 })
 
 const envelopeOutput = {
@@ -39,6 +39,26 @@ export function apply(ctx: Context, config: Config): void {
       timeoutMs: config.timeoutMs,
       async execute(_args, execution) {
         return client.status(execution.signal)
+      },
+    }),
+  )
+
+  ctx.tools.register(
+    defineTool({
+      name: 'hku_sis_open_enrollment_add_classes',
+      description:
+        'After the user manually completes HKU Portal login and MFA, navigate through fixed verified Portal and SIS targets, select one exact requested SIS term when prompted, and return the read-only Enrollment Add Classes snapshot. This tool accepts no URL, selector, coordinate, script, or course input. It cannot search, add, delete, enter Step 2/3, or submit.',
+      parameters: {
+        term_label: {
+          type: 'string',
+          required: true,
+          description: 'Exact SIS term label to select, for example 2026-27 Sem 2.',
+        },
+      },
+      output: envelopeOutput,
+      timeoutMs: config.timeoutMs,
+      async execute(args, execution) {
+        return client.navigateToEnrollmentAddClasses(args, execution.signal)
       },
     }),
   )

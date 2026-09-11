@@ -57,6 +57,9 @@ export declare class HKUAgentsClient {
     constructor(options: HKUAgentsClientOptions);
     status(signal?: AbortSignal): Promise<IntegrationEnvelope>;
     syncCourseLists(signal?: AbortSignal): Promise<IntegrationEnvelope>;
+    navigateToEnrollmentAddClasses(input: {
+        term_label: string;
+    }, signal?: AbortSignal): Promise<IntegrationEnvelope>;
     preflight(input: {
         term_label: string;
         expected_courses: Array<{

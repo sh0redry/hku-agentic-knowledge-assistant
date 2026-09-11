@@ -163,6 +163,13 @@ export class HKUAgentsClient {
     return this.request('POST', '/api/v1/integration/sis/sync', undefined, signal)
   }
 
+  navigateToEnrollmentAddClasses(
+    input: { term_label: string },
+    signal?: AbortSignal,
+  ): Promise<IntegrationEnvelope> {
+    return this.request('POST', '/api/v1/integration/sis/navigate', input, signal)
+  }
+
   preflight(
     input: {
       term_label: string

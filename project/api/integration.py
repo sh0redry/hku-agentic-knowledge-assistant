@@ -9,7 +9,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from agents.models import TaskStatus
 from api.schemas import IntegrationResponse, IntegrationTaskSummary
 from browser_bridge.service import BrowserBridgeError
-from connectors.sis.models import SISLivePreflightRequest
+from connectors.sis.models import SISLivePreflightRequest, SISNavigationRequest
 
 
 class IntegrationAPIError(RuntimeError):
@@ -115,6 +115,44 @@ def create_integration_router(expected_token: str) -> APIRouter:
                 "Check the extension connection, bind the SIS tab, and open Enrollment Add Classes.",
             ) from exc
         return response(correlation_id, ok=True, result=snapshot)
+
+    @router.post("/sis/navigate", response_model=IntegrationResponse)
+    async def navigate_to_enrollment_add_classes(
+        request: Request,
+        body: SISNavigationRequest | None = None,
+        correlation_id: str = Depends(authorize),
+    ):
+        record = await request.app.state.container.tasks.submit_and_wait(
+            "sis.navigation.open_enrollment_add_classes",
+            (body or SISNavigationRequest()).model_dump(mode="json"),
+            correlation_id=correlation_id,
+        )
+        if record.status != TaskStatus.COMPLETED:
+            task_error = record.error or {
+                "code": "TASK_FAILED",
+                "message": "Restricted SIS navigation did not complete.",
+            }
+            error_code = task_error.get("code", "TASK_FAILED")
+            if error_code == "TERM_SELECTION_REQUIRED":
+                recovery = "Provide one exact SIS term label, for example 2026-27 Sem 2."
+            elif error_code in {"TERM_NOT_AVAILABLE", "TERM_MISMATCH"}:
+                recovery = "Choose one of the term labels currently shown by SIS."
+            else:
+                recovery = (
+                    "Keep the authenticated HKU Portal tab active, reload the updated "
+                    "extension, and retry. Login and MFA always remain manual."
+                )
+            return response(
+                correlation_id,
+                ok=False,
+                task=record,
+                error={
+                    "code": error_code,
+                    "message": task_error.get("message", "Restricted SIS navigation failed."),
+                    "recovery": recovery,
+                },
+            )
+        return response(correlation_id, ok=True, task=record, result=record.result)
 
     @router.post("/sis/preflight", response_model=IntegrationResponse)
     async def integration_live_preflight(
