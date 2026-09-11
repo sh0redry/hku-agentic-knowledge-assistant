@@ -134,6 +134,11 @@ class SISNavigateAndPreflightCapability(BaseCapability):
 
         snapshot = navigation["snapshot"]
         preflight = _evaluate_live_snapshot(validated_input, snapshot)
+        navigation_steps = navigation.get("steps", [])
+        navigation_interactions_performed = any(
+            step != "target_already_open" for step in navigation_steps
+        )
+        term_selection_performed = "sis_select_term" in navigation_steps
         navigation_summary = {
             key: value for key, value in navigation.items() if key != "snapshot"
         }
@@ -143,6 +148,9 @@ class SISNavigateAndPreflightCapability(BaseCapability):
             "read_only": True,
             "simulated": False,
             "sis_write_requests_sent": 0,
+            "navigation_interactions_performed": navigation_interactions_performed,
+            "term_selection_performed": term_selection_performed,
+            "enrollment_writes_performed": 0,
             "binding": {
                 "origin": binding.get("origin"),
                 "page_kind": binding.get("page_kind"),

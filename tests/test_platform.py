@@ -334,6 +334,9 @@ class PlatformAPITests(unittest.TestCase):
         self.assertEqual(body["task"]["correlation_id"], "combined-1")
         self.assertTrue(body["result"]["ready"])
         self.assertEqual(body["result"]["sis_write_requests_sent"], 0)
+        self.assertTrue(body["result"]["navigation_interactions_performed"])
+        self.assertTrue(body["result"]["term_selection_performed"])
+        self.assertEqual(body["result"]["enrollment_writes_performed"], 0)
         self.assertEqual(
             body["result"]["binding"]["origin"], "https://studentportal.hku.hk"
         )
@@ -378,6 +381,28 @@ class PlatformAPITests(unittest.TestCase):
             [{"course_code": "COMP2119", "section": "1A"}],
         )
         self.assertEqual(body["result"]["sis_write_requests_sent"], 0)
+
+    def test_combined_preflight_reports_no_navigation_when_target_is_already_open(self):
+        bind = AsyncMock(return_value=live_cart_snapshot())
+        navigation = navigation_result()
+        navigation["source_origin"] = "https://sis-main.hku.hk"
+        navigation["source_page_kind"] = "cart"
+        navigation["steps"] = ["target_already_open"]
+        navigate = AsyncMock(return_value=navigation)
+        self.container.connectors["sis_browser"].bind_hku_tab = bind
+        self.container.connectors["sis_browser"].open_enrollment_add_classes = navigate
+
+        response = self.client.post(
+            "/api/v1/integration/sis/navigate-and-preflight",
+            headers=self.integration_headers("combined-already-open"),
+            json=live_preflight_payload(),
+        )
+
+        body = response.json()
+        self.assertTrue(body["ok"])
+        self.assertFalse(body["result"]["navigation_interactions_performed"])
+        self.assertFalse(body["result"]["term_selection_performed"])
+        self.assertEqual(body["result"]["enrollment_writes_performed"], 0)
 
     def test_integration_validation_errors_use_the_versioned_envelope(self):
         payload = live_preflight_payload()

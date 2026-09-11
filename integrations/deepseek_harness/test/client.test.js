@@ -237,6 +237,9 @@ test('combined tool forwards only term and expected course intent', async () => 
                 ready: true,
                 read_only: true,
                 sis_write_requests_sent: 0,
+                navigation_interactions_performed: true,
+                term_selection_performed: true,
+                enrollment_writes_performed: 0,
               }),
             ),
           )
@@ -256,6 +259,9 @@ test('combined tool forwards only term and expected course intent', async () => 
         )
         assert.equal(result.result.ready, true)
         assert.equal(result.result.sis_write_requests_sent, 0)
+        assert.equal(result.result.navigation_interactions_performed, true)
+        assert.equal(result.result.term_selection_performed, true)
+        assert.equal(result.result.enrollment_writes_performed, 0)
       },
     )
   } finally {

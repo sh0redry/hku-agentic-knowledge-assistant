@@ -87,6 +87,8 @@ extension has no cookie or SIS write permissions.
 
 The GUI's preferred one-step preflight accepts only the expected term, course
 code, and section, then performs fixed Portal-to-SIS navigation before reading.
+Its result distinguishes controlled navigation interactions and term selection
+from enrollment writes, which remain fixed at zero.
 The current SIS state and term-specific class number are always obtained from the
 bound browser tab and cannot be supplied by chat or by the user-facing form.
 

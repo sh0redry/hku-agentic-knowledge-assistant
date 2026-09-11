@@ -123,6 +123,11 @@ in `result.ready`, so a valid mismatch is returned as `ok: true, ready: false`.
 Authentication, validation, bridge, and task failures use stable error codes and
 recovery text without exposing credentials, cookies, or private DOM.
 
+The combined result reports browser navigation separately from enrollment
+mutation. `navigation_interactions_performed` and `term_selection_performed`
+state whether controlled navigation occurred; `enrollment_writes_performed` is
+fixed at `0`. Therefore zero enrollment writes does not mean zero clicks.
+
 Run the platform tests without contacting HKU SIS or an LLM:
 
 ```bash

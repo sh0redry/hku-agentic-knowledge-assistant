@@ -28,7 +28,7 @@ export function apply(ctx, config) {
     }));
     ctx.tools.register(defineTool({
         name: 'hku_sis_navigate_and_preflight',
-        description: 'Preferred one-step read-only SIS check. After the user manually completes HKU Portal login and MFA, bind the available verified Portal tab, follow only the fixed Portal-to-SIS path, select the exact requested term, read the Temporary Course List, and strictly compare it with the complete expected course/section set. Check result.ready for the domain decision. This cannot search, add, delete, enter Step 2/3, or submit.',
+        description: 'Preferred one-step read-only SIS check. After the user manually completes HKU Portal login and MFA, bind the available verified Portal tab, follow only the fixed Portal-to-SIS path, select the exact requested term, read the Temporary Course List, and strictly compare it with the complete expected course/section set. Check result.ready for the domain decision. Restricted navigation clicks may occur: result.navigation_interactions_performed and result.term_selection_performed report them explicitly. result.enrollment_writes_performed is always 0 because this tool cannot search, add, delete, enter Step 2/3, enroll, or submit. Do not describe zero enrollment writes as zero clicks.',
         parameters: {
             term_label: {
                 type: 'string',

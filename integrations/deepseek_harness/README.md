@@ -48,7 +48,7 @@ From the repository root, with the `dsh` CLI installed:
 cd integrations/deepseek_harness
 npm run build
 npm pack
-dsh plugin --profile web add ./dsh-hku-agents-0.4.0.tgz
+dsh plugin --profile web add ./dsh-hku-agents-0.4.1.tgz
 dsh --profile web --dump-config
 dsh --profile web
 ```
@@ -83,5 +83,9 @@ Cordis configuration; do not put the token value in YAML.
   course/section set, automatically binds the available verified Portal tab,
   then composes navigation, structured cart reading, and strict comparison into
   one audited local task.
+- Combined results distinguish navigation from enrollment mutation explicitly:
+  `navigation_interactions_performed` and `term_selection_performed` are
+  booleans, while `enrollment_writes_performed` is always `0`. Zero enrollment
+  writes must never be described as zero browser clicks.
 - The tool set contains no search, form-fill, add, drop, Step 2/3, enroll, or
   submit command.
