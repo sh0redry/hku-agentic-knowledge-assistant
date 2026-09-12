@@ -3,7 +3,9 @@ from __future__ import annotations
 import re
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from browser_bridge.security import sanitize_path
 
 from connectors.sis.models import CourseSelection
 
@@ -44,6 +46,49 @@ class BrowserTabState(StrictMessage):
         if any(not re.fullmatch(pattern, item) for item in value):
             raise ValueError("Invalid SIS term label in browser snapshot.")
         return value
+
+
+class BrowserTargetState(StrictMessage):
+    system: Literal["portal", "sis", "moodle", "library"]
+    origin: Literal[
+        "https://hkuportal.hku.hk",
+        "https://studentportal.hku.hk",
+        "https://sis-main.hku.hk",
+        "https://moodle.hku.hk",
+        "https://julac-hku.primo.exlibrisgroup.com",
+        "https://lib.hku.hk",
+    ]
+    path: str = Field(default="/", min_length=1, max_length=300)
+    logged_in: bool | None = None
+    page_kind: str = Field(default="unknown", pattern=r"^[a-z][a-z0-9_]{0,39}$")
+    parser_version: str | None = Field(
+        default=None, pattern=r"^\d+\.\d+\.\d+$", max_length=20
+    )
+    active: bool = False
+    safe_for_writes: Literal[False] = False
+
+    @field_validator("path")
+    @classmethod
+    def validate_path(cls, value: str) -> str:
+        return sanitize_path(value)
+
+    @model_validator(mode="after")
+    def validate_system_origin_pair(self):
+        allowed_origins = {
+            "portal": {
+                "https://hkuportal.hku.hk",
+                "https://studentportal.hku.hk",
+            },
+            "sis": {"https://sis-main.hku.hk"},
+            "moodle": {"https://moodle.hku.hk"},
+            "library": {
+                "https://julac-hku.primo.exlibrisgroup.com",
+                "https://lib.hku.hk",
+            },
+        }
+        if self.origin not in allowed_origins[self.system]:
+            raise ValueError("Browser target origin is not allowed for the reported system.")
+        return self
 
 
 class SISParserDiagnostics(StrictMessage):
@@ -109,6 +154,7 @@ class PairMessage(StrictMessage):
 class HeartbeatMessage(StrictMessage):
     type: Literal["heartbeat"]
     tab: BrowserTabState | None = None
+    targets: list[BrowserTargetState] = Field(default_factory=list, max_length=8)
 
 
 class ExtensionResultMessage(StrictMessage):

@@ -1,6 +1,6 @@
 "use strict";
 
-importScripts("connection_lifecycle.js");
+importScripts("connection_lifecycle.js", "browser_targets.js");
 
 const SIS_URL_PATTERN = "https://sis-main.hku.hk/*";
 const PORTAL_URL_PATTERNS = [
@@ -33,6 +33,7 @@ let reconnectTimer = null;
 let heartbeatTimer = null;
 let boundTabId = null;
 let lastSnapshot = null;
+let targetRegistry = [];
 let bridgeStatus = "not_configured";
 let reconnectAttempt = 0;
 let nextRetryAt = 0;
@@ -62,7 +63,7 @@ function publicTabState() {
     };
   }
   return {
-    bound: true,
+    bound: boundTabId !== null,
     origin: lastSnapshot.origin || null,
     logged_in: lastSnapshot.logged_in ?? null,
     page_kind: lastSnapshot.page_kind || "unknown",
@@ -73,9 +74,27 @@ function publicTabState() {
   };
 }
 
-function sendHeartbeat() {
+async function refreshTargetRegistry() {
+  const tabs = await chrome.tabs.query({ url: self.HKUBrowserTargets.targetPatterns() });
+  targetRegistry = self.HKUBrowserTargets.buildRegistry(tabs, boundTabId, lastSnapshot);
+  return targetRegistry;
+}
+
+async function sendHeartbeat() {
   if (socket && socket.readyState === WebSocket.OPEN && bridgeStatus === "paired") {
-    socket.send(JSON.stringify({ type: "heartbeat", tab: publicTabState() }));
+    try {
+      await refreshTargetRegistry();
+    } catch (_error) {
+      // Fail closed for discovery while keeping the existing command channel alive.
+      targetRegistry = [];
+    }
+    if (socket && socket.readyState === WebSocket.OPEN && bridgeStatus === "paired") {
+      socket.send(JSON.stringify({
+        type: "heartbeat",
+        tab: publicTabState(),
+        targets: targetRegistry
+      }));
+    }
   }
 }
 
@@ -142,8 +161,8 @@ async function connect() {
       lastConnectionError = null;
       clearTimeout(reconnectTimer);
       clearInterval(heartbeatTimer);
-      heartbeatTimer = setInterval(sendHeartbeat, 20000);
-      sendHeartbeat();
+      heartbeatTimer = setInterval(() => void sendHeartbeat(), 20000);
+      void sendHeartbeat();
       return;
     }
     if (message.protocol_version === 1 && message.request_id && message.command) {
@@ -267,7 +286,7 @@ async function inspectBoundHkuTab() {
   const snapshot = await sendTabCommand(tab.id, command);
   boundTabId = tab.id;
   lastSnapshot = snapshot;
-  sendHeartbeat();
+  void sendHeartbeat();
   return lastSnapshot;
 }
 
@@ -288,7 +307,7 @@ async function inspectBoundSisTab(command, payload = {}) {
   if (!["sis.open_enrollment_add_classes", "sis.select_term"].includes(command)) {
     lastSnapshot = data;
   }
-  sendHeartbeat();
+  void sendHeartbeat();
   return data;
 }
 
@@ -337,7 +356,7 @@ async function waitForSisSnapshot(deadline, preferredTabId = null, existingSisTa
       const snapshot = await sendTabCommand(tab.id, "sis.inspect_page");
       boundTabId = tab.id;
       lastSnapshot = snapshot;
-      sendHeartbeat();
+      void sendHeartbeat();
       if (snapshot.logged_in === false) {
         throw commandError("SIS_LOGIN_REQUIRED", "Complete SIS authentication in Chrome.");
       }
@@ -468,7 +487,8 @@ async function executeCommand(command, payload = {}) {
     throw commandError("COMMAND_NOT_ALLOWED", "This extension only accepts named read-only commands.");
   }
   if (command === "browser.health") {
-    return { connected: bridgeStatus === "paired", read_only: true };
+    await refreshTargetRegistry();
+    return { connected: bridgeStatus === "paired", read_only: true, targets: targetRegistry };
   }
   if (command === "hku.bind_tab") {
     const tab = await findHkuTab();
@@ -477,7 +497,7 @@ async function executeCommand(command, payload = {}) {
     const snapshot = await sendTabCommand(tab.id, inspectCommand);
     boundTabId = tab.id;
     lastSnapshot = snapshot;
-    sendHeartbeat();
+    void sendHeartbeat();
     return snapshot;
   }
   if (command === "hku.inspect_portal") return inspectBoundHkuTab();
@@ -524,22 +544,25 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
   if (message?.type === "status") {
-    const status = self.HKUConnectionLifecycle.visibleState(
-      bridgeStatus,
-      lastSnapshot ? { ...lastSnapshot, bound: boundTabId !== null } : null
-    );
-    sendResponse({
-      status,
-      transportStatus: bridgeStatus,
-      bound: boundTabId !== null,
-      pageKind: lastSnapshot?.page_kind || "unknown",
-      lastError: lastConnectionError,
-      reconnectAttempt,
-      retryInSeconds: nextRetryAt > Date.now()
-        ? Math.max(1, Math.ceil((nextRetryAt - Date.now()) / 1000))
-        : 0
+    refreshTargetRegistry().catch(() => targetRegistry).then(() => {
+      const status = self.HKUConnectionLifecycle.visibleState(
+        bridgeStatus,
+        lastSnapshot ? { ...lastSnapshot, bound: boundTabId !== null } : null
+      );
+      sendResponse({
+        status,
+        transportStatus: bridgeStatus,
+        bound: boundTabId !== null,
+        pageKind: lastSnapshot?.page_kind || "unknown",
+        targets: targetRegistry,
+        lastError: lastConnectionError,
+        reconnectAttempt,
+        retryInSeconds: nextRetryAt > Date.now()
+          ? Math.max(1, Math.ceil((nextRetryAt - Date.now()) / 1000))
+          : 0
+      });
     });
-    return false;
+    return true;
   }
   if (message?.type === "reconnect") {
     restartConnection();

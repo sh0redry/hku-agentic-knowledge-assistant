@@ -81,9 +81,11 @@ Then run:
 python project/app.py
 ```
 
-For the optional read-only SIS connection, load `browser_runtime/extension` as
-an unpacked extension and pair it from the GUI's **Connections** tab. The
-extension has no cookie or SIS write permissions.
+For the optional browser connection, load `browser_runtime/extension` as an
+unpacked extension and pair it from the GUI's **Connections** tab. The GUI now
+tracks sanitized Portal, SIS, Moodle, and Library connection state separately.
+Moodle and Library remain discovery-only; the extension has no cookie or domain
+write permissions.
 
 Configure a separate random `BROWSER_PAIRING_TOKEN` of at least 32 characters
 in the ignored `project/.env` file for automatic extension reconnection across

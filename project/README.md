@@ -73,6 +73,7 @@ Core endpoints:
 | `GET /api/v1/browser/pairing` | Current local extension pairing information |
 | `POST /api/v1/browser/pairing/rotate` | Invalidate the current browser token and connection |
 | `POST /api/v1/browser/pairing/revoke` | Invalidate the token, disconnect, and clear the dynamic extension pin |
+| `GET /api/v1/browser/targets` | Sanitized Portal/SIS/Moodle/Library discovery, auth state, and freshness |
 | `POST /api/v1/browser/sis/bind` | Bind an open SIS tab through the read-only extension |
 | `POST /api/v1/browser/hku/bind` | Bind the active verified HKU Portal or SIS tab |
 | `POST /api/v1/browser/hku/open-sis` | Follow the fixed Portal SIS entry after manual login/MFA |
@@ -142,9 +143,9 @@ Run the platform tests without contacting HKU SIS or an LLM:
 python -m unittest discover -s tests -v
 ```
 
-### Connect the restricted Portal/SIS extension
+### Connect the restricted multi-system extension
 
-The first browser integration is an unpacked Manifest V3 extension in
+The browser integration is an unpacked Manifest V3 extension in
 `browser_runtime/extension`. Start HKU AGENTS, load that directory from
 `chrome://extensions` using **Developer mode → Load unpacked**, then open the
 GUI's **Connections** tab. Copy its pairing token into the extension popup; with
@@ -180,6 +181,14 @@ validated page type, login state, term label, exact course identifiers, and
 sanitized navigation status. Course search, Step 2/3, and all
 enrollment writes remain unavailable.
 See `browser_runtime/extension/README.md` for setup and security details.
+
+The **Connections** tab is also the authoritative multi-system diagnostic
+surface. Its browser target registry tracks Portal, SIS, Moodle, and Library
+independently, including detected authentication state, heartbeat freshness,
+page kind, parser version, and a recovery hint. Reported URLs are restricted to
+approved origins and paths; query strings and fragments are removed centrally.
+Moodle and Library are discovery-only in Phase A and expose no content parser,
+navigation tool, or domain write.
 
 ### Build the HKU Knowledge Base
 

@@ -1,21 +1,24 @@
 {
   "manifest_version": 3,
-  "name": "HKU AGENTS Portal/SIS Bridge",
-  "version": "0.5.0",
-  "description": "Restricted local navigation and read-only inspection bridge for HKU Portal and SIS.",
+  "name": "HKU AGENTS Multi-System Browser Bridge",
+  "version": "0.6.0",
+  "description": "Restricted local navigation and read-only multi-system discovery bridge for HKU Portal services.",
   "minimum_chrome_version": "116",
   "permissions": ["storage"],
   "host_permissions": [
     "https://hkuportal.hku.hk/*",
     "https://studentportal.hku.hk/*",
     "https://sis-main.hku.hk/*",
+    "https://moodle.hku.hk/*",
+    "https://julac-hku.primo.exlibrisgroup.com/*",
+    "https://lib.hku.hk/*",
     "http://127.0.0.1/*"
   ],
   "background": {
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "HKU AGENTS SIS Bridge",
+    "default_title": "HKU AGENTS Browser Bridge",
     "default_popup": "popup.html"
   },
   "content_scripts": [

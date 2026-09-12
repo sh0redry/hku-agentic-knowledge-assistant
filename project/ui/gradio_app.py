@@ -550,6 +550,16 @@ def create_gradio_ui(container):
                 language="json",
                 label="Connector status",
             )
+            browser_targets_output = gr.Code(
+                value=_pretty(
+                    {
+                        "read_only": True,
+                        "targets": container.browser_bridge.status()["targets"],
+                    }
+                ),
+                language="json",
+                label="Browser target registry (sanitized origin/path only)",
+            )
             connections_button = gr.Button("Refresh connections")
             rotate_pairing_button.click(
                 lambda: (
@@ -568,8 +578,11 @@ def create_gradio_ui(container):
                 queue=False,
             )
             connections_button.click(
-                lambda: safe_call(api_client.integration_status),
-                outputs=connections_output,
+                lambda: (
+                    safe_call(api_client.integration_status),
+                    safe_call(api_client.browser_targets),
+                ),
+                outputs=[connections_output, browser_targets_output],
                 queue=False,
             )
 

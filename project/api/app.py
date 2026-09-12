@@ -209,6 +209,16 @@ def create_api_app(
     async def browser_status():
         return app.state.container.connectors["sis_browser"].health()
 
+    @app.get("/api/v1/browser/targets")
+    async def browser_targets():
+        status = app.state.container.connectors["sis_browser"].health()
+        return {
+            "read_only": True,
+            "bridge_status": status["status"],
+            "lifecycle_state": status["lifecycle_state"],
+            "targets": status["targets"],
+        }
+
     @app.websocket("/api/v1/browser/ws")
     async def browser_websocket(websocket: WebSocket):
         if not config.BROWSER_BRIDGE_ENABLED:

@@ -1,11 +1,14 @@
-# HKU AGENTS Portal/SIS Bridge
+# HKU AGENTS Multi-System Browser Bridge
 
-This unpacked Manifest V3 extension connects authenticated HKU Portal and SIS
-tabs to the local HKU AGENTS process. It can follow only two fixed navigation
+This unpacked Manifest V3 extension discovers approved HKU Portal, SIS, Moodle,
+and Library tabs and reports a sanitized per-system connection registry to the
+local HKU AGENTS process. Existing Portal/SIS commands still use the compatible
+single active binding. The extension can follow only two fixed navigation
 targets: the Portal SIS sign-on entry and the exact SIS `Enrollment Add Classes`
-component route. It
-never enters credentials, reads cookies, searches courses, enters Step 2/3, or
-submits forms.
+component route. Moodle and Library support is discovery-only in Phase A: there
+are no content scripts, parsers, navigation commands, or domain actions for
+those systems. The extension never enters credentials, reads cookies, searches
+courses, enters Step 2/3, or submits forms.
 
 ## Install for local development
 
@@ -32,10 +35,25 @@ When the unpacked extension receives a new ID, restart HKU AGENTS to clear the
 in-memory development pin, or set `BROWSER_EXTENSION_IDS` explicitly in
 `project/.env`.
 
+## Multi-system diagnostics
+
+The popup and the GUI **Connections** tab show one record for each supported
+system: `portal`, `sis`, `moodle`, and `library`. Each record contains only an
+approved origin, a path without query string or fragment, inferred
+authentication/page state, parser version where available, and heartbeat
+freshness. Complete authentication URLs, tickets, relay state, and tokens are
+not sent to the local service.
+
+Only Portal and SIS can be bound for existing commands. Opening Moodle or My
+Library in Chrome makes them discoverable, but does not grant HKU AGENTS a read
+or write capability for either page.
+
 ## Security contract
 
-- Exact HKU host permissions only: `https://studentportal.hku.hk/*`,
-  `https://hkuportal.hku.hk/*`, and `https://sis-main.hku.hk/*`.
+- Exact approved host permissions only: `https://studentportal.hku.hk/*`,
+  `https://hkuportal.hku.hk/*`, `https://sis-main.hku.hk/*`,
+  `https://moodle.hku.hk/*`, `https://julac-hku.primo.exlibrisgroup.com/*`, and
+  `https://lib.hku.hk/*`.
 - Local companion permission only: `http://127.0.0.1/*`.
 - No `tabs`, cookies, downloads, clipboard, debugger, webRequest, or form-control permissions.
 - Named commands only; arbitrary JavaScript, selectors, URLs, coordinates, and
@@ -45,7 +63,9 @@ in-memory development pin, or set `BROWSER_EXTENSION_IDS` explicitly in
 - Navigation stops when login is incomplete, the target is missing or ambiguous,
   an origin differs, or the verified destination does not become ready in time.
 - Live preflight reads and compares the current cart but cannot modify it.
-- Only structured page state leaves the content script. Full HTML is never sent.
+- Only structured page state leaves Portal/SIS content scripts. Full HTML is never sent.
+- Moodle and Library have no content scripts in Phase A; tab discovery strips
+  query strings and fragments before reporting state.
 - Temporary Course List rows and Class Schedule rows are returned in separate fields.
 - The SIS listener loads at `document_start` so legacy PeopleSoft frame pages can
   be observed even when their top-level document does not promptly become idle.

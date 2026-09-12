@@ -3,6 +3,7 @@
 const portInput = document.getElementById("port");
 const tokenInput = document.getElementById("token");
 const statusOutput = document.getElementById("status");
+const targetsOutput = document.getElementById("targets");
 
 function showStatus(message, isError = false) {
   statusOutput.textContent = message;
@@ -19,6 +20,12 @@ async function refreshStatus() {
     `Bridge: ${status.status} | HKU tab: ${status.bound ? status.pageKind : "not bound"}${retry}${detail}`,
     ["token_rejected", "extension_rejected", "bridge_disabled"].includes(status.status)
   );
+  const targets = Array.isArray(status.targets) ? status.targets : [];
+  targetsOutput.textContent = targets.length
+    ? targets.map((target) =>
+      `${target.system}: ${target.logged_in === true ? "authenticated" : target.logged_in === false ? "login required" : "detected"} (${target.page_kind})`
+    ).join("\n")
+    : "No supported HKU system tabs detected.";
 }
 
 document.getElementById("connect").addEventListener("click", async () => {

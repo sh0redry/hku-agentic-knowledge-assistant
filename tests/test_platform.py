@@ -36,6 +36,7 @@ from api.app import create_api_app
 from application import ApplicationContainer
 from agents.knowledge.agent import KnowledgeAnswerCapability
 from browser_bridge.models import HeartbeatMessage, SISNavigationResult, SISPageSnapshot
+from browser_bridge.security import redact_sensitive_text, sanitize_url
 from browser_bridge.service import BrowserBridgeError, BrowserBridgeService
 from connectors.sis.protocol import (
     BrowserCommand,
@@ -518,14 +519,72 @@ class PlatformAPITests(unittest.TestCase):
                         "term_label": "2026-27 Sem 1",
                         "course_count": 1,
                     },
+                    "targets": [
+                        {
+                            "system": "portal",
+                            "origin": "https://studentportal.hku.hk",
+                            "path": "/en-US/",
+                            "logged_in": True,
+                            "page_kind": "portal_home",
+                            "parser_version": "0.4.3",
+                            "active": False,
+                            "safe_for_writes": False,
+                        },
+                        {
+                            "system": "sis",
+                            "origin": "https://sis-main.hku.hk",
+                            "path": "/psp/sisprod/EMPLOYEE/SA/h/",
+                            "logged_in": True,
+                            "page_kind": "cart",
+                            "parser_version": "0.2.2",
+                            "active": True,
+                            "safe_for_writes": False,
+                        },
+                        {
+                            "system": "moodle",
+                            "origin": "https://moodle.hku.hk",
+                            "path": "/my/",
+                            "logged_in": True,
+                            "page_kind": "dashboard",
+                            "parser_version": None,
+                            "active": False,
+                            "safe_for_writes": False,
+                        },
+                        {
+                            "system": "library",
+                            "origin": "https://julac-hku.primo.exlibrisgroup.com",
+                            "path": "/discovery/account",
+                            "logged_in": True,
+                            "page_kind": "account",
+                            "parser_version": None,
+                            "active": False,
+                            "safe_for_writes": False,
+                        },
+                    ],
                 }
             )
             status = self.client.get("/api/v1/browser/status").json()
             self.assertEqual(status["status"], "connected")
             self.assertEqual(status["lifecycle_state"], "sis_bound")
             self.assertEqual(status["tab"]["page_kind"], "cart")
+            targets = {target["system"]: target for target in status["targets"]}
+            self.assertEqual(targets["portal"]["connection_state"], "authenticated")
+            self.assertEqual(targets["sis"]["parser_version"], "0.2.2")
+            self.assertEqual(targets["moodle"]["page_kind"], "dashboard")
+            self.assertEqual(targets["library"]["page_kind"], "account")
+            self.assertTrue(all(not target["safe_for_writes"] for target in targets.values()))
+            target_response = self.client.get("/api/v1/browser/targets").json()
+            self.assertTrue(target_response["read_only"])
+            self.assertEqual(len(target_response["targets"]), 4)
 
-        self.assertEqual(self.client.get("/api/v1/browser/status").json()["status"], "disconnected")
+        disconnected_status = self.client.get("/api/v1/browser/status").json()
+        self.assertEqual(disconnected_status["status"], "disconnected")
+        self.assertTrue(
+            all(
+                target["connection_state"] == "stale"
+                for target in disconnected_status["targets"]
+            )
+        )
 
         rotated = self.client.post("/api/v1/browser/pairing/rotate").json()
         self.assertEqual(rotated["pairing_token_source"], "runtime_rotated")
@@ -833,6 +892,36 @@ class SafetyFrameworkTests(unittest.TestCase):
                 {"type": "heartbeat", "tab": None, "cookie": "must-not-enter-bridge"}
             )
         with self.assertRaises(Exception):
+            HeartbeatMessage.model_validate(
+                {
+                    "type": "heartbeat",
+                    "targets": [
+                        {
+                            "system": "moodle",
+                            "origin": "https://moodle.hku.hk",
+                            "path": "/my/?ticket=must-not-enter-bridge",
+                            "page_kind": "dashboard",
+                            "safe_for_writes": False,
+                        }
+                    ],
+                }
+            )
+        with self.assertRaises(Exception):
+            HeartbeatMessage.model_validate(
+                {
+                    "type": "heartbeat",
+                    "targets": [
+                        {
+                            "system": "moodle",
+                            "origin": "https://sis-main.hku.hk",
+                            "path": "/",
+                            "page_kind": "dashboard",
+                            "safe_for_writes": False,
+                        }
+                    ],
+                }
+            )
+        with self.assertRaises(Exception):
             SISNavigationResult.model_validate(
                 {**navigation_result(), "sis_write_requests_sent": 1}
             )
@@ -854,6 +943,18 @@ class SafetyFrameworkTests(unittest.TestCase):
                     }
                 }
             )
+
+        sanitized = sanitize_url(
+            "https://studentportal.hku.hk/en-US/?ticket=secret-value#fragment"
+        )
+        self.assertEqual(sanitized, "https://studentportal.hku.hk/en-US/")
+        redacted = redact_sensitive_text(
+            "Open https://moodle.hku.hk/login/index.php?token=url-secret, "
+            "token=text-secret, Authorization: Bearer bearer-secret"
+        )
+        self.assertNotIn("url-secret", redacted)
+        self.assertNotIn("text-secret", redacted)
+        self.assertNotIn("bearer-secret", redacted)
 
     def test_extension_manifest_is_read_only_and_parser_handles_synthetic_row(self):
         extension_root = ROOT / "browser_runtime" / "extension"
@@ -897,9 +998,13 @@ class SafetyFrameworkTests(unittest.TestCase):
                 "https://hkuportal.hku.hk/*",
                 "https://studentportal.hku.hk/*",
                 "https://sis-main.hku.hk/*",
+                "https://moodle.hku.hk/*",
+                "https://julac-hku.primo.exlibrisgroup.com/*",
+                "https://lib.hku.hk/*",
                 "http://127.0.0.1/*",
             ],
         )
+        self.assertEqual(manifest["version"], "0.6.0")
 
         node = shutil.which("node")
         if node is None:
@@ -935,6 +1040,18 @@ class SafetyFrameworkTests(unittest.TestCase):
             lifecycle_result_process.returncode,
             0,
             lifecycle_result_process.stderr or lifecycle_result_process.stdout,
+        )
+        targets_result_process = subprocess.run(
+            [node, str(ROOT / "tests" / "browser_targets.test.js")],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(
+            targets_result_process.returncode,
+            0,
+            targets_result_process.stderr or targets_result_process.stdout,
         )
 
     def test_knowledge_initialization_starts_once_in_the_background(self):

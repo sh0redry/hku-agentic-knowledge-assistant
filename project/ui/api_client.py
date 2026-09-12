@@ -60,6 +60,9 @@ class HKUAgentsAPIClient:
     def browser_status(self) -> dict:
         return self._request("GET", "/api/v1/browser/status")
 
+    def browser_targets(self) -> dict:
+        return self._request("GET", "/api/v1/browser/targets")
+
     def bind_sis_tab(self) -> dict:
         return self._request("POST", "/api/v1/browser/sis/bind")
 

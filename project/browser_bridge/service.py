@@ -17,6 +17,8 @@ from browser_bridge.models import (
     HeartbeatMessage,
     PairMessage,
 )
+from browser_bridge.registry import BrowserSessionRegistry
+from browser_bridge.security import redact_sensitive_text
 from connectors.sis.protocol import BrowserCommand, BrowserCommandResult
 
 
@@ -55,6 +57,7 @@ class BrowserBridgeService:
         self._websocket_loop: asyncio.AbstractEventLoop | None = None
         self._last_heartbeat = 0.0
         self._tab_state = BrowserTabState()
+        self._sessions = BrowserSessionRegistry()
         self._pending: dict[str, asyncio.Future] = {}
         self._last_command: str | None = None
         self._last_command_stage: str | None = None
@@ -153,6 +156,10 @@ class BrowserBridgeService:
                 "extension_version": self._extension_version,
                 "last_heartbeat_seconds": round(age, 1) if age is not None else None,
                 "tab": self._tab_state.model_dump(mode="json"),
+                "targets": self._sessions.snapshot(
+                    bridge_connected=fresh,
+                    heartbeat_timeout=self._heartbeat_timeout,
+                ),
                 "last_command": {
                     "name": self._last_command,
                     "stage": self._last_command_stage,
@@ -173,10 +180,10 @@ class BrowserBridgeService:
         if lifecycle_state == "sis_bound":
             return "Read-only extension paired and bound to HKU SIS."
         if lifecycle_state == "paired":
-            return "Read-only extension connected. No SIS write commands are available."
+            return "Read-only extension connected. No domain write commands are available."
         if status == "stale":
             return "Extension heartbeat is stale; reopen its popup or reload the extension."
-        return "Install and pair the local read-only Chrome extension."
+        return "Install and pair the local read-only HKU browser extension."
 
     def _extension_id_from_origin(self, origin: str | None) -> str | None:
         match = EXTENSION_ORIGIN_PATTERN.fullmatch(origin or "")
@@ -252,6 +259,7 @@ class BrowserBridgeService:
             self._last_pairing_error = None
             self._last_pairing_error_at = 0.0
             self._tab_state = BrowserTabState()
+            self._sessions.clear()
         if previous is not None and previous is not websocket:
             try:
                 await previous.close(code=4002, reason="Replaced by a new paired connection.")
@@ -267,6 +275,7 @@ class BrowserBridgeService:
                 self._last_heartbeat = time.monotonic()
                 if heartbeat.tab is not None:
                     self._tab_state = heartbeat.tab
+                self._sessions.update(heartbeat.targets, heartbeat.tab)
             return
 
         result = ExtensionResultMessage.model_validate(payload)
@@ -276,13 +285,21 @@ class BrowserBridgeService:
         if future is not None and not future.done():
             with self._state_lock:
                 self._last_command_stage = "completed"
-                self._last_command_error = None if result.ok else str(result.error)
+                self._last_command_error = (
+                    None if result.ok else redact_sensitive_text(result.error)
+                )
+            sanitized_error = None
+            if result.error is not None:
+                sanitized_error = {
+                    "code": str(result.error.get("code", "BROWSER_COMMAND_FAILED")),
+                    "message": redact_sensitive_text(result.error.get("message", "")),
+                }
             future.set_result(
                 BrowserCommandResult(
                     request_id=result.request_id,
                     ok=result.ok,
                     data=result.data,
-                    error=result.error,
+                    error=sanitized_error,
                 )
             )
 

@@ -16,4 +16,5 @@ button { margin-top: 12px; border: 1px solid #2563eb; background: #2563eb; color
 button.secondary { background: white; color: #1d4ed8; }
 #status { margin-top: 14px; padding: 10px; border-radius: 8px; background: #e0ecff; font-size: 12px; white-space: pre-line; }
 #status.error { color: #991b1b; background: #fee2e2; }
+.targets { margin-top: 8px; padding: 8px; border: 1px solid #d8dee8; border-radius: 6px; background: #f7f9fc; font: 12px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-line; }
 .notice { margin: 14px 0 0; color: #64748b; font-size: 11px; line-height: 1.45; }
