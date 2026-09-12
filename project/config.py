@@ -38,6 +38,11 @@ BROWSER_HEARTBEAT_TIMEOUT_SECONDS = float(
 BROWSER_COMMAND_TIMEOUT_SECONDS = float(
     os.environ.get("BROWSER_COMMAND_TIMEOUT_SECONDS", "35")
 )
+_BROWSER_PAIRING_TOKEN_SETTING = os.environ.get("BROWSER_PAIRING_TOKEN", "").strip()
+BROWSER_PAIRING_TOKEN = _BROWSER_PAIRING_TOKEN_SETTING or secrets.token_urlsafe(32)
+BROWSER_PAIRING_TOKEN_SOURCE = (
+    "environment" if _BROWSER_PAIRING_TOKEN_SETTING else "process_generated"
+)
 BROWSER_EXTENSION_IDS = {
     item.strip()
     for item in os.environ.get("BROWSER_EXTENSION_IDS", "").split(",")

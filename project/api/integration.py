@@ -81,6 +81,19 @@ def create_integration_router(expected_token: str) -> APIRouter:
             error=error,
         )
 
+    def browser_recovery(error_code: str, fallback: str) -> str:
+        if error_code == "PAIRING_TOKEN_REJECTED":
+            return (
+                "Copy the current Browser Pairing Token from the HKU AGENTS Connections "
+                "tab into the extension popup, then select Save and connect."
+            )
+        if error_code in {"BROWSER_NOT_CONNECTED", "BROWSER_DISCONNECTED"}:
+            return (
+                "Open the extension popup to inspect its connection state or select "
+                "Reconnect now."
+            )
+        return fallback
+
     @router.get("/status", response_model=IntegrationResponse)
     async def integration_status(request: Request, correlation_id: str = Depends(authorize)):
         container = request.app.state.container
@@ -112,7 +125,10 @@ def create_integration_router(expected_token: str) -> APIRouter:
                 status,
                 exc.code,
                 str(exc),
-                "Check the extension connection, bind the SIS tab, and open Enrollment Add Classes.",
+                browser_recovery(
+                    exc.code,
+                    "Bind the SIS tab and open Enrollment Add Classes, then retry.",
+                ),
             ) from exc
         return response(correlation_id, ok=True, result=snapshot)
 
@@ -138,9 +154,10 @@ def create_integration_router(expected_token: str) -> APIRouter:
             elif error_code in {"TERM_NOT_AVAILABLE", "TERM_MISMATCH"}:
                 recovery = "Choose one of the term labels currently shown by SIS."
             else:
-                recovery = (
+                recovery = browser_recovery(
+                    error_code,
                     "Keep the authenticated HKU Portal tab active, reload the updated "
-                    "extension, and retry. Login and MFA always remain manual."
+                    "extension, and retry. Login and MFA always remain manual.",
                 )
             return response(
                 correlation_id,
@@ -177,7 +194,10 @@ def create_integration_router(expected_token: str) -> APIRouter:
                 error={
                     "code": task_error.get("code", "TASK_FAILED"),
                     "message": task_error.get("message", "The live SIS preflight task failed."),
-                    "recovery": "Check the SIS connection and page state, then retry.",
+                    "recovery": browser_recovery(
+                        task_error.get("code", "TASK_FAILED"),
+                        "Check the SIS connection and page state, then retry.",
+                    ),
                 },
             )
         return response(
@@ -207,9 +227,10 @@ def create_integration_router(expected_token: str) -> APIRouter:
             if error_code in {"TERM_NOT_AVAILABLE", "TERM_MISMATCH"}:
                 recovery = "Choose one of the term labels currently shown by SIS."
             else:
-                recovery = (
+                recovery = browser_recovery(
+                    error_code,
                     "Keep the authenticated HKU Portal tab active, verify the extension "
-                    "connection, and retry. Login and MFA always remain manual."
+                    "connection, and retry. Login and MFA always remain manual.",
                 )
             return response(
                 correlation_id,

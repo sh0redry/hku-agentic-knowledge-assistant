@@ -153,8 +153,23 @@ def create_api_app(
         status = 504 if exc.code == "BROWSER_TIMEOUT" else 409
         return HTTPException(status_code=status, detail={"code": exc.code, "message": str(exc)})
 
+    def require_local_pairing_origin(request: Request) -> None:
+        origin = request.headers.get("origin")
+        if origin and origin not in {
+            f"http://{request.url.netloc}",
+            f"https://{request.url.netloc}",
+        }:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "PAIRING_ORIGIN_REJECTED",
+                    "message": "Browser pairing management is limited to the local app origin.",
+                },
+            )
+
     @app.get("/api/v1/browser/pairing")
     async def browser_pairing(request: Request):
+        require_local_pairing_origin(request)
         if not config.BROWSER_BRIDGE_ENABLED:
             raise HTTPException(status_code=404, detail="Browser bridge is disabled.")
         scheme = "wss" if request.url.scheme == "https" else "ws"
@@ -163,13 +178,31 @@ def create_api_app(
 
     @app.post("/api/v1/browser/pairing/rotate")
     async def rotate_browser_pairing(request: Request):
+        require_local_pairing_origin(request)
         if not config.BROWSER_BRIDGE_ENABLED:
             raise HTTPException(status_code=404, detail="Browser bridge is disabled.")
-        token = app.state.container.browser_bridge.rotate_pairing_token()
+        token = await app.state.container.browser_bridge.rotate_pairing_token()
         scheme = "wss" if request.url.scheme == "https" else "ws"
         return {
             "pairing_token": token,
             "websocket_url": f"{scheme}://{request.url.netloc}/api/v1/browser/ws",
+            "pairing_token_source": "runtime_rotated",
+            "persistent_across_restarts": False,
+        }
+
+    @app.post("/api/v1/browser/pairing/revoke")
+    async def revoke_browser_pairing(request: Request):
+        require_local_pairing_origin(request)
+        if not config.BROWSER_BRIDGE_ENABLED:
+            raise HTTPException(status_code=404, detail="Browser bridge is disabled.")
+        token = await app.state.container.browser_bridge.revoke_pairing()
+        scheme = "wss" if request.url.scheme == "https" else "ws"
+        return {
+            "pairing_token": token,
+            "websocket_url": f"{scheme}://{request.url.netloc}/api/v1/browser/ws",
+            "pairing_token_source": "runtime_revoked",
+            "persistent_across_restarts": False,
+            "extension_pin_cleared": True,
         }
 
     @app.get("/api/v1/browser/status")

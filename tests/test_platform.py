@@ -404,6 +404,26 @@ class PlatformAPITests(unittest.TestCase):
         self.assertFalse(body["result"]["term_selection_performed"])
         self.assertEqual(body["result"]["enrollment_writes_performed"], 0)
 
+    def test_combined_preflight_explains_rejected_pairing_token(self):
+        self.container.connectors["sis_browser"].bind_hku_tab = AsyncMock(
+            side_effect=BrowserBridgeError(
+                "PAIRING_TOKEN_REJECTED",
+                "The browser extension pairing token was rejected.",
+            )
+        )
+
+        response = self.client.post(
+            "/api/v1/integration/sis/navigate-and-preflight",
+            headers=self.integration_headers("combined-token-rejected"),
+            json=live_preflight_payload(),
+        )
+
+        body = response.json()
+        self.assertFalse(body["ok"])
+        self.assertEqual(body["error"]["code"], "PAIRING_TOKEN_REJECTED")
+        self.assertIn("Connections", body["error"]["recovery"])
+        self.assertIn("Save and connect", body["error"]["recovery"])
+
     def test_integration_validation_errors_use_the_versioned_envelope(self):
         payload = live_preflight_payload()
         payload["expected_courses"][0]["class_number"] = "12345"
@@ -424,6 +444,14 @@ class PlatformAPITests(unittest.TestCase):
         self.assertEqual(
             self.client.get("/api/v1/browser/pairing", headers={"host": "evil.example"}).status_code,
             400,
+        )
+        rejected_rotation = self.client.post(
+            "/api/v1/browser/pairing/rotate",
+            headers={"origin": "https://evil.example"},
+        )
+        self.assertEqual(rejected_rotation.status_code, 403)
+        self.assertEqual(
+            rejected_rotation.json()["detail"]["code"], "PAIRING_ORIGIN_REJECTED"
         )
         pairing = self.client.get("/api/v1/browser/pairing").json()
         self.assertGreaterEqual(len(pairing["pairing_token"]), 20)
@@ -460,6 +488,25 @@ class PlatformAPITests(unittest.TestCase):
             paired = websocket.receive_json()
             self.assertTrue(paired["read_only"])
             self.assertEqual(paired["extension_id"], extension_id)
+            self.assertEqual(
+                self.client.get("/api/v1/browser/status").json()["lifecycle_state"],
+                "paired",
+            )
+            websocket.send_json(
+                {
+                    "type": "heartbeat",
+                    "tab": {
+                        "bound": True,
+                        "origin": "https://studentportal.hku.hk",
+                        "logged_in": True,
+                        "page_kind": "portal_home",
+                        "term_label": None,
+                        "course_count": 0,
+                    },
+                }
+            )
+            portal_status = self.client.get("/api/v1/browser/status").json()
+            self.assertEqual(portal_status["lifecycle_state"], "portal_bound")
             websocket.send_json(
                 {
                     "type": "heartbeat",
@@ -475,9 +522,45 @@ class PlatformAPITests(unittest.TestCase):
             )
             status = self.client.get("/api/v1/browser/status").json()
             self.assertEqual(status["status"], "connected")
+            self.assertEqual(status["lifecycle_state"], "sis_bound")
             self.assertEqual(status["tab"]["page_kind"], "cart")
 
         self.assertEqual(self.client.get("/api/v1/browser/status").json()["status"], "disconnected")
+
+        rotated = self.client.post("/api/v1/browser/pairing/rotate").json()
+        self.assertEqual(rotated["pairing_token_source"], "runtime_rotated")
+        self.assertFalse(rotated["persistent_across_restarts"])
+        with self.assertRaises(WebSocketDisconnect):
+            with self.client.websocket_connect(
+                "/api/v1/browser/ws",
+                headers={"origin": f"chrome-extension://{extension_id}"},
+            ) as old_token_socket:
+                old_token_socket.send_json(
+                    {
+                        "type": "pair",
+                        "token": pairing["pairing_token"],
+                        "extension_version": "0.5.0",
+                    }
+                )
+                old_token_socket.receive_json()
+        rejected_status = self.client.get("/api/v1/browser/status").json()
+        self.assertEqual(rejected_status["lifecycle_state"], "token_rejected")
+        rejected_bind = self.client.post("/api/v1/browser/sis/bind")
+        self.assertEqual(rejected_bind.json()["detail"]["code"], "PAIRING_TOKEN_REJECTED")
+
+        with self.client.websocket_connect(
+            "/api/v1/browser/ws",
+            headers={"origin": f"chrome-extension://{extension_id}"},
+        ) as rotated_socket:
+            rotated_socket.send_json(
+                {
+                    "type": "pair",
+                    "token": rotated["pairing_token"],
+                    "extension_version": "0.5.0",
+                }
+            )
+            self.assertEqual(rotated_socket.receive_json()["type"], "paired")
+
         with self.assertRaises(WebSocketDisconnect):
             with self.client.websocket_connect(
                 "/api/v1/browser/ws",
@@ -485,9 +568,44 @@ class PlatformAPITests(unittest.TestCase):
             ):
                 pass
 
+        revoked = self.client.post("/api/v1/browser/pairing/revoke").json()
+        self.assertTrue(revoked["extension_pin_cleared"])
+        self.assertEqual(revoked["pairing_token_source"], "runtime_revoked")
+        with self.client.websocket_connect(
+            "/api/v1/browser/ws",
+            headers={"origin": f"chrome-extension://{'b' * 32}"},
+        ) as replacement_socket:
+            replacement_socket.send_json(
+                {
+                    "type": "pair",
+                    "token": revoked["pairing_token"],
+                    "extension_version": "0.5.0",
+                }
+            )
+            self.assertEqual(replacement_socket.receive_json()["type"], "paired")
+
         bind = self.client.post("/api/v1/browser/sis/bind")
         self.assertEqual(bind.status_code, 409)
         self.assertEqual(bind.json()["detail"]["code"], "BROWSER_NOT_CONNECTED")
+
+    def test_configured_pairing_token_is_stable_across_service_instances(self):
+        token = "stable-browser-pairing-token-" + ("x" * 32)
+        first = BrowserBridgeService(
+            pairing_token=token,
+            pairing_token_source="environment",
+        )
+        second = BrowserBridgeService(
+            pairing_token=token,
+            pairing_token_source="environment",
+        )
+
+        first_info = first.pairing_info("ws://127.0.0.1:7860/api/v1/browser/ws")
+        second_info = second.pairing_info("ws://127.0.0.1:7860/api/v1/browser/ws")
+        self.assertEqual(first_info["pairing_token"], second_info["pairing_token"])
+        self.assertEqual(first_info["pairing_token_source"], "environment")
+        self.assertTrue(first_info["persistent_across_restarts"])
+        with self.assertRaises(ValueError):
+            BrowserBridgeService(pairing_token="too-short")
 
     def test_simulated_sis_preflight_is_zero_request_and_exact(self):
         response = self.client.post("/api/v1/sis/preflight", json=preflight_payload())
@@ -805,6 +923,18 @@ class SafetyFrameworkTests(unittest.TestCase):
             navigation_result_process.returncode,
             0,
             navigation_result_process.stderr or navigation_result_process.stdout,
+        )
+        lifecycle_result_process = subprocess.run(
+            [node, str(ROOT / "tests" / "connection_lifecycle.test.js")],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(
+            lifecycle_result_process.returncode,
+            0,
+            lifecycle_result_process.stderr or lifecycle_result_process.stdout,
         )
 
     def test_knowledge_initialization_starts_once_in_the_background(self):

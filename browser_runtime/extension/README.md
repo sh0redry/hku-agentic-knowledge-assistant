@@ -12,8 +12,12 @@ submits forms.
 1. Start HKU AGENTS with `python project/app.py`.
 2. Open `chrome://extensions`, enable **Developer mode**, and choose **Load unpacked**.
 3. Select this `browser_runtime/extension` directory.
-4. In HKU AGENTS, open **Connections** and copy the current pairing token.
-5. Open the extension popup, paste the token, and select **Save and connect**.
+4. In HKU AGENTS, open **Connections** and copy the current pairing token. For
+   stable local development, set the same random value as `BROWSER_PAIRING_TOKEN`
+   in the ignored `project/.env` file before starting the app.
+5. Open the extension popup, paste the token once, and select **Save and connect**.
+   The extension stores it in Chrome local extension storage and reconnects
+   automatically after browser or HKU AGENTS restarts.
 6. Log in to HKU Portal and complete MFA yourself. The authenticated modern
    Portal is served from `https://studentportal.hku.hk`; the legacy
    `https://hkuportal.hku.hk` redirect origin is also allowed.
@@ -47,3 +51,15 @@ in-memory development pin, or set `BROWSER_EXTENSION_IDS` explicitly in
   be observed even when their top-level document does not promptly become idle.
 - Only an exact validated term exposed by the SIS Select Term page may be
   selected. Course search, delete, Step 2/3, and all enrollment writes remain absent.
+
+## Connection lifecycle
+
+- Retry delay uses bounded exponential backoff: 1, 2, 4, 8, 16, then 30 seconds.
+- The popup distinguishes `not_configured`, `connecting`, `reconnecting`,
+  `paired`, `portal_bound`, `sis_bound`, `token_rejected`,
+  `extension_rejected`, and `bridge_disabled` states.
+- **Reconnect now** resets the retry delay without changing the saved token.
+- Rotating the server token immediately disconnects the current extension and
+  rejects its old token. Revoking also clears the dynamically pinned extension ID.
+- Runtime rotation does not edit `project/.env`; update that ignored file
+  manually when the new token should survive the next app restart.

@@ -54,6 +54,9 @@ class HKUAgentsAPIClient:
     def rotate_browser_pairing(self) -> dict:
         return self._request("POST", "/api/v1/browser/pairing/rotate")
 
+    def revoke_browser_pairing(self) -> dict:
+        return self._request("POST", "/api/v1/browser/pairing/revoke")
+
     def browser_status(self) -> dict:
         return self._request("GET", "/api/v1/browser/status")
 

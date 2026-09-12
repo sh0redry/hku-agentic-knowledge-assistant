@@ -85,6 +85,10 @@ For the optional read-only SIS connection, load `browser_runtime/extension` as
 an unpacked extension and pair it from the GUI's **Connections** tab. The
 extension has no cookie or SIS write permissions.
 
+Configure a separate random `BROWSER_PAIRING_TOKEN` of at least 32 characters
+in the ignored `project/.env` file for automatic extension reconnection across
+local app restarts. Leaving it blank keeps the safer ephemeral development mode.
+
 The GUI's preferred one-step preflight accepts only the expected term, course
 code, and section, then performs fixed Portal-to-SIS navigation before reading.
 Its result distinguishes controlled navigation interactions and term selection

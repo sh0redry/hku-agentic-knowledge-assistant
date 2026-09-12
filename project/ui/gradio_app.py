@@ -508,7 +508,9 @@ def create_gradio_ui(container):
             gr.Markdown(
                 "## Pair the read-only extension\n"
                 "Load `browser_runtime/extension` as an unpacked Chrome extension, then copy "
-                "this process-local token into its popup. Do not share the token."
+                "this local token into its popup once. Configure `BROWSER_PAIRING_TOKEN` in "
+                "the ignored `project/.env` file to preserve pairing across app restarts. "
+                "Do not share the token."
             )
             current_pairing = pairing_info()
             pairing_token = gr.Textbox(
@@ -519,6 +521,14 @@ def create_gradio_ui(container):
             websocket_address = gr.Textbox(
                 value=current_pairing["websocket_url"],
                 label="Local bridge address",
+                interactive=False,
+            )
+            pairing_token_source = gr.Textbox(
+                value=current_pairing["pairing_token_source"],
+                label=(
+                    "Pairing token source"
+                    + (" (persistent)" if current_pairing["persistent_across_restarts"] else "")
+                ),
                 interactive=False,
             )
             integration_api_token = gr.Textbox(
@@ -532,6 +542,9 @@ def create_gradio_ui(container):
                 "or Hermes adapters. It is not the browser-extension pairing token."
             )
             rotate_pairing_button = gr.Button("Rotate pairing token")
+            revoke_pairing_button = gr.Button(
+                "Revoke connection and extension pin", variant="stop"
+            )
             connections_output = gr.Code(
                 value=_pretty({"connections": container.connection_status()}),
                 language="json",
@@ -539,8 +552,19 @@ def create_gradio_ui(container):
             )
             connections_button = gr.Button("Refresh connections")
             rotate_pairing_button.click(
-                lambda: api_client.rotate_browser_pairing()["pairing_token"],
-                outputs=pairing_token,
+                lambda: (
+                    api_client.rotate_browser_pairing()["pairing_token"],
+                    "runtime_rotated",
+                ),
+                outputs=[pairing_token, pairing_token_source],
+                queue=False,
+            )
+            revoke_pairing_button.click(
+                lambda: (
+                    api_client.revoke_browser_pairing()["pairing_token"],
+                    "runtime_revoked",
+                ),
+                outputs=[pairing_token, pairing_token_source],
                 queue=False,
             )
             connections_button.click(

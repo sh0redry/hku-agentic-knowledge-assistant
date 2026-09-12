@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "HKU AGENTS Portal/SIS Bridge",
-  "version": "0.4.4",
+  "version": "0.5.0",
   "description": "Restricted local navigation and read-only inspection bridge for HKU Portal and SIS.",
   "minimum_chrome_version": "116",
   "permissions": ["storage"],

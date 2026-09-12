@@ -11,8 +11,13 @@ function showStatus(message, isError = false) {
 
 async function refreshStatus() {
   const status = await chrome.runtime.sendMessage({ type: "status" });
+  const retry = status.retryInSeconds > 0
+    ? ` | retry in ${status.retryInSeconds}s (attempt ${status.reconnectAttempt})`
+    : "";
+  const detail = status.lastError ? `\n${status.lastError}` : "";
   showStatus(
-    `Bridge: ${status.status} | HKU tab: ${status.bound ? status.pageKind : "not bound"}`
+    `Bridge: ${status.status} | HKU tab: ${status.bound ? status.pageKind : "not bound"}${retry}${detail}`,
+    ["token_rejected", "extension_rejected", "bridge_disabled"].includes(status.status)
   );
 }
 
@@ -29,6 +34,12 @@ document.getElementById("connect").addEventListener("click", async () => {
   setTimeout(refreshStatus, 800);
 });
 
+document.getElementById("reconnect").addEventListener("click", async () => {
+  await chrome.runtime.sendMessage({ type: "reconnect" });
+  showStatus("Reconnecting now...");
+  setTimeout(refreshStatus, 300);
+});
+
 document.getElementById("bind").addEventListener("click", async () => {
   showStatus("Looking for the active HKU Portal or SIS tab...");
   const result = await chrome.runtime.sendMessage({ type: "bind" });
@@ -43,3 +54,4 @@ chrome.storage.local.get({ bridgePort: 7860 }).then(({ bridgePort }) => {
   portInput.value = bridgePort;
 });
 refreshStatus();
+setInterval(refreshStatus, 1000);

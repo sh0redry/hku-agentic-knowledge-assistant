@@ -71,6 +71,8 @@ Core endpoints:
 | `GET /api/v1/capabilities` | Registered capability manifests |
 | `GET /api/v1/connections` | Connector and future browser-runtime status |
 | `GET /api/v1/browser/pairing` | Current local extension pairing information |
+| `POST /api/v1/browser/pairing/rotate` | Invalidate the current browser token and connection |
+| `POST /api/v1/browser/pairing/revoke` | Invalidate the token, disconnect, and clear the dynamic extension pin |
 | `POST /api/v1/browser/sis/bind` | Bind an open SIS tab through the read-only extension |
 | `POST /api/v1/browser/hku/bind` | Bind the active verified HKU Portal or SIS tab |
 | `POST /api/v1/browser/hku/open-sis` | Follow the fixed Portal SIS entry after manual login/MFA |
@@ -103,6 +105,12 @@ Set a random value of at least 32 characters as `INTEGRATION_API_TOKEN` in
 `project/.env`. If it is blank, the application creates a process-local token;
 the current value and its source are visible in the GUI's **Connections** tab.
 This token is separate from the Chrome extension pairing token.
+
+Set a separate random value of 32 to 200 characters as `BROWSER_PAIRING_TOKEN`
+in the ignored `project/.env` file to keep the browser connection stable across
+HKU AGENTS restarts. If it is blank, the app deliberately generates a new
+process-local browser token on every start. The extension stores the token in
+Chrome local extension storage and reconnects with bounded exponential backoff.
 
 Every Integration API response uses the same envelope:
 
@@ -139,8 +147,9 @@ python -m unittest discover -s tests -v
 The first browser integration is an unpacked Manifest V3 extension in
 `browser_runtime/extension`. Start HKU AGENTS, load that directory from
 `chrome://extensions` using **Developer mode → Load unpacked**, then open the
-GUI's **Connections** tab. Copy its process-local pairing token into the
-extension popup and bind an SIS tab that you logged into yourself.
+GUI's **Connections** tab. Copy its pairing token into the extension popup; with
+`BROWSER_PAIRING_TOKEN` configured, this is normally a one-time action on the
+same Chrome profile.
 
 After completing Portal login and MFA yourself, keep the Portal tab active and
 select **Bind active HKU tab**, then **Open Enrollment Add Classes**. Both the

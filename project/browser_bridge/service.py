@@ -39,11 +39,16 @@ class BrowserBridgeService:
         allowed_extension_ids: set[str] | None = None,
         heartbeat_timeout: float = 45.0,
         command_timeout: float = 10.0,
+        pairing_token: str | None = None,
+        pairing_token_source: str = "process_generated",
     ):
         self._allowed_extension_ids = allowed_extension_ids or set()
         self._heartbeat_timeout = heartbeat_timeout
         self._command_timeout = command_timeout
-        self._pairing_token = secrets.token_urlsafe(32)
+        self._pairing_token = pairing_token or secrets.token_urlsafe(32)
+        if not 32 <= len(self._pairing_token) <= 200:
+            raise ValueError("Browser pairing token must contain 32 to 200 characters.")
+        self._pairing_token_source = pairing_token_source
         self._paired_extension_id: str | None = None
         self._extension_version: str | None = None
         self._websocket: WebSocket | None = None
@@ -54,6 +59,8 @@ class BrowserBridgeService:
         self._last_command: str | None = None
         self._last_command_stage: str | None = None
         self._last_command_error: str | None = None
+        self._last_pairing_error: str | None = None
+        self._last_pairing_error_at = 0.0
         self._state_lock = threading.RLock()
 
     def pairing_info(self, websocket_url: str) -> dict[str, Any]:
@@ -62,13 +69,45 @@ class BrowserBridgeService:
                 "pairing_token": self._pairing_token,
                 "websocket_url": websocket_url,
                 "paired_extension_id": self._paired_extension_id,
+                "pairing_token_source": self._pairing_token_source,
+                "persistent_across_restarts": self._pairing_token_source == "environment",
                 "security": "localhost + token + extension-origin pinning",
             }
 
-    def rotate_pairing_token(self) -> str:
+    async def rotate_pairing_token(self) -> str:
+        return await self._replace_pairing_token(
+            clear_extension_pin=False,
+            source="runtime_rotated",
+            close_reason="Pairing token rotated.",
+        )
+
+    async def revoke_pairing(self) -> str:
+        return await self._replace_pairing_token(
+            clear_extension_pin=True,
+            source="runtime_revoked",
+            close_reason="Browser pairing revoked.",
+        )
+
+    async def _replace_pairing_token(
+        self, *, clear_extension_pin: bool, source: str, close_reason: str
+    ) -> str:
         with self._state_lock:
             self._pairing_token = secrets.token_urlsafe(32)
-            return self._pairing_token
+            self._pairing_token_source = source
+            self._last_pairing_error = None
+            self._last_pairing_error_at = 0.0
+            websocket = self._websocket
+            if clear_extension_pin:
+                self._paired_extension_id = None
+                self._extension_version = None
+            token = self._pairing_token
+        if websocket is not None:
+            self._deactivate_connection(websocket)
+            try:
+                await websocket.close(code=4003, reason=close_reason)
+            except RuntimeError:
+                pass
+        return token
 
     def status(self) -> dict[str, Any]:
         with self._state_lock:
@@ -76,9 +115,38 @@ class BrowserBridgeService:
             socket_connected = self._websocket is not None
             fresh = socket_connected and age is not None and age <= self._heartbeat_timeout
             status = "connected" if fresh else ("stale" if socket_connected else "disconnected")
+            pairing_error_age = (
+                time.monotonic() - self._last_pairing_error_at
+                if self._last_pairing_error_at
+                else None
+            )
+            token_rejected = (
+                not socket_connected
+                and self._last_pairing_error == "PAIRING_TOKEN_REJECTED"
+                and pairing_error_age is not None
+                and pairing_error_age <= self._heartbeat_timeout
+            )
+            if token_rejected:
+                lifecycle_state = "token_rejected"
+            elif status == "connected" and self._tab_state.bound:
+                lifecycle_state = (
+                    "portal_bound"
+                    if self._tab_state.origin in {
+                        "https://hkuportal.hku.hk",
+                        "https://studentportal.hku.hk",
+                    }
+                    else "sis_bound"
+                    if self._tab_state.origin == "https://sis-main.hku.hk"
+                    else "paired"
+                )
+            elif status == "connected":
+                lifecycle_state = "paired"
+            else:
+                lifecycle_state = status
             return {
                 "id": "sis_browser",
                 "status": status,
+                "lifecycle_state": lifecycle_state,
                 "mode": "local_browser_read_only",
                 "safe_for_writes": False,
                 "paired_extension_id": self._paired_extension_id,
@@ -90,12 +158,21 @@ class BrowserBridgeService:
                     "stage": self._last_command_stage,
                     "error": self._last_command_error,
                 },
-                "message": self._status_message(status),
+                "last_pairing_error": self._last_pairing_error,
+                "pairing_token_source": self._pairing_token_source,
+                "persistent_pairing": self._pairing_token_source == "environment",
+                "message": self._status_message(status, lifecycle_state),
             }
 
     @staticmethod
-    def _status_message(status: str) -> str:
-        if status == "connected":
+    def _status_message(status: str, lifecycle_state: str) -> str:
+        if lifecycle_state == "token_rejected":
+            return "The extension presented an invalid pairing token. Update it in the extension popup."
+        if lifecycle_state == "portal_bound":
+            return "Read-only extension paired and bound to HKU Portal."
+        if lifecycle_state == "sis_bound":
+            return "Read-only extension paired and bound to HKU SIS."
+        if lifecycle_state == "paired":
             return "Read-only extension connected. No SIS write commands are available."
         if status == "stale":
             return "Extension heartbeat is stale; reopen its popup or reload the extension."
@@ -123,6 +200,9 @@ class BrowserBridgeService:
             with self._state_lock:
                 expected_token = self._pairing_token
             if not hmac.compare_digest(pair.token, expected_token):
+                with self._state_lock:
+                    self._last_pairing_error = "PAIRING_TOKEN_REJECTED"
+                    self._last_pairing_error_at = time.monotonic()
                 await websocket.close(code=4401, reason="Invalid pairing token.")
                 return
 
@@ -169,6 +249,8 @@ class BrowserBridgeService:
             self._websocket = websocket
             self._websocket_loop = asyncio.get_running_loop()
             self._last_heartbeat = time.monotonic()
+            self._last_pairing_error = None
+            self._last_pairing_error_at = 0.0
             self._tab_state = BrowserTabState()
         if previous is not None and previous is not websocket:
             try:
@@ -231,8 +313,15 @@ class BrowserBridgeService:
             or not websocket_loop.is_running()
             or status != "connected"
         ):
+            bridge_status = self.status()
+            if bridge_status["lifecycle_state"] == "token_rejected":
+                raise BrowserBridgeError(
+                    "PAIRING_TOKEN_REJECTED",
+                    "The browser extension pairing token was rejected. Update the token in its popup.",
+                )
             raise BrowserBridgeError(
-                "BROWSER_NOT_CONNECTED", "Pair the read-only browser extension first."
+                "BROWSER_NOT_CONNECTED",
+                "The read-only browser extension is not connected. Open its popup to inspect retry status.",
             )
 
         current_loop = asyncio.get_running_loop()

@@ -31,6 +31,8 @@ class ApplicationContainer:
             allowed_extension_ids=config.BROWSER_EXTENSION_IDS,
             heartbeat_timeout=config.BROWSER_HEARTBEAT_TIMEOUT_SECONDS,
             command_timeout=config.BROWSER_COMMAND_TIMEOUT_SECONDS,
+            pairing_token=config.BROWSER_PAIRING_TOKEN,
+            pairing_token_source=config.BROWSER_PAIRING_TOKEN_SOURCE,
         )
         self.connectors = {
             "sis_browser": BrowserSISConnector(self.browser_bridge),
