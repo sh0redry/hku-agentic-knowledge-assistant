@@ -138,3 +138,6 @@ class HKUAgentsAPIClient:
 
     def moodle_inspect_dashboard(self) -> dict:
         return self._integration_request("POST", "/moodle/dashboard/inspect", json={})
+
+    def moodle_list_courses(self) -> dict:
+        return self._integration_request("POST", "/moodle/courses/list", json={})

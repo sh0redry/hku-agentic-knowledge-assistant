@@ -55,7 +55,7 @@ class MoodleDashboardIntegrationTests(unittest.TestCase):
                     "logged_in": True,
                     "page_kind": "dashboard",
                     "diagnostics": {
-                        "parser_version": "0.1.0",
+                        "parser_version": "0.2.4",
                         "dashboard_marker_found": True,
                         "login_marker_found": False,
                         "user_menu_found": True,
@@ -147,7 +147,7 @@ class MoodleDashboardIntegrationTests(unittest.TestCase):
                     "logged_in": True,
                     "page_kind": "dashboard",
                     "diagnostics": {
-                        "parser_version": "0.1.0",
+                        "parser_version": "0.2.4",
                         "dashboard_marker_found": True,
                         "login_marker_found": False,
                         "user_menu_found": True,
@@ -174,6 +174,86 @@ class MoodleDashboardIntegrationTests(unittest.TestCase):
             response["result"]["navigation"]["steps"],
             ["moodle_fixed_route_to_dashboard"],
         )
+
+    def test_visible_courses_are_returned_but_not_persisted(self):
+        connector = self.container.connectors["sis_browser"]
+        connector.bind_hku_tab = AsyncMock(
+            return_value={
+                "origin": "https://moodle.hku.hk",
+                "page_kind": "dashboard",
+                "logged_in": True,
+            }
+        )
+        connector.open_moodle = AsyncMock(
+            return_value={
+                "read_only": True,
+                "navigation_only": True,
+                "moodle_write_requests_sent": 0,
+                "source_origin": "https://moodle.hku.hk",
+                "source_page_kind": "dashboard",
+                "target_origin": "https://moodle.hku.hk",
+                "target_page_kind": "dashboard",
+                "steps": ["target_already_open"],
+                "snapshot": {},
+            }
+        )
+        connector.list_moodle_courses = AsyncMock(
+            return_value={
+                "origin": "https://moodle.hku.hk",
+                "logged_in": True,
+                "page_kind": "dashboard",
+                "courses": [
+                    {
+                        "course_id": "123",
+                        "course_code": "COMP3297",
+                        "section": "2B",
+                        "name": "COMP3297-2B Software Engineering",
+                        "state": "current",
+                    }
+                ],
+                "diagnostics": {
+                    "parser_version": "0.2.4",
+                    "dashboard_marker_found": True,
+                    "login_marker_found": False,
+                    "user_menu_found": True,
+                    "course_link_candidate_count": 1,
+                    "timeline_marker_found": True,
+                    "upcoming_marker_found": True,
+                    "todo_marker_found": False,
+                    "course_candidate_count": 1,
+                    "parsed_course_count": 1,
+                    "unparsed_course_candidate_count": 0,
+                    "missing_course_id_candidate_count": 0,
+                    "missing_course_name_candidate_count": 0,
+                    "duplicate_course_candidate_count": 0,
+                    "course_placeholder_candidate_count": 0,
+                },
+            }
+        )
+
+        response = self.client.post(
+            "/api/v1/integration/moodle/courses/list",
+            headers=self.headers,
+            json={},
+        ).json()
+
+        self.assertTrue(response["ok"])
+        result = response["result"]
+        self.assertEqual(result["course_list"]["course_count"], 1)
+        self.assertEqual(result["course_list"]["courses"][0]["course_id"], "123")
+        self.assertFalse(result["assignment_data_read"])
+        self.assertFalse(result["grade_data_read"])
+        self.assertEqual(result["moodle_writes_performed"], 0)
+        self.assertEqual(
+            self.container.moodle_courses.snapshot()["courses"][0]["course_code"],
+            "COMP3297",
+        )
+
+        stored = self.container.store.get_task(response["task"]["id"])
+        self.assertEqual(stored.result["course_count"], 1)
+        self.assertFalse(stored.result["private_course_details_persisted"])
+        self.assertNotIn("course_list", stored.result)
+        self.assertNotIn("Software Engineering", str(stored.result))
 
 
 if __name__ == "__main__":

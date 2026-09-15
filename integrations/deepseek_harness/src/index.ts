@@ -288,4 +288,18 @@ export function apply(ctx: Context, config: Config): void {
       },
     }),
   )
+
+  ctx.tools.register(
+    defineTool({
+      name: 'hku_moodle_list_courses',
+      description:
+        'Open the authenticated HKU Moodle Dashboard and list only visible course membership identifiers and names. Private course rows remain process-local and are not persisted in task history. It does not read assignments, grades, participants, messages, or submissions, and performs no Moodle write.',
+      parameters: {},
+      output: envelopeOutput,
+      timeoutMs: config.timeoutMs,
+      async execute(_args, execution) {
+        return client.listMoodleCourses(execution.signal)
+      },
+    }),
+  )
 }

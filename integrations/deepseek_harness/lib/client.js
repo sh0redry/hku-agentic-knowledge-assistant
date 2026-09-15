@@ -117,6 +117,9 @@ export class HKUAgentsClient {
     inspectMoodleDashboard(signal) {
         return this.request('POST', '/api/v1/integration/moodle/dashboard/inspect', {}, signal);
     }
+    listMoodleCourses(signal) {
+        return this.request('POST', '/api/v1/integration/moodle/courses/list', {}, signal);
+    }
     async request(method, path, body, parentSignal) {
         const token = process.env[this.tokenEnv]?.trim();
         if (!token || token.length < 32) {

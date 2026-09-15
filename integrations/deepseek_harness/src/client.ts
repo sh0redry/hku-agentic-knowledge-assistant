@@ -245,6 +245,10 @@ export class HKUAgentsClient {
     return this.request('POST', '/api/v1/integration/moodle/dashboard/inspect', {}, signal)
   }
 
+  listMoodleCourses(signal?: AbortSignal): Promise<IntegrationEnvelope> {
+    return this.request('POST', '/api/v1/integration/moodle/courses/list', {}, signal)
+  }
+
   private async request(
     method: 'GET' | 'POST',
     path: string,

@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from agents.models import TaskStatus
-from agents.moodle.agent import MoodleDashboardInspectRequest
+from agents.moodle.agent import MoodleCourseListRequest, MoodleDashboardInspectRequest
 from api.schemas import IntegrationResponse, IntegrationTaskSummary
 from browser_bridge.service import BrowserBridgeError
 from connectors.sis.models import (
@@ -196,10 +196,11 @@ def create_integration_router(expected_token: str) -> APIRouter:
     async def run_moodle_task(
         request: Request,
         correlation_id: str,
-        body: MoodleDashboardInspectRequest,
+        capability_id: str,
+        body: MoodleDashboardInspectRequest | MoodleCourseListRequest,
     ) -> IntegrationResponse:
         record = await request.app.state.container.tasks.submit_and_wait(
-            "moodle.dashboard.inspect",
+            capability_id,
             body.model_dump(mode="json"),
             correlation_id=correlation_id,
         )
@@ -210,10 +211,12 @@ def create_integration_router(expected_token: str) -> APIRouter:
             }
             error_code = task_error.get("code", "TASK_FAILED")
             recovery = (
-                "Reload the unpacked HKU AGENTS Browser Bridge 0.9.1, then refresh HKU Portal and Moodle."
+                "Reload the unpacked HKU AGENTS Browser Bridge 0.10.4, then refresh HKU Portal and Moodle."
                 if error_code == "EXTENSION_UPDATE_REQUIRED"
                 else "Complete the HKU Portal User login and any MFA in Moodle, then retry."
                 if error_code == "MOODLE_LOGIN_REQUIRED"
+                else "Keep the authenticated Moodle Dashboard open and report the count-only parser diagnostics."
+                if error_code == "MOODLE_COURSE_PARSE_INCOMPLETE"
                 else browser_recovery(
                     error_code,
                     "Keep the authenticated HKU Portal tab active and retry Moodle Dashboard inspection.",
@@ -240,7 +243,21 @@ def create_integration_router(expected_token: str) -> APIRouter:
         return await run_moodle_task(
             request,
             correlation_id,
+            "moodle.dashboard.inspect",
             body or MoodleDashboardInspectRequest(),
+        )
+
+    @router.post("/moodle/courses/list", response_model=IntegrationResponse)
+    async def list_moodle_courses(
+        request: Request,
+        body: MoodleCourseListRequest | None = None,
+        correlation_id: str = Depends(authorize),
+    ):
+        return await run_moodle_task(
+            request,
+            correlation_id,
+            "moodle.courses.list",
+            body or MoodleCourseListRequest(),
         )
 
     @router.post("/sis/timetable/sync-weekly", response_model=IntegrationResponse)

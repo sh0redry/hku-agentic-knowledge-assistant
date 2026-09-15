@@ -166,6 +166,7 @@ class PlatformAPITests(unittest.TestCase):
                 "sis.timetable.check_conflicts",
                 "sis.timetable.exam_status",
                 "moodle.dashboard.inspect",
+                "moodle.courses.list",
             },
         )
         connections = self.client.get("/api/v1/connections").json()["connections"]
@@ -1028,7 +1029,7 @@ class SafetyFrameworkTests(unittest.TestCase):
                 "http://127.0.0.1/*",
             ],
         )
-        self.assertEqual(manifest["version"], "0.9.1")
+        self.assertEqual(manifest["version"], "0.10.4")
 
         node = shutil.which("node")
         if node is None:
@@ -1184,6 +1185,10 @@ class SafetyFrameworkTests(unittest.TestCase):
         self.assertEqual(timetable_command.payload, {})
         moodle_command = BrowserCommand(command=BrowserCommandName.OPEN_MOODLE)
         self.assertEqual(moodle_command.payload, {})
+        moodle_courses_command = BrowserCommand(
+            command=BrowserCommandName.LIST_MOODLE_COURSES
+        )
+        self.assertEqual(moodle_courses_command.payload, {})
         redacted = sanitize_for_log(
             {
                 "cookie": "secret",

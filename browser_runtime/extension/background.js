@@ -33,7 +33,8 @@ const ALLOWED_COMMANDS = new Set([
   "sis.get_status",
   "timetable.inspect_weekly",
   "moodle.inspect_dashboard",
-  "moodle.open_dashboard"
+  "moodle.open_dashboard",
+  "moodle.list_courses"
 ]);
 const NAVIGATION_DEADLINE_MS = 30000;
 
@@ -590,6 +591,26 @@ async function waitForMoodleDashboardSnapshot(deadline, preferredTabId = null) {
   );
 }
 
+async function readSettledMoodleCourseList(deadline = Date.now() + 5000) {
+  const dashboard = await findAuthenticatedMoodleSnapshot();
+  if (!dashboard) {
+    throw commandError("MOODLE_TAB_NOT_FOUND", "Open the authenticated Moodle Dashboard in Chrome first.");
+  }
+  let lastSnapshot = null;
+  while (Date.now() < deadline) {
+    lastSnapshot = await sendTabCommand(boundTabId, "moodle.list_courses");
+    const diagnostics = lastSnapshot.diagnostics || {};
+    if (
+      Number(diagnostics.parsed_course_count || 0) > 0 &&
+      Number(diagnostics.unparsed_course_candidate_count || 0) === 0
+    ) {
+      return lastSnapshot;
+    }
+    await delay(300);
+  }
+  return lastSnapshot;
+}
+
 async function waitForCartSnapshot(deadline, requestedTermLabel = null) {
   let lastError = null;
   let selectedTerm = false;
@@ -929,6 +950,9 @@ async function executeCommand(command, payload = {}) {
       throw commandError("MOODLE_TAB_NOT_FOUND", "Open the authenticated Moodle Dashboard in Chrome first.");
     }
     return snapshot;
+  }
+  if (command === "moodle.list_courses") {
+    return readSettledMoodleCourseList();
   }
   return inspectBoundSisTab(command);
 }

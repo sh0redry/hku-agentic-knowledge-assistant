@@ -295,6 +295,12 @@ def create_gradio_ui(container):
         except Exception as exc:
             return _pretty({"ok": False, "read_only": True, "message": str(exc)})
 
+    async def moodle_courses_handler():
+        try:
+            return _pretty(await asyncio.to_thread(api_client.moodle_list_courses))
+        except Exception as exc:
+            return _pretty({"ok": False, "read_only": True, "message": str(exc)})
+
     async def live_sis_call(action, operation):
         completed_at = lambda: datetime.now(timezone.utc).isoformat(timespec="seconds")
         try:
@@ -657,10 +663,10 @@ def create_gradio_ui(container):
         with gr.Tab("Moodle"):
             gr.Markdown(
                 "## Moodle Dashboard discovery (read-only)\n"
-                "Keep the authenticated HKU Portal tab active. This first Phase C slice "
+                "Keep the authenticated HKU Portal tab active. The diagnostic action "
                 "opens Moodle through the exact Portal service entry and verifies only "
-                "login state and Dashboard markers. It does not read course names, "
-                "assignments, grades, messages, or submissions."
+                "login state and Dashboard markers. The separate course-list action "
+                "below has its own explicit private-data contract."
             )
             moodle_dashboard_button = gr.Button(
                 "Open and inspect Moodle Dashboard", variant="primary"
@@ -673,6 +679,25 @@ def create_gradio_ui(container):
             moodle_dashboard_button.click(
                 moodle_dashboard_handler,
                 outputs=moodle_dashboard_output,
+                show_progress="minimal",
+                queue=False,
+            )
+            gr.Markdown(
+                "### Visible course membership\n"
+                "Reads only course IDs, names, normalized course codes/sections when "
+                "present, and explicit current/past/future markers. Private rows remain "
+                "in process memory and are excluded from SQLite task history. It does "
+                "not read assignments, grades, participants, messages, or submissions."
+            )
+            moodle_courses_button = gr.Button("List visible Moodle courses")
+            moodle_courses_output = gr.Code(
+                value="Open the authenticated Moodle Dashboard before listing courses.",
+                language="json",
+                label="Moodle visible courses",
+            )
+            moodle_courses_button.click(
+                moodle_courses_handler,
+                outputs=moodle_courses_output,
                 show_progress="minimal",
                 queue=False,
             )

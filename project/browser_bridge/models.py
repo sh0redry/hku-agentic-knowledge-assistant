@@ -186,6 +186,47 @@ class MoodleDashboardSnapshot(BrowserTabState):
     diagnostics: MoodleParserDiagnostics
 
 
+class MoodleCourse(StrictMessage):
+    course_id: str = Field(pattern=r"^\d{1,20}$", max_length=20)
+    course_code: str | None = Field(
+        default=None, pattern=r"^[A-Z]{2,8}\d{4}[A-Z]?$", max_length=20
+    )
+    section: str | None = Field(
+        default=None, pattern=r"^[0-9]{1,3}[A-Z]{0,2}$", max_length=5
+    )
+    academic_year: str | None = Field(
+        default=None, pattern=r"^20\d{2}-\d{2}$", max_length=7
+    )
+    name: str = Field(min_length=1, max_length=300)
+    state: Literal["current", "past", "future", "unknown"] = "unknown"
+
+
+class MoodleCourseParserDiagnostics(MoodleParserDiagnostics):
+    course_candidate_count: int = Field(ge=0, le=10000)
+    parsed_course_count: int = Field(ge=0, le=10000)
+    unparsed_course_candidate_count: int = Field(ge=0, le=10000)
+    missing_course_id_candidate_count: int = Field(ge=0, le=10000)
+    missing_course_name_candidate_count: int = Field(ge=0, le=10000)
+    duplicate_course_candidate_count: int = Field(ge=0, le=10000)
+    course_placeholder_candidate_count: int = Field(ge=0, le=10000)
+
+
+class MoodleCourseListSnapshot(BrowserTabState):
+    origin: Literal["https://moodle.hku.hk"]
+    logged_in: Literal[True]
+    page_kind: Literal["dashboard"]
+    courses: list[MoodleCourse] = Field(default_factory=list, max_length=200)
+    diagnostics: MoodleCourseParserDiagnostics
+
+    @model_validator(mode="after")
+    def validate_course_counts(self):
+        if self.course_count != len(self.courses):
+            raise ValueError("Moodle course count does not match the structured rows.")
+        if self.diagnostics.parsed_course_count != len(self.courses):
+            raise ValueError("Moodle parser count does not match the structured rows.")
+        return self
+
+
 class MoodleNavigationResult(StrictMessage):
     read_only: Literal[True]
     navigation_only: Literal[True]

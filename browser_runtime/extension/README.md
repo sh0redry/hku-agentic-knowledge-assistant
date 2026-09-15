@@ -5,10 +5,11 @@ and Library tabs and reports a sanitized per-system connection registry to the
 local HKU AGENTS process. Existing Portal/SIS commands still use the compatible
 single active binding. The extension can follow three fixed navigation targets:
 the Portal SIS sign-on entry, the exact SIS `Enrollment Add Classes` component
-route, and a validated Portal Moodle entry. Moodle has a diagnostic-only content
-parser in Phase C; Library remains discovery-only. The Moodle parser returns
-authentication/page markers and aggregate counts only, never course names,
-assignments, grades, messages, submissions, or full HTML. The extension never
+route, and a validated Portal Moodle entry. Moodle has a diagnostic parser plus
+an explicitly separate visible-course-membership command in Phase C; Library
+remains discovery-only. The diagnostic command returns markers and aggregate
+counts only. The course command returns structured course identity but never
+assignments, grades, participants, messages, submissions, or full HTML. The extension never
 enters credentials, reads cookies, searches courses, enters Step 2/3, or submits
 forms.
 
@@ -53,7 +54,7 @@ not sent to the local service.
 
 Portal, SIS, the dedicated My Weekly Schedule application, and Moodle can be
 bound for their restricted commands. Moodle exposes only a diagnostic Dashboard
-inspection capability; opening My Library in Chrome makes it discoverable but
+  inspection and visible-course-list capabilities; opening My Library in Chrome makes it discoverable but
 does not grant HKU AGENTS a read or write capability for that page.
 
 ## Security contract
@@ -83,10 +84,12 @@ does not grant HKU AGENTS a read or write capability for that page.
 - Weekly parser `0.2.1` recognizes absolutely positioned course cards from their
   SUN-SAT column geometry. It derives Sem 1/2 only from unambiguous displayed-week
   months and reports June-August as undetermined.
-- Moodle parser `0.1.0` recognizes login and authenticated Dashboard state but
-  releases only boolean markers and aggregate candidate counts. Library remains
-  discovery-only. Tab discovery strips query strings and fragments before
-  reporting state.
+- Moodle parser `0.2.4` recognizes login and authenticated Dashboard state. Its
+  diagnostic command releases only boolean markers and aggregate counts; its
+  separately named course command releases Moodle course ID, name, normalized
+  code/section/academic year when present, and conservative state. Library
+  remains discovery-only. Tab discovery strips query strings and fragments
+  before reporting state.
 - SIS parser `0.3.1` additionally normalizes read-only Class Schedule meetings
   and visible Examination Timetables entries. It does not create or edit calendar data.
 - Verified functional SIS pages take precedence over stale hidden sign-in text

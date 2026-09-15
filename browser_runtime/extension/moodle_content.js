@@ -2,13 +2,19 @@
   "use strict";
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    if (!["moodle.inspect_dashboard", "moodle.open_dashboard"].includes(message?.command)) {
+    if (![
+      "moodle.inspect_dashboard",
+      "moodle.open_dashboard",
+      "moodle.list_courses"
+    ].includes(message?.command)) {
       return false;
     }
     try {
       const data = message.command === "moodle.open_dashboard"
         ? self.HKUMoodleParser.openDashboard(document, location)
-        : self.HKUMoodleParser.inspect(document, location);
+        : message.command === "moodle.list_courses"
+          ? self.HKUMoodleParser.parseCourses(document, location)
+          : self.HKUMoodleParser.inspect(document, location);
       sendResponse({ ok: true, data });
     } catch (error) {
       sendResponse({

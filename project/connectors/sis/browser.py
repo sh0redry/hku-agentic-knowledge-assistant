@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from browser_bridge.models import (
     MoodleDashboardSnapshot,
+    MoodleCourseListSnapshot,
     MoodleNavigationResult,
     PortalPageSnapshot,
     SISNavigationResult,
@@ -65,6 +66,10 @@ class BrowserSISConnector(BaseConnector):
     async def inspect_moodle_dashboard(self) -> dict:
         data = await self._command(BrowserCommandName.INSPECT_MOODLE_DASHBOARD)
         return MoodleDashboardSnapshot.model_validate(data).model_dump(mode="json")
+
+    async def list_moodle_courses(self) -> dict:
+        data = await self._command(BrowserCommandName.LIST_MOODLE_COURSES)
+        return MoodleCourseListSnapshot.model_validate(data).model_dump(mode="json")
 
     async def bind_tab(self) -> dict:
         data = await self._command(BrowserCommandName.BIND_SIS_TAB)

@@ -79,6 +79,7 @@ Core endpoints:
 | `POST /api/v1/browser/hku/open-sis` | Follow the fixed Portal SIS entry after manual login/MFA |
 | `POST /api/v1/browser/hku/open-moodle` | Follow the validated Portal Moodle entry after manual login/MFA |
 | `GET /api/v1/browser/moodle/dashboard` | Read diagnostic-only Moodle Dashboard state without course or assignment data |
+| `GET /api/v1/browser/moodle/courses` | Read structured visible Moodle course membership from the authenticated Dashboard |
 | `POST /api/v1/browser/sis/open-enrollment-add-classes` | Follow the exact SIS Enrollment Add Classes menu item |
 | `GET /api/v1/browser/sis/page` | Read structured state from the bound SIS page |
 | `GET /api/v1/browser/sis/cart` | Read structured cart rows without submitting anything |
@@ -95,6 +96,7 @@ Core endpoints:
 | `POST /api/v1/integration/sis/timetable/check-conflicts` | Compare candidate meetings with the synchronized schedule locally |
 | `POST /api/v1/integration/sis/timetable/exam-status` | Inspect publication state on an already-open Examination Timetables page |
 | `POST /api/v1/integration/moodle/dashboard/inspect` | Navigate to and inspect the Moodle Dashboard using a diagnostic-only contract |
+| `POST /api/v1/integration/moodle/courses/list` | Navigate and list visible Moodle course membership without reading learning activity data |
 | `POST /api/v1/chat` | Execute the existing Knowledge Agent through the platform boundary |
 | `POST /api/v1/sis/preflight` | Run the zero-network SIS simulator |
 | `GET /api/v1/tasks/{task_id}/events` | Stream task events over SSE |
@@ -196,11 +198,13 @@ Moodle, and Library
 independently, including detected authentication state, heartbeat freshness,
 page kind, parser version, and a recovery hint. Reported URLs are restricted to
 approved origins and paths; query strings and fragments are removed centrally.
-Moodle has a Phase C diagnostic-only parser and restricted Portal navigation
-tool. It reports authentication/page state, boolean Dashboard markers, and an
-aggregate course-link candidate count, but never course names, assignments,
-grades, messages, submissions, or full HTML. Library remains discovery-only.
-Neither system exposes a domain write.
+Moodle has a Phase C diagnostic parser, restricted Portal navigation, and a
+separately scoped visible-course reader. The diagnostic action never returns
+course names. The explicit course-list action returns only Moodle course ID,
+name, conservatively normalized course code/section/academic year, and an
+explicit current/past/future marker when the DOM provides one. It never reads
+assignments, grades, participants, messages, submissions, or full HTML. Library
+remains discovery-only. Neither system exposes a domain write.
 
 ### Moodle diagnostic slice
 
@@ -214,8 +218,15 @@ The result explicitly reports `navigation_interactions_performed`,
 indicators are respectively `0`, `false`, and `false`.
 
 Moodle login and MFA remain manual. Unknown origins, ambiguous Portal entries,
-login pages, and unverified Dashboard states fail closed. Course membership and
-deadline extraction are intentionally deferred to the next Phase C task.
+login pages, and unverified Dashboard states fail closed.
+
+`POST /api/v1/integration/moodle/courses/list` takes an empty object and reads
+only course cards currently exposed in the authenticated Dashboard DOM. Its
+complete course rows are held in process memory and returned to the current
+caller, while SQLite task history stores only the count, fetch time, and
+`private_course_details_persisted: false`. A zero-candidate result carries a
+warning because it does not prove that the account has no courses. Deadline and
+To-do extraction remain deferred.
 
 ### Read-only timetable tools
 
