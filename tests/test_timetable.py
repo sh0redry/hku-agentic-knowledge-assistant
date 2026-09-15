@@ -109,14 +109,14 @@ class TimetableIntegrationTests(unittest.TestCase):
 
     def test_sync_and_derived_api_share_one_read_only_cache(self):
         data = fixture("sis_timetable_sem1.json")
-        self.container.connectors["sis_browser"].bind_hku_tab = AsyncMock(
+        bind_hku_tab = AsyncMock(
             return_value={
                 "origin": "https://studentportal.hku.hk",
                 "page_kind": "portal_home",
                 "logged_in": True,
             }
         )
-        self.container.connectors["sis_browser"].open_weekly_timetable = AsyncMock(
+        open_weekly_timetable = AsyncMock(
             return_value={
                 "read_only": True,
                 "navigation_only": True,
@@ -140,6 +140,10 @@ class TimetableIntegrationTests(unittest.TestCase):
                     },
                 },
             }
+        )
+        self.container.connectors["sis_browser"].bind_hku_tab = bind_hku_tab
+        self.container.connectors["sis_browser"].open_weekly_timetable = (
+            open_weekly_timetable
         )
         sync = self.client.post(
             "/api/v1/integration/sis/timetable/sync-weekly",
@@ -172,6 +176,90 @@ class TimetableIntegrationTests(unittest.TestCase):
         self.assertTrue(next_class["ok"])
         self.assertEqual(next_class["result"]["next_class"]["course_code"], "COMP3230")
         self.assertFalse(next_class["result"]["browser_interactions_performed"])
+
+        free_slots = self.client.post(
+            "/api/v1/integration/sis/timetable/free-slots",
+            headers=self.headers,
+            json={
+                "term_label": data["term_label"],
+                "weekdays": ["monday"],
+                "window_start": "09:00",
+                "window_end": "18:00",
+                "minimum_minutes": 60,
+            },
+        ).json()
+        self.assertTrue(free_slots["ok"])
+        self.assertEqual(
+            free_slots["result"]["free_slots"],
+            [
+                {
+                    "weekday": "monday",
+                    "start_time": "09:00",
+                    "end_time": "13:00",
+                    "duration_minutes": 240,
+                },
+                {
+                    "weekday": "monday",
+                    "start_time": "15:50",
+                    "end_time": "18:00",
+                    "duration_minutes": 130,
+                },
+            ],
+        )
+
+        conflicts = self.client.post(
+            "/api/v1/integration/sis/timetable/check-conflicts",
+            headers=self.headers,
+            json={
+                "term_label": data["term_label"],
+                "candidate_meetings": [
+                    {
+                        "course_code": "COMP9999",
+                        "section": "1A",
+                        "weekday": "monday",
+                        "start_time": "13:30",
+                        "end_time": "15:10",
+                    }
+                ],
+            },
+        ).json()
+        self.assertTrue(conflicts["ok"])
+        self.assertTrue(conflicts["result"]["has_conflicts"])
+        self.assertEqual(conflicts["result"]["conflict_count"], 2)
+        self.assertEqual(
+            [item["overlap"] for item in conflicts["result"]["conflicts"]],
+            [
+                {
+                    "start_time": "13:30",
+                    "end_time": "14:50",
+                    "duration_minutes": 80,
+                },
+                {
+                    "start_time": "15:00",
+                    "end_time": "15:10",
+                    "duration_minutes": 10,
+                },
+            ],
+        )
+
+        derived_results = [
+            next_class["result"],
+            free_slots["result"],
+            conflicts["result"],
+        ]
+        synced_at = sync["result"]["timetable"]["fetched_at"]
+        for result in derived_results:
+            self.assertTrue(result["derived_locally"])
+            self.assertFalse(result["browser_interactions_performed"])
+            self.assertEqual(result["domain_writes_performed"], 0)
+            self.assertEqual(result["source_fetched_at"], synced_at)
+        bind_hku_tab.assert_awaited_once_with()
+        open_weekly_timetable.assert_awaited_once_with()
+
+        conflict_task = self.container.store.get_task(conflicts["task"]["id"])
+        self.assertEqual(conflict_task.input["candidate_meeting_count"], 1)
+        self.assertNotIn("candidate_meetings", conflict_task.input)
+        self.assertNotIn("COMP9999", str(conflict_task.result))
 
     def test_derived_api_requires_a_matching_sync(self):
         response = self.client.post(

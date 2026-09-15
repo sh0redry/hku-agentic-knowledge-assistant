@@ -218,6 +218,79 @@ test('timetable sync tool forwards only the exact term to the Phase B endpoint',
   }
 })
 
+test('three derived timetable tools forward cache-only calculation inputs', async () => {
+  const previous = process.env.INTEGRATION_API_TOKEN
+  process.env.INTEGRATION_API_TOKEN = TOKEN
+  const received = []
+  try {
+    await withServer(
+      (request, response) => {
+        const chunks = []
+        request.on('data', chunk => chunks.push(chunk))
+        request.on('end', () => {
+          const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+          received.push({ url: request.url, body })
+          let result
+          if (request.url.endsWith('/next-class')) {
+            result = { derived_locally: true, browser_interactions_performed: false, next_class: { course_code: 'COMP3230' } }
+          } else if (request.url.endsWith('/free-slots')) {
+            result = { derived_locally: true, browser_interactions_performed: false, free_slots: [] }
+          } else {
+            result = { derived_locally: true, browser_interactions_performed: false, has_conflicts: true, conflict_count: 1 }
+          }
+          response.setHeader('content-type', 'application/json')
+          response.end(JSON.stringify(envelope(result)))
+        })
+      },
+      async baseUrl => {
+        const tools = []
+        const ctx = { tools: { register(tool) { tools.push(tool) } } }
+        apply(ctx, { baseUrl, tokenEnv: 'INTEGRATION_API_TOKEN', timeoutMs: 5000 })
+        const execution = { signal: new AbortController().signal }
+        const next = await tools.find(tool => tool.name === 'hku_sis_next_class').execute(
+          { term_label: '2026-27 Sem 1', as_of: '2026-09-14T12:00:00+08:00', days_ahead: 7 },
+          execution,
+        )
+        const free = await tools.find(tool => tool.name === 'hku_sis_find_free_slots').execute(
+          { term_label: '2026-27 Sem 1', weekdays: ['monday'], window_start: '09:00', window_end: '18:00', minimum_minutes: 60 },
+          execution,
+        )
+        const conflicts = await tools.find(tool => tool.name === 'hku_sis_check_timetable_conflicts').execute(
+          {
+            term_label: '2026-27 Sem 1',
+            candidate_meetings: [{ course_code: 'COMP9999', section: '1A', weekday: 'monday', start_time: '13:30', end_time: '14:00' }],
+          },
+          execution,
+        )
+        for (const output of [next, free, conflicts]) {
+          assert.equal(output.result.derived_locally, true)
+          assert.equal(output.result.browser_interactions_performed, false)
+        }
+      },
+    )
+    assert.deepEqual(received, [
+      {
+        url: '/api/v1/integration/sis/timetable/next-class',
+        body: { term_label: '2026-27 Sem 1', as_of: '2026-09-14T12:00:00+08:00', days_ahead: 7 },
+      },
+      {
+        url: '/api/v1/integration/sis/timetable/free-slots',
+        body: { term_label: '2026-27 Sem 1', weekdays: ['monday'], window_start: '09:00', window_end: '18:00', minimum_minutes: 60 },
+      },
+      {
+        url: '/api/v1/integration/sis/timetable/check-conflicts',
+        body: {
+          term_label: '2026-27 Sem 1',
+          candidate_meetings: [{ course_code: 'COMP9999', section: '1A', weekday: 'monday', start_time: '13:30', end_time: '14:00' }],
+        },
+      },
+    ])
+  } finally {
+    if (previous === undefined) delete process.env.INTEGRATION_API_TOKEN
+    else process.env.INTEGRATION_API_TOKEN = previous
+  }
+})
+
 test('navigation tool sends only the validated target term to the fixed local endpoint', async () => {
   const previous = process.env.INTEGRATION_API_TOKEN
   process.env.INTEGRATION_API_TOKEN = TOKEN
