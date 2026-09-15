@@ -84,8 +84,10 @@ python project/app.py
 For the optional browser connection, load `browser_runtime/extension` as an
 unpacked extension and pair it from the GUI's **Connections** tab. The GUI now
 tracks sanitized Portal, SIS, Moodle, and Library connection state separately.
-Moodle and Library remain discovery-only; the extension has no cookie or domain
-write permissions.
+Moodle now has a diagnostic-only Dashboard inspection slice; Library remains
+discovery-only. The extension has no cookie or domain write permissions, and
+the Moodle diagnostic deliberately returns no course names, assignments,
+grades, messages, or submission data.
 
 Configure a separate random `BROWSER_PAIRING_TOKEN` of at least 32 characters
 in the ignored `project/.env` file for automatic extension reconnection across
@@ -111,6 +113,13 @@ The weekly page does not expose an academic-term label, so the bridge records it
 visible week range and conservatively derives Sem 1 for September-December or
 Sem 2 for January-May; June-August remains explicitly undetermined. Course cards
 are read from their verified SUN-SAT grid columns rather than assumed table rows.
+
+Phase C begins with a restricted Portal-to-Moodle SSO path and explicit Moodle
+authentication/page-state detection. The GUI's **Moodle** tab can open and
+inspect the authenticated Dashboard, but this first slice returns only parser
+markers and aggregate candidate counts. It reports browser navigation separately
+from Moodle writes, which remain fixed at zero. Course and deadline extraction
+will be added only after this navigation and privacy boundary passes live testing.
 
 Ollama is still available as an optional local provider by setting `LLM_PROVIDER=ollama`.
 

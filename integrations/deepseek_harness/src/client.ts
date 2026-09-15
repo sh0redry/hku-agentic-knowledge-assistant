@@ -241,6 +241,10 @@ export class HKUAgentsClient {
     return this.request('POST', '/api/v1/integration/sis/timetable/exam-status', input, signal)
   }
 
+  inspectMoodleDashboard(signal?: AbortSignal): Promise<IntegrationEnvelope> {
+    return this.request('POST', '/api/v1/integration/moodle/dashboard/inspect', {}, signal)
+  }
+
   private async request(
     method: 'GET' | 'POST',
     path: string,

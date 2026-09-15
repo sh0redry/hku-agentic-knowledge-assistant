@@ -8,12 +8,19 @@
   ]);
   const SIS_ORIGIN = "https://sis-main.hku.hk";
   const WEEKLY_TIMETABLE_ORIGIN = "https://sweb.hku.hk";
+  const MOODLE_ORIGIN = "https://moodle.hku.hk";
   const WEEKLY_TIMETABLE_URL =
     `${WEEKLY_TIMETABLE_ORIGIN}/student/servlet/MyWeekly/showTimetable`;
   const SIS_ENTRY_LABELS = new Set([
     "sis",
     "student information system",
     "student information system (sis)"
+  ]);
+  const MOODLE_ENTRY_LABELS = new Set([
+    "moodle",
+    "my elearning",
+    "e-learning",
+    "elearning"
   ]);
   const SIS_SIGNON_PATH = "/sisprod/z_signon.jsp";
   const ENROLLMENT_COMPONENT = "SA_LEARNER_SERVICES.SSR_SSENRL_CART.GBL";
@@ -66,7 +73,8 @@
     try {
       const destination = new URL(rawHref, locationObject.href);
       if (destination.protocol !== "https:") return null;
-      if (!PORTAL_ORIGINS.has(destination.origin) && destination.origin !== SIS_ORIGIN) return null;
+      if (!PORTAL_ORIGINS.has(destination.origin) &&
+          destination.origin !== SIS_ORIGIN && destination.origin !== MOODLE_ORIGIN) return null;
       return destination;
     } catch (_error) {
       return null;
@@ -87,6 +95,21 @@
     return candidates;
   }
 
+  function portalMoodleCandidates(documentObject, locationObject) {
+    const candidates = [];
+    for (const documentCandidate of collectSameOriginDocuments(documentObject)) {
+      for (const element of clickableElements(documentCandidate)) {
+        const label = normalizedLabel(element);
+        if (!MOODLE_ENTRY_LABELS.has(label)) continue;
+        const destination = safePortalDestination(element, locationObject);
+        if (!destination || !isApprovedMoodleEntry(destination)) continue;
+        candidates.push({ element, label, destination });
+      }
+    }
+    const exactMoodle = candidates.filter((candidate) => candidate.label === "moodle");
+    return exactMoodle.length ? exactMoodle : candidates;
+  }
+
   function isApprovedSisEntry(destination) {
     if (destination.origin === SIS_ORIGIN) {
       return destination.pathname.toLowerCase() === SIS_SIGNON_PATH;
@@ -94,6 +117,14 @@
     return destination.origin === LEGACY_PORTAL_ORIGIN &&
       destination.pathname.toLowerCase() === "/ssoaccess.html" &&
       destination.searchParams.get("service")?.toLowerCase() === "sis";
+  }
+
+  function isApprovedMoodleEntry(destination) {
+    if (destination.origin === MOODLE_ORIGIN) return true;
+    if (!PORTAL_ORIGINS.has(destination.origin)) return false;
+    const service = (destination.searchParams.get("service") || "").toLowerCase();
+    return /moodle|elearning/.test(service) ||
+      /moodle|elearning/.test(destination.pathname.toLowerCase());
   }
 
   function classifyPortalPage(documentObject, locationObject) {
@@ -105,6 +136,7 @@
     if (/access denied|not authorized|session (?:has )?expired/.test(bodyText)) return "blocked";
     if (
       portalSisCandidates(documentObject, locationObject).length > 0 ||
+      portalMoodleCandidates(documentObject, locationObject).length > 0 ||
       /dashboard|my page|logout/.test(bodyText)
     ) {
       return "portal_home";
@@ -118,6 +150,7 @@
     }
     const pageKind = classifyPortalPage(documentObject, locationObject);
     const candidates = portalSisCandidates(documentObject, locationObject);
+    const moodleCandidates = portalMoodleCandidates(documentObject, locationObject);
     return {
       bound: true,
       origin: locationObject.origin,
@@ -131,7 +164,10 @@
         parser_version: "0.4.4",
         sis_entry_candidate_count: candidates.length,
         sis_entry_available: candidates.length > 0,
-        candidate_labels: [...new Set(candidates.map((candidate) => candidate.label))].slice(0, 5)
+        candidate_labels: [...new Set(candidates.map((candidate) => candidate.label))].slice(0, 5),
+        moodle_entry_candidate_count: moodleCandidates.length,
+        moodle_entry_available: moodleCandidates.length > 0,
+        moodle_candidate_labels: [...new Set(moodleCandidates.map((candidate) => candidate.label))].slice(0, 5)
       }
     };
   }
@@ -339,14 +375,39 @@
     };
   }
 
+  function openMoodleFromPortal(documentObject, locationObject, scheduler) {
+    const snapshot = inspectPortal(documentObject, locationObject);
+    if (snapshot.logged_in !== true) {
+      const error = new Error("Complete HKU Portal login and MFA before opening Moodle.");
+      error.code = "PORTAL_LOGIN_REQUIRED";
+      throw error;
+    }
+    const candidate = uniqueDestinationCandidate(
+      portalMoodleCandidates(documentObject, locationObject),
+      "The Moodle entry"
+    );
+    deferNavigation(() => candidate.element.click(), scheduler);
+    return {
+      read_only: true,
+      navigation_only: true,
+      moodle_write_requests_sent: 0,
+      source_origin: locationObject.origin,
+      target_origin: MOODLE_ORIGIN,
+      navigation_started: true,
+      portal_entry_clicked: true
+    };
+  }
+
   const api = {
     classifyPortalPage,
     inspectPortal,
     normalizeText,
     openEnrollmentAddClasses,
+    openMoodleFromPortal,
     openSisFromPortal,
     openWeeklyTimetableFromPortal,
     portalSisCandidates,
+    portalMoodleCandidates,
     selectTerm,
     termSelectionCandidates
   };

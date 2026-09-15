@@ -165,6 +165,7 @@ class PlatformAPITests(unittest.TestCase):
                 "sis.timetable.find_free_slots",
                 "sis.timetable.check_conflicts",
                 "sis.timetable.exam_status",
+                "moodle.dashboard.inspect",
             },
         )
         connections = self.client.get("/api/v1/connections").json()["connections"]
@@ -1005,6 +1006,7 @@ class SafetyFrameworkTests(unittest.TestCase):
                 "https://studentportal.hku.hk/*",
                 "https://sis-main.hku.hk/*",
                 "https://sweb.hku.hk/*",
+                "https://moodle.hku.hk/*",
             },
         )
         sis_content_script = next(
@@ -1026,7 +1028,7 @@ class SafetyFrameworkTests(unittest.TestCase):
                 "http://127.0.0.1/*",
             ],
         )
-        self.assertEqual(manifest["version"], "0.8.2")
+        self.assertEqual(manifest["version"], "0.9.1")
 
         node = shutil.which("node")
         if node is None:
@@ -1074,6 +1076,18 @@ class SafetyFrameworkTests(unittest.TestCase):
             targets_result_process.returncode,
             0,
             targets_result_process.stderr or targets_result_process.stdout,
+        )
+        moodle_result_process = subprocess.run(
+            [node, str(ROOT / "tests" / "moodle_parser.test.js")],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(
+            moodle_result_process.returncode,
+            0,
+            moodle_result_process.stderr or moodle_result_process.stdout,
         )
         timetable_result_process = subprocess.run(
             [node, str(ROOT / "tests" / "timetable_parser.test.js")],
@@ -1168,6 +1182,8 @@ class SafetyFrameworkTests(unittest.TestCase):
             command=BrowserCommandName.OPEN_WEEKLY_TIMETABLE
         )
         self.assertEqual(timetable_command.payload, {})
+        moodle_command = BrowserCommand(command=BrowserCommandName.OPEN_MOODLE)
+        self.assertEqual(moodle_command.payload, {})
         redacted = sanitize_for_log(
             {
                 "cookie": "secret",

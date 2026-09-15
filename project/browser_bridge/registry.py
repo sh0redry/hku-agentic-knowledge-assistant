@@ -49,6 +49,8 @@ class BrowserSessionRegistry:
                 if legacy_tab.origin == "https://sis-main.hku.hk"
                 else "timetable"
                 if legacy_tab.origin == "https://sweb.hku.hk"
+                else "moodle"
+                if legacy_tab.origin == "https://moodle.hku.hk"
                 else None
             )
             if system and system not in incoming:

@@ -4,12 +4,14 @@ importScripts("connection_lifecycle.js", "browser_targets.js");
 
 const SIS_URL_PATTERN = "https://sis-main.hku.hk/*";
 const WEEKLY_TIMETABLE_URL_PATTERN = "https://sweb.hku.hk/*";
+const MOODLE_URL_PATTERN = "https://moodle.hku.hk/*";
 const PORTAL_URL_PATTERNS = [
   "https://hkuportal.hku.hk/*",
   "https://studentportal.hku.hk/*"
 ];
 const SIS_ORIGIN = "https://sis-main.hku.hk";
 const WEEKLY_TIMETABLE_ORIGIN = "https://sweb.hku.hk";
+const MOODLE_ORIGIN = "https://moodle.hku.hk";
 const PORTAL_ORIGINS = new Set([
   "https://hkuportal.hku.hk",
   "https://studentportal.hku.hk"
@@ -21,6 +23,7 @@ const ALLOWED_COMMANDS = new Set([
   "hku.open_sis",
   "hku.open_enrollment_add_classes",
   "hku.open_weekly_timetable",
+  "hku.open_moodle",
   "sis.bind_tab",
   "sis.inspect_page",
   "sis.inspect_cart",
@@ -28,7 +31,9 @@ const ALLOWED_COMMANDS = new Set([
   "sis.select_term",
   "sis.preflight",
   "sis.get_status",
-  "timetable.inspect_weekly"
+  "timetable.inspect_weekly",
+  "moodle.inspect_dashboard",
+  "moodle.open_dashboard"
 ]);
 const NAVIGATION_DEADLINE_MS = 30000;
 
@@ -200,6 +205,10 @@ async function queryWeeklyTimetableTabs() {
   return chrome.tabs.query({ url: WEEKLY_TIMETABLE_URL_PATTERN });
 }
 
+async function queryMoodleTabs() {
+  return chrome.tabs.query({ url: MOODLE_URL_PATTERN });
+}
+
 async function findSisTab() {
   const allTabs = await querySisTabs();
   const tabs = allTabs.filter((tab) => !isKnownSisSsoErrorPage(tab.url));
@@ -219,7 +228,8 @@ async function findSisTab() {
 function allowedOrigin(url) {
   try {
     const origin = new URL(url).origin;
-    return PORTAL_ORIGINS.has(origin) || origin === SIS_ORIGIN || origin === WEEKLY_TIMETABLE_ORIGIN
+    return PORTAL_ORIGINS.has(origin) || origin === SIS_ORIGIN ||
+      origin === WEEKLY_TIMETABLE_ORIGIN || origin === MOODLE_ORIGIN
       ? origin
       : null;
   } catch (_error) {
@@ -246,6 +256,7 @@ function hkuTabPriority(tab) {
   const origin = allowedOrigin(tab?.url);
   if (origin === "https://studentportal.hku.hk") return 4;
   if (origin === WEEKLY_TIMETABLE_ORIGIN) return 3;
+  if (origin === MOODLE_ORIGIN) return 3;
   if (origin === SIS_ORIGIN) return 2;
   if (origin === "https://hkuportal.hku.hk") return 1;
   return 0;
@@ -260,7 +271,7 @@ async function findHkuTab() {
     !isKnownSisSsoErrorPage(active[0].url)
   ) return active[0];
   const tabs = (await chrome.tabs.query({
-    url: [...PORTAL_URL_PATTERNS, SIS_URL_PATTERN, WEEKLY_TIMETABLE_URL_PATTERN]
+    url: [...PORTAL_URL_PATTERNS, SIS_URL_PATTERN, WEEKLY_TIMETABLE_URL_PATTERN, MOODLE_URL_PATTERN]
   }))
     .filter((tab) => !isKnownPortalErrorPage(tab.url) && !isKnownSisSsoErrorPage(tab.url));
   if (!tabs.length) {
@@ -317,6 +328,8 @@ async function inspectBoundHkuTab() {
     ? "hku.inspect_portal"
     : origin === WEEKLY_TIMETABLE_ORIGIN
       ? "timetable.inspect_weekly"
+      : origin === MOODLE_ORIGIN
+        ? "moodle.inspect_dashboard"
       : "sis.inspect_page";
   const snapshot = await sendTabCommand(tab.id, command);
   boundTabId = tab.id;
@@ -459,6 +472,30 @@ async function findAuthenticatedWeeklyTimetableSnapshot() {
   return null;
 }
 
+async function findAuthenticatedMoodleSnapshot(allowAuthenticatedPage = false) {
+  const tabs = await queryMoodleTabs();
+  tabs.sort((left, right) =>
+    Number(right.active) - Number(left.active) ||
+    Number(right.lastAccessed || 0) - Number(left.lastAccessed || 0)
+  );
+  for (const tab of tabs) {
+    try {
+      const snapshot = await sendTabCommand(tab.id, "moodle.inspect_dashboard");
+      const acceptablePage = snapshot.page_kind === "dashboard" ||
+        (allowAuthenticatedPage && ["home", "course"].includes(snapshot.page_kind));
+      if (snapshot.logged_in === true && acceptablePage) {
+        boundTabId = tab.id;
+        lastSnapshot = snapshot;
+        void sendHeartbeat();
+        return snapshot;
+      }
+    } catch (_error) {
+      // Continue across stale, login, or partially loaded Moodle tabs.
+    }
+  }
+  return null;
+}
+
 async function waitForWeeklyTimetableSnapshot(deadline, preferredTabId = null) {
   let lastError = null;
   while (Date.now() < deadline) {
@@ -492,6 +529,64 @@ async function waitForWeeklyTimetableSnapshot(deadline, preferredTabId = null) {
   throw commandError(
     lastError?.code || "TIMETABLE_NAVIGATION_TIMEOUT",
     lastError?.message || "My Weekly Schedule did not become ready before the navigation deadline."
+  );
+}
+
+async function waitForMoodleDashboardSnapshot(deadline, preferredTabId = null) {
+  let lastError = null;
+  const dashboardNavigationTabIds = new Set();
+  while (Date.now() < deadline) {
+    const tabs = await queryMoodleTabs();
+    tabs.sort((left, right) =>
+      Number(right.openerTabId === preferredTabId) - Number(left.openerTabId === preferredTabId) ||
+      Number(right.active) - Number(left.active) ||
+      Number(right.lastAccessed || 0) - Number(left.lastAccessed || 0)
+    );
+    for (const tab of tabs) {
+      try {
+        const snapshot = await sendTabCommand(tab.id, "moodle.inspect_dashboard");
+        if (snapshot.logged_in === true && snapshot.page_kind === "dashboard") {
+          boundTabId = tab.id;
+          lastSnapshot = snapshot;
+          void sendHeartbeat();
+          return {
+            snapshot,
+            dashboardNavigationPerformed: dashboardNavigationTabIds.has(tab.id)
+          };
+        }
+        if (snapshot.logged_in === false) {
+          throw commandError(
+            "MOODLE_LOGIN_REQUIRED",
+            "Complete the HKU Portal User login and any MFA in the Moodle tab."
+          );
+        }
+        if (
+          snapshot.logged_in === true &&
+          ["home", "course"].includes(snapshot.page_kind) &&
+          !dashboardNavigationTabIds.has(tab.id)
+        ) {
+          await sendTabCommand(tab.id, "moodle.open_dashboard");
+          dashboardNavigationTabIds.add(tab.id);
+          lastError = commandError(
+            "MOODLE_DASHBOARD_NOT_READY",
+            "Moodle is authenticated and is opening the fixed Dashboard route."
+          );
+        } else {
+          lastError = commandError(
+            "MOODLE_DASHBOARD_NOT_READY",
+            `Moodle opened page kind '${snapshot.page_kind}', not the verified Dashboard.`
+          );
+        }
+      } catch (error) {
+        if (error.code === "MOODLE_LOGIN_REQUIRED") throw error;
+        lastError = error;
+      }
+    }
+    await delay(300);
+  }
+  throw commandError(
+    lastError?.code || "MOODLE_NAVIGATION_TIMEOUT",
+    lastError?.message || "Moodle Dashboard did not become ready before the navigation deadline."
   );
 }
 
@@ -624,6 +719,106 @@ async function openWeeklyTimetable() {
   };
 }
 
+async function openMoodleDashboard() {
+  const deadline = Date.now() + NAVIGATION_DEADLINE_MS;
+  const source = await inspectBoundHkuTab();
+  if (
+    source.origin === MOODLE_ORIGIN &&
+    source.logged_in === true &&
+    source.page_kind === "dashboard"
+  ) {
+    return {
+      read_only: true,
+      navigation_only: true,
+      moodle_write_requests_sent: 0,
+      source_origin: source.origin,
+      source_page_kind: source.page_kind,
+      target_origin: MOODLE_ORIGIN,
+      target_page_kind: "dashboard",
+      steps: ["target_already_open"],
+      snapshot: source
+    };
+  }
+  if (
+    source.origin === MOODLE_ORIGIN &&
+    source.logged_in === true &&
+    ["home", "course"].includes(source.page_kind)
+  ) {
+    const moodleTabId = boundTabId;
+    await sendTabCommand(moodleTabId, "moodle.open_dashboard");
+    const outcome = await waitForMoodleDashboardSnapshot(deadline, moodleTabId);
+    return {
+      read_only: true,
+      navigation_only: true,
+      moodle_write_requests_sent: 0,
+      source_origin: source.origin,
+      source_page_kind: source.page_kind,
+      target_origin: MOODLE_ORIGIN,
+      target_page_kind: "dashboard",
+      steps: ["moodle_fixed_route_to_dashboard"],
+      snapshot: outcome.snapshot
+    };
+  }
+  if (source.origin === MOODLE_ORIGIN && source.logged_in === false) {
+    throw commandError(
+      "MOODLE_LOGIN_REQUIRED",
+      "Complete the HKU Portal User login and any MFA in the Moodle tab."
+    );
+  }
+  if (!PORTAL_ORIGINS.has(source.origin) || source.page_kind !== "portal_home") {
+    throw commandError(
+      "PORTAL_LOGIN_REQUIRED",
+      "Open and authenticate HKU Portal before inspecting Moodle Dashboard."
+    );
+  }
+  const existing = await findAuthenticatedMoodleSnapshot(true);
+  if (existing) {
+    if (existing.page_kind !== "dashboard") {
+      const moodleTabId = boundTabId;
+      await sendTabCommand(moodleTabId, "moodle.open_dashboard");
+      const outcome = await waitForMoodleDashboardSnapshot(deadline, moodleTabId);
+      return {
+        read_only: true,
+        navigation_only: true,
+        moodle_write_requests_sent: 0,
+        source_origin: source.origin,
+        source_page_kind: source.page_kind,
+        target_origin: MOODLE_ORIGIN,
+        target_page_kind: "dashboard",
+        steps: ["moodle_tab_reused", "moodle_fixed_route_to_dashboard"],
+        snapshot: outcome.snapshot
+      };
+    }
+    return {
+      read_only: true,
+      navigation_only: true,
+      moodle_write_requests_sent: 0,
+      source_origin: source.origin,
+      source_page_kind: source.page_kind,
+      target_origin: MOODLE_ORIGIN,
+      target_page_kind: "dashboard",
+      steps: ["moodle_dashboard_tab_reused"],
+      snapshot: existing
+    };
+  }
+  const portalTabId = boundTabId;
+  await sendTabCommand(portalTabId, "hku.open_moodle");
+  const outcome = await waitForMoodleDashboardSnapshot(deadline, portalTabId);
+  const steps = ["portal_to_moodle"];
+  if (outcome.dashboardNavigationPerformed) steps.push("moodle_fixed_route_to_dashboard");
+  return {
+    read_only: true,
+    navigation_only: true,
+    moodle_write_requests_sent: 0,
+    source_origin: source.origin,
+    source_page_kind: source.page_kind,
+    target_origin: MOODLE_ORIGIN,
+    target_page_kind: "dashboard",
+    steps,
+    snapshot: outcome.snapshot
+  };
+}
+
 async function openEnrollmentAddClasses(requestedTermLabel = null) {
   const deadline = Date.now() + NAVIGATION_DEADLINE_MS;
   const source = await inspectBoundHkuTab();
@@ -695,6 +890,8 @@ async function executeCommand(command, payload = {}) {
       ? "hku.inspect_portal"
       : origin === WEEKLY_TIMETABLE_ORIGIN
         ? "timetable.inspect_weekly"
+        : origin === MOODLE_ORIGIN
+          ? "moodle.inspect_dashboard"
         : "sis.inspect_page";
     const snapshot = await sendTabCommand(tab.id, inspectCommand);
     boundTabId = tab.id;
@@ -705,6 +902,7 @@ async function executeCommand(command, payload = {}) {
   if (command === "hku.inspect_portal") return inspectBoundHkuTab();
   if (command === "hku.open_sis") return openSis();
   if (command === "hku.open_weekly_timetable") return openWeeklyTimetable();
+  if (command === "hku.open_moodle") return openMoodleDashboard();
   if (command === "hku.open_enrollment_add_classes") {
     return openEnrollmentAddClasses(payload.term_label || null);
   }
@@ -722,6 +920,13 @@ async function executeCommand(command, payload = {}) {
     const snapshot = await findAuthenticatedWeeklyTimetableSnapshot();
     if (!snapshot) {
       throw commandError("TIMETABLE_TAB_NOT_FOUND", "Open My Weekly Schedule in Chrome first.");
+    }
+    return snapshot;
+  }
+  if (command === "moodle.inspect_dashboard") {
+    const snapshot = await findAuthenticatedMoodleSnapshot();
+    if (!snapshot) {
+      throw commandError("MOODLE_TAB_NOT_FOUND", "Open the authenticated Moodle Dashboard in Chrome first.");
     }
     return snapshot;
   }

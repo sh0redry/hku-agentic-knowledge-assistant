@@ -135,3 +135,6 @@ class HKUAgentsAPIClient:
 
     def timetable_exam_status(self, payload: dict) -> dict:
         return self._integration_request("POST", "/sis/timetable/exam-status", json=payload)
+
+    def moodle_inspect_dashboard(self) -> dict:
+        return self._integration_request("POST", "/moodle/dashboard/inspect", json={})

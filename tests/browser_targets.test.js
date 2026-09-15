@@ -34,6 +34,10 @@ assert.equal(
   targets.classifyUrl("https://moodle.hku.hk/my/").page_kind,
   "dashboard"
 );
+assert.equal(
+  targets.classifyUrl("https://moodle.hku.hk/my/").logged_in,
+  null
+);
 assert.deepEqual(
   targets.classifyUrl(
     "https://sweb.hku.hk/student/servlet/MyWeekly/showTimetable?ticket=secret"

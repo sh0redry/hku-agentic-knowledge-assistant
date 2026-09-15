@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from browser_bridge.models import (
+    MoodleDashboardSnapshot,
+    MoodleNavigationResult,
     PortalPageSnapshot,
     SISNavigationResult,
     SISPageSnapshot,
@@ -32,6 +34,8 @@ class BrowserSISConnector(BaseConnector):
             return PortalPageSnapshot.model_validate(data).model_dump(mode="json")
         if data.get("origin") == "https://sweb.hku.hk":
             return WeeklyTimetableSnapshot.model_validate(data).model_dump(mode="json")
+        if data.get("origin") == "https://moodle.hku.hk":
+            return MoodleDashboardSnapshot.model_validate(data).model_dump(mode="json")
         return SISPageSnapshot.model_validate(data).model_dump(mode="json")
 
     async def inspect_portal(self) -> dict:
@@ -53,6 +57,14 @@ class BrowserSISConnector(BaseConnector):
     async def open_weekly_timetable(self) -> dict:
         data = await self._command(BrowserCommandName.OPEN_WEEKLY_TIMETABLE)
         return WeeklyTimetableNavigationResult.model_validate(data).model_dump(mode="json")
+
+    async def open_moodle(self) -> dict:
+        data = await self._command(BrowserCommandName.OPEN_MOODLE)
+        return MoodleNavigationResult.model_validate(data).model_dump(mode="json")
+
+    async def inspect_moodle_dashboard(self) -> dict:
+        data = await self._command(BrowserCommandName.INSPECT_MOODLE_DASHBOARD)
+        return MoodleDashboardSnapshot.model_validate(data).model_dump(mode="json")
 
     async def bind_tab(self) -> dict:
         data = await self._command(BrowserCommandName.BIND_SIS_TAB)

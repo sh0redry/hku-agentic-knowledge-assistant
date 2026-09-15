@@ -11,6 +11,7 @@ from agents.enrollment.agent import (
     SISPreflightCapability,
 )
 from agents.knowledge.agent import KnowledgeAnswerCapability
+from agents.moodle.agent import MoodleDashboardInspectCapability
 from agents.timetable.agent import (
     SISExamStatusCapability,
     SISFreeSlotsCapability,
@@ -64,6 +65,7 @@ class ApplicationContainer:
         self.registry.register(SISFreeSlotsCapability(self.timetable))
         self.registry.register(SISTimetableConflictCapability(self.timetable))
         self.registry.register(SISExamStatusCapability(self.connectors["sis_browser"]))
+        self.registry.register(MoodleDashboardInspectCapability(self.connectors["sis_browser"]))
 
         self.tasks = TaskManager(self.registry, self.store)
         self.actions = ActionService(self.registry, self.store, self.tasks, self.policy)

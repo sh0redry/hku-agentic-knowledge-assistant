@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "HKU AGENTS Multi-System Browser Bridge",
-  "version": "0.8.2",
+  "version": "0.9.1",
   "description": "Restricted local navigation and read-only multi-system discovery bridge for HKU Portal services.",
   "minimum_chrome_version": "116",
   "permissions": ["storage"],
@@ -39,6 +39,11 @@
     {
       "matches": ["https://sweb.hku.hk/*"],
       "js": ["weekly_timetable_parser.js", "weekly_timetable_content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://moodle.hku.hk/*"],
+      "js": ["moodle_parser.js", "moodle_content.js"],
       "run_at": "document_idle"
     }
   ],

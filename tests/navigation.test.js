@@ -45,11 +45,21 @@ const sisEntry = link(
   "Student Information System (SIS)",
   "https://sis-main.hku.hk/sisprod/z_signon.jsp"
 );
-const portalDocument = documentWith([sisEntry]);
+const moodleEntry = link(
+  "Moodle",
+  "https://hkuportal.hku.hk/ssoAccess.html?service=moodle"
+);
+const eLearningEntry = link(
+  "My eLearning",
+  "https://hkuportal.hku.hk/ssoAccess.html?service=elearning"
+);
+const portalDocument = documentWith([sisEntry, moodleEntry, eLearningEntry]);
 const portalSnapshot = navigation.inspectPortal(portalDocument, portalLocation);
 assert.equal(portalSnapshot.page_kind, "portal_home");
 assert.equal(portalSnapshot.logged_in, true);
 assert.equal(portalSnapshot.navigation_diagnostics.sis_entry_candidate_count, 1);
+assert.equal(portalSnapshot.navigation_diagnostics.moodle_entry_candidate_count, 1);
+assert.equal(portalSnapshot.navigation_diagnostics.moodle_entry_available, true);
 
 let queuedPortalNavigation = null;
 const portalNavigation = navigation.openSisFromPortal(
@@ -173,5 +183,25 @@ queuedWeeklyNavigation();
 assert.deepEqual(portalLocation.assigned, [
   "https://sweb.hku.hk/student/servlet/MyWeekly/showTimetable"
 ]);
+
+let queuedMoodleNavigation = null;
+const moodleNavigation = navigation.openMoodleFromPortal(
+  portalDocument,
+  portalLocation,
+  action => { queuedMoodleNavigation = action; }
+);
+assert.equal(moodleNavigation.navigation_only, true);
+assert.equal(moodleNavigation.moodle_write_requests_sent, 0);
+assert.equal(moodleNavigation.target_origin, "https://moodle.hku.hk");
+assert.equal(moodleEntry.clicked, 0);
+queuedMoodleNavigation();
+assert.equal(moodleEntry.clicked, 1);
+assert.equal(eLearningEntry.clicked, 0);
+
+const externalMoodleEntry = link("Moodle", "https://evil.example/collect");
+assert.throws(
+  () => navigation.openMoodleFromPortal(documentWith([externalMoodleEntry]), portalLocation),
+  error => error.code === "NAVIGATION_TARGET_NOT_FOUND"
+);
 
 console.log("Restricted HKU navigation synthetic tests passed.");

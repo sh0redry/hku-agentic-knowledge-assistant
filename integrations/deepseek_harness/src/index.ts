@@ -274,4 +274,18 @@ export function apply(ctx: Context, config: Config): void {
       },
     }),
   )
+
+  ctx.tools.register(
+    defineTool({
+      name: 'hku_moodle_inspect_dashboard',
+      description:
+        'Open Moodle through an authenticated HKU Portal tab and verify only login state and Dashboard diagnostics. It does not read course names, assignments, grades, messages, or submissions, and performs no Moodle write.',
+      parameters: {},
+      output: envelopeOutput,
+      timeoutMs: config.timeoutMs,
+      async execute(_args, execution) {
+        return client.inspectMoodleDashboard(execution.signal)
+      },
+    }),
+  )
 }

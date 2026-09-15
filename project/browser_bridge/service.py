@@ -142,6 +142,8 @@ class BrowserBridgeService:
                     if self._tab_state.origin == "https://sis-main.hku.hk"
                     else "timetable_bound"
                     if self._tab_state.origin == "https://sweb.hku.hk"
+                    else "moodle_bound"
+                    if self._tab_state.origin == "https://moodle.hku.hk"
                     else "paired"
                 )
             elif status == "connected":
@@ -183,6 +185,8 @@ class BrowserBridgeService:
             return "Read-only extension paired and bound to HKU SIS."
         if lifecycle_state == "timetable_bound":
             return "Read-only extension paired and bound to HKU My Weekly Schedule."
+        if lifecycle_state == "moodle_bound":
+            return "Read-only extension paired and bound to HKU Moodle Dashboard."
         if lifecycle_state == "paired":
             return "Read-only extension connected. No domain write commands are available."
         if status == "stale":

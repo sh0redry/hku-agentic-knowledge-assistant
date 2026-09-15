@@ -3,12 +3,14 @@
 This unpacked Manifest V3 extension discovers approved HKU Portal, SIS, Moodle,
 and Library tabs and reports a sanitized per-system connection registry to the
 local HKU AGENTS process. Existing Portal/SIS commands still use the compatible
-single active binding. The extension can follow only two fixed navigation
-targets: the Portal SIS sign-on entry and the exact SIS `Enrollment Add Classes`
-component route. Moodle and Library support is discovery-only in Phase A: there
-are no content scripts, parsers, navigation commands, or domain actions for
-those systems. The extension never enters credentials, reads cookies, searches
-courses, enters Step 2/3, or submits forms.
+single active binding. The extension can follow three fixed navigation targets:
+the Portal SIS sign-on entry, the exact SIS `Enrollment Add Classes` component
+route, and a validated Portal Moodle entry. Moodle has a diagnostic-only content
+parser in Phase C; Library remains discovery-only. The Moodle parser returns
+authentication/page markers and aggregate counts only, never course names,
+assignments, grades, messages, submissions, or full HTML. The extension never
+enters credentials, reads cookies, searches courses, enters Step 2/3, or submits
+forms.
 
 ## Install for local development
 
@@ -30,6 +32,11 @@ courses, enters Step 2/3, or submits forms.
    binds only the newly opened verified SIS tab (or the bound tab if it navigates
    in place), opens the hard-coded Add Classes component route after SIS
    authentication, then verifies the cart page before returning.
+9. To test the Phase C slice, return to the authenticated Portal tab, bind it,
+   and run **Open and inspect Moodle Dashboard** from the GUI's **Moodle** tab.
+   Complete any Moodle login or MFA step yourself, then retry the inspection.
+   If SSO lands on the authenticated Moodle home page, the bridge follows only
+   the fixed `https://moodle.hku.hk/my/` Dashboard route before inspecting it.
 
 When the unpacked extension receives a new ID, restart HKU AGENTS to clear the
 in-memory development pin, or set `BROWSER_EXTENSION_IDS` explicitly in
@@ -44,10 +51,10 @@ authentication/page state, parser version where available, and heartbeat
 freshness. Complete authentication URLs, tickets, relay state, and tokens are
 not sent to the local service.
 
-Portal, SIS, and the dedicated My Weekly Schedule application can be bound for
-existing commands. Opening Moodle or My
-Library in Chrome makes them discoverable, but does not grant HKU AGENTS a read
-or write capability for either page.
+Portal, SIS, the dedicated My Weekly Schedule application, and Moodle can be
+bound for their restricted commands. Moodle exposes only a diagnostic Dashboard
+inspection capability; opening My Library in Chrome makes it discoverable but
+does not grant HKU AGENTS a read or write capability for that page.
 
 ## Security contract
 
@@ -60,7 +67,8 @@ or write capability for either page.
 - Named commands only; arbitrary JavaScript, selectors, URLs, coordinates, and
   course values are rejected. A term must match an exact SIS term label.
 - The Portal entry click is restricted to a uniquely resolved, allow-listed SIS
-  sign-on destination; unrelated Portal controls cannot be clicked.
+  or Moodle destination; unrelated Portal controls cannot be clicked. If both
+  `Moodle` and `My eLearning` are present, the exact `Moodle` entry is preferred.
 - Navigation stops when login is incomplete, the target is missing or ambiguous,
   an origin differs, or the verified destination does not become ready in time.
 - PeopleSoft `errorPg=err` tabs are classified as SSO failures and are never
@@ -75,8 +83,10 @@ or write capability for either page.
 - Weekly parser `0.2.1` recognizes absolutely positioned course cards from their
   SUN-SAT column geometry. It derives Sem 1/2 only from unambiguous displayed-week
   months and reports June-August as undetermined.
-- Moodle and Library have no content scripts in Phase A; tab discovery strips
-  query strings and fragments before reporting state.
+- Moodle parser `0.1.0` recognizes login and authenticated Dashboard state but
+  releases only boolean markers and aggregate candidate counts. Library remains
+  discovery-only. Tab discovery strips query strings and fragments before
+  reporting state.
 - SIS parser `0.3.1` additionally normalizes read-only Class Schedule meetings
   and visible Examination Timetables entries. It does not create or edit calendar data.
 - Verified functional SIS pages take precedence over stale hidden sign-in text
@@ -91,7 +101,7 @@ or write capability for either page.
 
 - Retry delay uses bounded exponential backoff: 1, 2, 4, 8, 16, then 30 seconds.
 - The popup distinguishes `not_configured`, `connecting`, `reconnecting`,
-  `paired`, `portal_bound`, `sis_bound`, `token_rejected`,
+  `paired`, `portal_bound`, `sis_bound`, `moodle_bound`, `token_rejected`,
   `extension_rejected`, and `bridge_disabled` states.
 - **Reconnect now** resets the retry delay without changing the saved token.
 - Rotating the server token immediately disconnects the current extension and

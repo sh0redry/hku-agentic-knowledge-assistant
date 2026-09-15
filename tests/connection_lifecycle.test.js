@@ -37,5 +37,12 @@ assert.equal(
   }),
   "timetable_bound"
 );
+assert.equal(
+  lifecycle.visibleState("paired", {
+    bound: true,
+    origin: "https://moodle.hku.hk"
+  }),
+  "moodle_bound"
+);
 
 console.log("Browser connection lifecycle synthetic tests passed.");

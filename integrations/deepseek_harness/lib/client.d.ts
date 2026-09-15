@@ -95,6 +95,7 @@ export declare class HKUAgentsClient {
     examStatus(input: {
         term_label?: string;
     }, signal?: AbortSignal): Promise<IntegrationEnvelope>;
+    inspectMoodleDashboard(signal?: AbortSignal): Promise<IntegrationEnvelope>;
     private request;
 }
 //# sourceMappingURL=client.d.ts.map

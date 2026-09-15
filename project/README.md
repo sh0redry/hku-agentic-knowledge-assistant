@@ -77,6 +77,8 @@ Core endpoints:
 | `POST /api/v1/browser/sis/bind` | Bind an open SIS tab through the read-only extension |
 | `POST /api/v1/browser/hku/bind` | Bind the active verified HKU Portal or SIS tab |
 | `POST /api/v1/browser/hku/open-sis` | Follow the fixed Portal SIS entry after manual login/MFA |
+| `POST /api/v1/browser/hku/open-moodle` | Follow the validated Portal Moodle entry after manual login/MFA |
+| `GET /api/v1/browser/moodle/dashboard` | Read diagnostic-only Moodle Dashboard state without course or assignment data |
 | `POST /api/v1/browser/sis/open-enrollment-add-classes` | Follow the exact SIS Enrollment Add Classes menu item |
 | `GET /api/v1/browser/sis/page` | Read structured state from the bound SIS page |
 | `GET /api/v1/browser/sis/cart` | Read structured cart rows without submitting anything |
@@ -92,6 +94,7 @@ Core endpoints:
 | `POST /api/v1/integration/sis/timetable/free-slots` | Calculate recurring weekly free periods locally |
 | `POST /api/v1/integration/sis/timetable/check-conflicts` | Compare candidate meetings with the synchronized schedule locally |
 | `POST /api/v1/integration/sis/timetable/exam-status` | Inspect publication state on an already-open Examination Timetables page |
+| `POST /api/v1/integration/moodle/dashboard/inspect` | Navigate to and inspect the Moodle Dashboard using a diagnostic-only contract |
 | `POST /api/v1/chat` | Execute the existing Knowledge Agent through the platform boundary |
 | `POST /api/v1/sis/preflight` | Run the zero-network SIS simulator |
 | `GET /api/v1/tasks/{task_id}/events` | Stream task events over SSE |
@@ -193,8 +196,26 @@ Moodle, and Library
 independently, including detected authentication state, heartbeat freshness,
 page kind, parser version, and a recovery hint. Reported URLs are restricted to
 approved origins and paths; query strings and fragments are removed centrally.
-Moodle and Library are discovery-only in Phase A and expose no content parser,
-navigation tool, or domain write.
+Moodle has a Phase C diagnostic-only parser and restricted Portal navigation
+tool. It reports authentication/page state, boolean Dashboard markers, and an
+aggregate course-link candidate count, but never course names, assignments,
+grades, messages, submissions, or full HTML. Library remains discovery-only.
+Neither system exposes a domain write.
+
+### Moodle diagnostic slice
+
+After manual Portal login/MFA, keep the Portal tab active and use the GUI
+**Moodle** tab or call `POST /api/v1/integration/moodle/dashboard/inspect` with
+an empty JSON object. The browser bridge selects only a validated Portal Moodle
+entry or reuses an already authenticated `https://moodle.hku.hk` Dashboard.
+The result explicitly reports `navigation_interactions_performed`,
+`data_reads_performed`, `moodle_writes_performed`, `course_data_read`, and
+`assignment_data_read`. For this first Phase C task, the last three privacy/write
+indicators are respectively `0`, `false`, and `false`.
+
+Moodle login and MFA remain manual. Unknown origins, ambiguous Portal entries,
+login pages, and unverified Dashboard states fail closed. Course membership and
+deadline extraction are intentionally deferred to the next Phase C task.
 
 ### Read-only timetable tools
 

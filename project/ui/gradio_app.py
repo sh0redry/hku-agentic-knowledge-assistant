@@ -287,6 +287,14 @@ def create_gradio_ui(container):
         except Exception as exc:
             return _pretty({"ok": False, "read_only": True, "message": str(exc)})
 
+    async def moodle_dashboard_handler():
+        try:
+            return _pretty(
+                await asyncio.to_thread(api_client.moodle_inspect_dashboard)
+            )
+        except Exception as exc:
+            return _pretty({"ok": False, "read_only": True, "message": str(exc)})
+
     async def live_sis_call(action, operation):
         completed_at = lambda: datetime.now(timezone.utc).isoformat(timespec="seconds")
         try:
@@ -643,6 +651,29 @@ def create_gradio_ui(container):
                 timetable_exam_handler,
                 inputs=timetable_term,
                 outputs=timetable_output,
+                queue=False,
+            )
+
+        with gr.Tab("Moodle"):
+            gr.Markdown(
+                "## Moodle Dashboard discovery (read-only)\n"
+                "Keep the authenticated HKU Portal tab active. This first Phase C slice "
+                "opens Moodle through the exact Portal service entry and verifies only "
+                "login state and Dashboard markers. It does not read course names, "
+                "assignments, grades, messages, or submissions."
+            )
+            moodle_dashboard_button = gr.Button(
+                "Open and inspect Moodle Dashboard", variant="primary"
+            )
+            moodle_dashboard_output = gr.Code(
+                value="Keep the authenticated HKU Portal tab active, then run inspection.",
+                language="json",
+                label="Moodle Dashboard diagnostics",
+            )
+            moodle_dashboard_button.click(
+                moodle_dashboard_handler,
+                outputs=moodle_dashboard_output,
+                show_progress="minimal",
                 queue=False,
             )
 

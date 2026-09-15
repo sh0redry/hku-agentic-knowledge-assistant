@@ -68,7 +68,7 @@
       return {
         system: "moodle",
         ...location,
-        logged_in: login ? false : dashboard || course ? true : null,
+        logged_in: login ? false : null,
         page_kind: login ? "login" : dashboard ? "dashboard" : course ? "course" : "home"
       };
     }

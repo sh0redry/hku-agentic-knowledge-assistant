@@ -116,7 +116,7 @@ test('client preserves stable API errors without leaking the token', async () =>
   }
 })
 
-test('plugin registers exactly ten restricted HKU tools and forwards preflight input', async () => {
+test('plugin registers exactly eleven restricted HKU tools and forwards preflight input', async () => {
   const previous = process.env.INTEGRATION_API_TOKEN
   process.env.INTEGRATION_API_TOKEN = TOKEN
   let receivedBody
@@ -148,6 +148,7 @@ test('plugin registers exactly ten restricted HKU tools and forwards preflight i
             'hku_sis_find_free_slots',
             'hku_sis_check_timetable_conflicts',
             'hku_sis_exam_status',
+            'hku_moodle_inspect_dashboard',
           ],
         )
 
@@ -285,6 +286,44 @@ test('three derived timetable tools forward cache-only calculation inputs', asyn
         },
       },
     ])
+  } finally {
+    if (previous === undefined) delete process.env.INTEGRATION_API_TOKEN
+    else process.env.INTEGRATION_API_TOKEN = previous
+  }
+})
+
+test('Moodle diagnostic tool sends an empty read-only inspection request', async () => {
+  const previous = process.env.INTEGRATION_API_TOKEN
+  process.env.INTEGRATION_API_TOKEN = TOKEN
+  try {
+    await withServer(
+      (request, response) => {
+        assert.equal(request.method, 'POST')
+        assert.equal(request.url, '/api/v1/integration/moodle/dashboard/inspect')
+        const chunks = []
+        request.on('data', chunk => chunks.push(chunk))
+        request.on('end', () => {
+          assert.deepEqual(JSON.parse(Buffer.concat(chunks).toString('utf8')), {})
+          response.setHeader('content-type', 'application/json')
+          response.end(JSON.stringify(envelope({
+            read_only: true,
+            course_data_read: false,
+            assignment_data_read: false,
+            moodle_writes_performed: 0,
+          })))
+        })
+      },
+      async baseUrl => {
+        const tools = []
+        const ctx = { tools: { register(tool) { tools.push(tool) } } }
+        apply(ctx, { baseUrl, tokenEnv: 'INTEGRATION_API_TOKEN', timeoutMs: 5000 })
+        const tool = tools.find(item => item.name === 'hku_moodle_inspect_dashboard')
+        const result = await tool.execute({}, { signal: new AbortController().signal })
+        assert.equal(result.result.course_data_read, false)
+        assert.equal(result.result.assignment_data_read, false)
+        assert.equal(result.result.moodle_writes_performed, 0)
+      },
+    )
   } finally {
     if (previous === undefined) delete process.env.INTEGRATION_API_TOKEN
     else process.env.INTEGRATION_API_TOKEN = previous

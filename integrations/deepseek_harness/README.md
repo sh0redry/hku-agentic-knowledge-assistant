@@ -1,6 +1,6 @@
 # HKU AGENTS for DeepSeek Harness
 
-This package contributes ten restricted HKU SIS tools to DeepSeek Harness:
+This package contributes eleven restricted HKU tools to DeepSeek Harness:
 
 - `hku_sis_status`
 - `hku_sis_navigate_and_preflight` (preferred one-step read-only check)
@@ -12,10 +12,12 @@ This package contributes ten restricted HKU SIS tools to DeepSeek Harness:
 - `hku_sis_find_free_slots`
 - `hku_sis_check_timetable_conflicts`
 - `hku_sis_exam_status`
+- `hku_moodle_inspect_dashboard` (Phase C diagnostics only; no course data)
 
 It is a thin adapter over the authenticated HKU AGENTS Integration API. It does
 not parse HTML, hold browser cookies, choose URLs or selectors, or perform SIS
-writes. The local HKU AGENTS app and Chrome extension own deterministic Portal
+writes. The Moodle diagnostic tool likewise returns only page-state markers and
+does not expose courses or assignments. The local HKU AGENTS app and Chrome extension own deterministic Portal
 navigation and must be running separately. Login, password entry, CAPTCHA, and
 MFA always remain manual.
 

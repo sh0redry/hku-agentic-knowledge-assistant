@@ -247,6 +247,22 @@ def create_api_app(
         except BrowserBridgeError as exc:
             raise bridge_http_error(exc) from exc
 
+    @app.post("/api/v1/browser/hku/open-moodle")
+    async def open_moodle_from_portal():
+        try:
+            return await app.state.container.connectors["sis_browser"].open_moodle()
+        except BrowserBridgeError as exc:
+            raise bridge_http_error(exc) from exc
+
+    @app.get("/api/v1/browser/moodle/dashboard")
+    async def inspect_moodle_dashboard():
+        try:
+            return await app.state.container.connectors[
+                "sis_browser"
+            ].inspect_moodle_dashboard()
+        except BrowserBridgeError as exc:
+            raise bridge_http_error(exc) from exc
+
     @app.post("/api/v1/browser/sis/open-enrollment-add-classes")
     async def open_enrollment_add_classes(body: SISNavigationRequest | None = None):
         try:

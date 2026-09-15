@@ -21,6 +21,7 @@ class BrowserTabState(StrictMessage):
         "https://studentportal.hku.hk",
         "https://sis-main.hku.hk",
         "https://sweb.hku.hk",
+        "https://moodle.hku.hk",
     ] | None = None
     logged_in: bool | None = None
     page_kind: Literal[
@@ -33,6 +34,8 @@ class BrowserTabState(StrictMessage):
         "status",
         "exam_schedule",
         "weekly_timetable",
+        "dashboard",
+        "course",
         "blocked",
         "unknown",
     ] = "unknown"
@@ -166,11 +169,53 @@ class WeeklyTimetableNavigationResult(StrictMessage):
     snapshot: WeeklyTimetableSnapshot
 
 
+class MoodleParserDiagnostics(StrictMessage):
+    parser_version: str = Field(pattern=r"^\d+\.\d+\.\d+$", max_length=20)
+    dashboard_marker_found: bool
+    login_marker_found: bool
+    user_menu_found: bool
+    course_link_candidate_count: int = Field(ge=0, le=10000)
+    timeline_marker_found: bool
+    upcoming_marker_found: bool
+    todo_marker_found: bool
+
+
+class MoodleDashboardSnapshot(BrowserTabState):
+    origin: Literal["https://moodle.hku.hk"]
+    page_kind: Literal["login", "dashboard", "course", "home", "blocked", "unknown"]
+    diagnostics: MoodleParserDiagnostics
+
+
+class MoodleNavigationResult(StrictMessage):
+    read_only: Literal[True]
+    navigation_only: Literal[True]
+    moodle_write_requests_sent: Literal[0]
+    source_origin: Literal[
+        "https://hkuportal.hku.hk",
+        "https://studentportal.hku.hk",
+        "https://moodle.hku.hk",
+    ]
+    source_page_kind: str = Field(min_length=1, max_length=40)
+    target_origin: Literal["https://moodle.hku.hk"]
+    target_page_kind: Literal["dashboard"]
+    steps: list[Literal[
+        "portal_to_moodle",
+        "moodle_tab_reused",
+        "moodle_dashboard_tab_reused",
+        "moodle_fixed_route_to_dashboard",
+        "target_already_open",
+    ]] = Field(min_length=1, max_length=2)
+    snapshot: MoodleDashboardSnapshot
+
+
 class PortalNavigationDiagnostics(StrictMessage):
     parser_version: str = Field(pattern=r"^\d+\.\d+\.\d+$", max_length=20)
     sis_entry_candidate_count: int = Field(ge=0, le=20)
     sis_entry_available: bool
     candidate_labels: list[str] = Field(default_factory=list, max_length=5)
+    moodle_entry_candidate_count: int = Field(ge=0, le=20)
+    moodle_entry_available: bool
+    moodle_candidate_labels: list[str] = Field(default_factory=list, max_length=5)
 
 
 class PortalPageSnapshot(BrowserTabState):
