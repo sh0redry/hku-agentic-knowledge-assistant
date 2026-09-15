@@ -116,7 +116,7 @@ test('client preserves stable API errors without leaking the token', async () =>
   }
 })
 
-test('plugin registers exactly five restricted HKU tools and forwards preflight input', async () => {
+test('plugin registers exactly ten restricted HKU tools and forwards preflight input', async () => {
   const previous = process.env.INTEGRATION_API_TOKEN
   process.env.INTEGRATION_API_TOKEN = TOKEN
   let receivedBody
@@ -143,6 +143,11 @@ test('plugin registers exactly five restricted HKU tools and forwards preflight 
             'hku_sis_open_enrollment_add_classes',
             'hku_sis_sync_course_lists',
             'hku_sis_preflight',
+            'hku_sis_timetable_sync',
+            'hku_sis_next_class',
+            'hku_sis_find_free_slots',
+            'hku_sis_check_timetable_conflicts',
+            'hku_sis_exam_status',
           ],
         )
 
@@ -160,6 +165,51 @@ test('plugin registers exactly five restricted HKU tools and forwards preflight 
           term_label: '2026-27 Sem 2',
           expected_courses: [{ course_code: 'COMP3297', section: '2B' }],
         })
+      },
+    )
+  } finally {
+    if (previous === undefined) delete process.env.INTEGRATION_API_TOKEN
+    else process.env.INTEGRATION_API_TOKEN = previous
+  }
+})
+
+test('timetable sync tool forwards only the exact term to the Phase B endpoint', async () => {
+  const previous = process.env.INTEGRATION_API_TOKEN
+  process.env.INTEGRATION_API_TOKEN = TOKEN
+  try {
+    await withServer(
+      (request, response) => {
+        assert.equal(request.method, 'POST')
+        assert.equal(request.url, '/api/v1/integration/sis/timetable/sync-weekly')
+        const chunks = []
+        request.on('data', chunk => chunks.push(chunk))
+        request.on('end', () => {
+          assert.deepEqual(JSON.parse(Buffer.concat(chunks).toString('utf8')), {
+            term_label: '2026-27 Sem 1',
+          })
+          response.setHeader('content-type', 'application/json')
+          response.end(JSON.stringify(envelope({
+            read_only: true,
+            domain_writes_performed: 0,
+            timetable: { meeting_count: 7 },
+          })))
+        })
+      },
+      async baseUrl => {
+        const tools = []
+        const ctx = { tools: { register(tool) { tools.push(tool) } } }
+        apply(ctx, { baseUrl, tokenEnv: 'INTEGRATION_API_TOKEN', timeoutMs: 5000 })
+        const sync = tools.find(tool => tool.name === 'hku_sis_timetable_sync')
+        const result = await sync.execute(
+          {
+            term_label: '2026-27 Sem 1',
+            sis_session_reused: false,
+            navigation_interactions_performed: true,
+          },
+          { signal: new AbortController().signal },
+        )
+        assert.equal(result.result.domain_writes_performed, 0)
+        assert.equal(result.result.timetable.meeting_count, 7)
       },
     )
   } finally {

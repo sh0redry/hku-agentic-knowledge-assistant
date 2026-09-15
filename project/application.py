@@ -11,6 +11,13 @@ from agents.enrollment.agent import (
     SISPreflightCapability,
 )
 from agents.knowledge.agent import KnowledgeAnswerCapability
+from agents.timetable.agent import (
+    SISExamStatusCapability,
+    SISFreeSlotsCapability,
+    SISNextClassCapability,
+    SISTimetableConflictCapability,
+    SISTimetableSyncCapability,
+)
 from agents.registry import CapabilityRegistry
 from connectors.sis.fake import FakeSISConnector
 from connectors.sis.browser import BrowserSISConnector
@@ -18,6 +25,7 @@ from services.actions import ActionService
 from services.policy import PolicyEngine
 from services.store import SQLiteStore
 from services.tasks import TaskManager
+from services.timetable import TimetableService
 
 
 class ApplicationContainer:
@@ -38,6 +46,7 @@ class ApplicationContainer:
             "sis_browser": BrowserSISConnector(self.browser_bridge),
             "sis_simulator": FakeSISConnector(),
         }
+        self.timetable = TimetableService()
 
         self.registry.register(KnowledgeAnswerCapability())
         self.registry.register(SISPreflightCapability(self.connectors["sis_simulator"]))
@@ -48,6 +57,13 @@ class ApplicationContainer:
         self.registry.register(
             SISOpenEnrollmentAddClassesCapability(self.connectors["sis_browser"])
         )
+        self.registry.register(
+            SISTimetableSyncCapability(self.connectors["sis_browser"], self.timetable)
+        )
+        self.registry.register(SISNextClassCapability(self.timetable))
+        self.registry.register(SISFreeSlotsCapability(self.timetable))
+        self.registry.register(SISTimetableConflictCapability(self.timetable))
+        self.registry.register(SISExamStatusCapability(self.connectors["sis_browser"]))
 
         self.tasks = TaskManager(self.registry, self.store)
         self.actions = ActionService(self.registry, self.store, self.tasks, self.policy)

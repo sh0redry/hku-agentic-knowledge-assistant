@@ -160,6 +160,11 @@ class PlatformAPITests(unittest.TestCase):
                 "sis.enrollment.live_preflight",
                 "sis.enrollment.navigate_and_preflight",
                 "sis.navigation.open_enrollment_add_classes",
+                "sis.timetable.sync_weekly",
+                "sis.timetable.next_class",
+                "sis.timetable.find_free_slots",
+                "sis.timetable.check_conflicts",
+                "sis.timetable.exam_status",
             },
         )
         connections = self.client.get("/api/v1/connections").json()["connections"]
@@ -575,7 +580,13 @@ class PlatformAPITests(unittest.TestCase):
             self.assertTrue(all(not target["safe_for_writes"] for target in targets.values()))
             target_response = self.client.get("/api/v1/browser/targets").json()
             self.assertTrue(target_response["read_only"])
-            self.assertEqual(len(target_response["targets"]), 4)
+            self.assertEqual(len(target_response["targets"]), 5)
+            timetable_target = next(
+                target
+                for target in target_response["targets"]
+                if target["system"] == "timetable"
+            )
+            self.assertFalse(timetable_target["detected"])
 
         disconnected_status = self.client.get("/api/v1/browser/status").json()
         self.assertEqual(disconnected_status["status"], "disconnected")
@@ -583,7 +594,16 @@ class PlatformAPITests(unittest.TestCase):
             all(
                 target["connection_state"] == "stale"
                 for target in disconnected_status["targets"]
+                if target["detected"]
             )
+        )
+        self.assertEqual(
+            next(
+                target["connection_state"]
+                for target in disconnected_status["targets"]
+                if target["system"] == "timetable"
+            ),
+            "not_detected",
         )
 
         rotated = self.client.post("/api/v1/browser/pairing/rotate").json()
@@ -984,6 +1004,7 @@ class SafetyFrameworkTests(unittest.TestCase):
                 "https://hkuportal.hku.hk/*",
                 "https://studentportal.hku.hk/*",
                 "https://sis-main.hku.hk/*",
+                "https://sweb.hku.hk/*",
             },
         )
         sis_content_script = next(
@@ -998,13 +1019,14 @@ class SafetyFrameworkTests(unittest.TestCase):
                 "https://hkuportal.hku.hk/*",
                 "https://studentportal.hku.hk/*",
                 "https://sis-main.hku.hk/*",
+                "https://sweb.hku.hk/*",
                 "https://moodle.hku.hk/*",
                 "https://julac-hku.primo.exlibrisgroup.com/*",
                 "https://lib.hku.hk/*",
                 "http://127.0.0.1/*",
             ],
         )
-        self.assertEqual(manifest["version"], "0.6.0")
+        self.assertEqual(manifest["version"], "0.8.2")
 
         node = shutil.which("node")
         if node is None:
@@ -1052,6 +1074,30 @@ class SafetyFrameworkTests(unittest.TestCase):
             targets_result_process.returncode,
             0,
             targets_result_process.stderr or targets_result_process.stdout,
+        )
+        timetable_result_process = subprocess.run(
+            [node, str(ROOT / "tests" / "timetable_parser.test.js")],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(
+            timetable_result_process.returncode,
+            0,
+            timetable_result_process.stderr or timetable_result_process.stdout,
+        )
+        weekly_result_process = subprocess.run(
+            [node, str(ROOT / "tests" / "weekly_timetable_parser.test.js")],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(
+            weekly_result_process.returncode,
+            0,
+            weekly_result_process.stderr or weekly_result_process.stdout,
         )
 
     def test_knowledge_initialization_starts_once_in_the_background(self):
@@ -1118,6 +1164,10 @@ class SafetyFrameworkTests(unittest.TestCase):
             payload={"term_label": "2026-27 Sem 2"},
         )
         self.assertEqual(navigation_command.payload, {"term_label": "2026-27 Sem 2"})
+        timetable_command = BrowserCommand(
+            command=BrowserCommandName.OPEN_WEEKLY_TIMETABLE
+        )
+        self.assertEqual(timetable_command.payload, {})
         redacted = sanitize_for_log(
             {
                 "cookie": "secret",

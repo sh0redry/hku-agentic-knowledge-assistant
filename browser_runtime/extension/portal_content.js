@@ -3,7 +3,8 @@
 
   const ALLOWED_MESSAGES = new Set([
     "hku.inspect_portal",
-    "hku.open_sis"
+    "hku.open_sis",
+    "hku.open_weekly_timetable"
   ]);
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -12,6 +13,8 @@
       let data;
       if (message.command === "hku.open_sis") {
         data = self.HKUNavigation.openSisFromPortal(document, location);
+      } else if (message.command === "hku.open_weekly_timetable") {
+        data = self.HKUNavigation.openWeeklyTimetableFromPortal(document, location);
       } else {
         data = self.HKUNavigation.inspectPortal(document, location);
       }

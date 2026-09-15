@@ -35,6 +35,23 @@ function fakeDocument(text, password = false) {
 
 assert.equal(parser.classifyPage(fakeDocument("Temporary Course List"), ""), "cart");
 assert.equal(parser.classifyPage(fakeDocument("Sign In", true), ""), "login");
+assert.equal(
+  parser.classifyPage(
+    fakeDocument(
+      "Hidden Sign in text Enrollment Add Classes Select Term " +
+      "Select a term then select Continue. 2026-27 Sem 1 2026-27 Sem 2"
+    ),
+    "https://sis-main.hku.hk/psp/sisprod/EMPLOYEE/SA/c/SSR_SSENRL_CART.GBL"
+  ),
+  "term_selection"
+);
+assert.equal(
+  parser.classifyPage(
+    fakeDocument("Select Term Select a term then select Continue."),
+    "https://sis-main.hku.hk/psp/sisprod/?cmd=login&errorPg=err"
+  ),
+  "login"
+);
 assert.equal(parser.classifyPage(fakeDocument("Unrecognized content"), ""), "unknown");
 assert.equal(
   parser.classifyPage(
@@ -245,6 +262,20 @@ assert.deepEqual(
     course_count: 0,
     logged_in: true
   }
+);
+
+assert.equal(
+  parser.chooseBestSnapshot([
+    {
+      page_kind: "term_selection",
+      term_label: null,
+      available_terms: ["2026-27 Sem 1", "2026-27 Sem 2"],
+      course_count: 0,
+      logged_in: null
+    },
+    { page_kind: "login", term_label: null, course_count: 0, logged_in: false }
+  ]).logged_in,
+  true
 );
 
 console.log("SIS parser synthetic tests passed.");

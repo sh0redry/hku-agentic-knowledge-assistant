@@ -23,6 +23,7 @@
       return "portal_bound";
     }
     if (snapshot.origin === "https://sis-main.hku.hk") return "sis_bound";
+    if (snapshot.origin === "https://sweb.hku.hk") return "timetable_bound";
     return "paired";
   }
 

@@ -87,6 +87,11 @@ Core endpoints:
 | `POST /api/v1/integration/sis/navigate` | Audited restricted navigation from Portal/SIS to Enrollment Add Classes |
 | `POST /api/v1/integration/sis/preflight` | Authenticated host-neutral live preflight |
 | `POST /api/v1/integration/sis/navigate-and-preflight` | Preferred authenticated one-step Portal navigation and preflight |
+| `POST /api/v1/integration/sis/timetable/sync-weekly` | Navigate and synchronize the live weekly Class Schedule into process memory |
+| `POST /api/v1/integration/sis/timetable/next-class` | Derive the next recurring class from the synchronized schedule |
+| `POST /api/v1/integration/sis/timetable/free-slots` | Calculate recurring weekly free periods locally |
+| `POST /api/v1/integration/sis/timetable/check-conflicts` | Compare candidate meetings with the synchronized schedule locally |
+| `POST /api/v1/integration/sis/timetable/exam-status` | Inspect publication state on an already-open Examination Timetables page |
 | `POST /api/v1/chat` | Execute the existing Knowledge Agent through the platform boundary |
 | `POST /api/v1/sis/preflight` | Run the zero-network SIS simulator |
 | `GET /api/v1/tasks/{task_id}/events` | Stream task events over SSE |
@@ -183,12 +188,41 @@ enrollment writes remain unavailable.
 See `browser_runtime/extension/README.md` for setup and security details.
 
 The **Connections** tab is also the authoritative multi-system diagnostic
-surface. Its browser target registry tracks Portal, SIS, Moodle, and Library
+surface. Its browser target registry tracks Portal, SIS, My Weekly Schedule,
+Moodle, and Library
 independently, including detected authentication state, heartbeat freshness,
 page kind, parser version, and a recovery hint. Reported URLs are restricted to
 approved origins and paths; query strings and fragments are removed centrally.
 Moodle and Library are discovery-only in Phase A and expose no content parser,
 navigation tool, or domain write.
+
+### Read-only timetable tools
+
+The GUI **Timetable** tab and the matching Integration API/Harness tools form the
+Phase B vertical slice. `sync-weekly` follows the fixed Portal/CAS route to the
+dedicated **My Weekly Schedule** application at `https://sweb.hku.hk` and reads
+meeting rows there for one exact term. The
+normalized result includes course, section, SIS class number, weekday, start/end
+time, room, `Asia/Hong_Kong` timezone, parser version, and source freshness.
+Because this application displays a week range rather than a term label, parser
+`0.2.1` maps September-December to Sem 1 and January-May to Sem 2, while refusing
+to guess for June-August. It assigns each absolutely positioned course card to a
+weekday using the verified SUN-SAT column geometry.
+
+The synchronized timetable is held only in process memory. Complete meetings,
+candidate conflicts, room details, and examination entries are deliberately
+excluded from SQLite task history. `next-class`, `free-slots`, and
+`check-conflicts` are deterministic local calculations and perform no additional
+browser interaction. Enrollment Add Classes remains isolated to enrollment
+preflight and is no longer treated as the weekly timetable source. The
+next-class result is a recurring weekly projection and
+warns that teaching weeks, reading weeks, holidays, and class suspensions are
+not yet validated.
+
+`exam-status` currently inspects an already-open and bound SIS Examination
+Timetables page. It distinguishes `unavailable`, `not_published`,
+`partially_published`, and `published`. Automatic navigation to that page is
+intentionally deferred until its live route and DOM contract are verified.
 
 ### Build the HKU Knowledge Base
 

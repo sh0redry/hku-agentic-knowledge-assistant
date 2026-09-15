@@ -30,5 +30,12 @@ assert.equal(
   }),
   "sis_bound"
 );
+assert.equal(
+  lifecycle.visibleState("paired", {
+    bound: true,
+    origin: "https://sweb.hku.hk"
+  }),
+  "timetable_bound"
+);
 
 console.log("Browser connection lifecycle synthetic tests passed.");

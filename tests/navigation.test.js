@@ -159,4 +159,19 @@ assert.deepEqual(
   { navigation_started: false, already_at_target: true }
 );
 
+let queuedWeeklyNavigation = null;
+const weeklyNavigation = navigation.openWeeklyTimetableFromPortal(
+  portalDocument,
+  portalLocation,
+  action => { queuedWeeklyNavigation = action; }
+);
+assert.equal(weeklyNavigation.navigation_only, true);
+assert.equal(weeklyNavigation.timetable_write_requests_sent, 0);
+assert.equal(weeklyNavigation.target_origin, "https://sweb.hku.hk");
+assert.equal(portalLocation.assigned.length, 0);
+queuedWeeklyNavigation();
+assert.deepEqual(portalLocation.assigned, [
+  "https://sweb.hku.hk/student/servlet/MyWeekly/showTimetable"
+]);
+
 console.log("Restricted HKU navigation synthetic tests passed.");

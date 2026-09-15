@@ -7,6 +7,9 @@
     "https://studentportal.hku.hk"
   ]);
   const SIS_ORIGIN = "https://sis-main.hku.hk";
+  const WEEKLY_TIMETABLE_ORIGIN = "https://sweb.hku.hk";
+  const WEEKLY_TIMETABLE_URL =
+    `${WEEKLY_TIMETABLE_ORIGIN}/student/servlet/MyWeekly/showTimetable`;
   const SIS_ENTRY_LABELS = new Set([
     "sis",
     "student information system",
@@ -313,12 +316,36 @@
     };
   }
 
+  function openWeeklyTimetableFromPortal(documentObject, locationObject, scheduler) {
+    const snapshot = inspectPortal(documentObject, locationObject);
+    if (snapshot.logged_in !== true) {
+      const error = new Error("Complete HKU Portal login and MFA before opening My Weekly Schedule.");
+      error.code = "PORTAL_LOGIN_REQUIRED";
+      throw error;
+    }
+    if (typeof locationObject.assign !== "function") {
+      const error = new Error("The verified Portal page cannot start weekly timetable navigation.");
+      error.code = "PAGE_NAVIGATION_UNAVAILABLE";
+      throw error;
+    }
+    deferNavigation(() => locationObject.assign(WEEKLY_TIMETABLE_URL), scheduler);
+    return {
+      read_only: true,
+      navigation_only: true,
+      timetable_write_requests_sent: 0,
+      source_origin: locationObject.origin,
+      target_origin: WEEKLY_TIMETABLE_ORIGIN,
+      navigation_started: true
+    };
+  }
+
   const api = {
     classifyPortalPage,
     inspectPortal,
     normalizeText,
     openEnrollmentAddClasses,
     openSisFromPortal,
+    openWeeklyTimetableFromPortal,
     portalSisCandidates,
     selectTerm,
     termSelectionCandidates

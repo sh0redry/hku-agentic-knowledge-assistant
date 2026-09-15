@@ -116,3 +116,22 @@ class HKUAgentsAPIClient:
         return self._integration_request(
             "POST", "/sis/navigate-and-preflight", json=payload
         )
+
+    def timetable_sync_weekly(self, term_label: str) -> dict:
+        return self._integration_request(
+            "POST", "/sis/timetable/sync-weekly", json={"term_label": term_label}
+        )
+
+    def timetable_next_class(self, payload: dict) -> dict:
+        return self._integration_request("POST", "/sis/timetable/next-class", json=payload)
+
+    def timetable_free_slots(self, payload: dict) -> dict:
+        return self._integration_request("POST", "/sis/timetable/free-slots", json=payload)
+
+    def timetable_check_conflicts(self, payload: dict) -> dict:
+        return self._integration_request(
+            "POST", "/sis/timetable/check-conflicts", json=payload
+        )
+
+    def timetable_exam_status(self, payload: dict) -> dict:
+        return self._integration_request("POST", "/sis/timetable/exam-status", json=payload)

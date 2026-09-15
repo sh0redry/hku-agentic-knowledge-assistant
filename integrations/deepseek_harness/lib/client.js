@@ -99,6 +99,21 @@ export class HKUAgentsClient {
     preflight(input, signal) {
         return this.request('POST', '/api/v1/integration/sis/preflight', input, signal);
     }
+    syncWeeklyTimetable(input, signal) {
+        return this.request('POST', '/api/v1/integration/sis/timetable/sync-weekly', { term_label: input.term_label }, signal);
+    }
+    nextClass(input, signal) {
+        return this.request('POST', '/api/v1/integration/sis/timetable/next-class', input, signal);
+    }
+    findFreeSlots(input, signal) {
+        return this.request('POST', '/api/v1/integration/sis/timetable/free-slots', input, signal);
+    }
+    checkTimetableConflicts(input, signal) {
+        return this.request('POST', '/api/v1/integration/sis/timetable/check-conflicts', input, signal);
+    }
+    examStatus(input, signal) {
+        return this.request('POST', '/api/v1/integration/sis/timetable/exam-status', input, signal);
+    }
     async request(method, path, body, parentSignal) {
         const token = process.env[this.tokenEnv]?.trim();
         if (!token || token.length < 32) {

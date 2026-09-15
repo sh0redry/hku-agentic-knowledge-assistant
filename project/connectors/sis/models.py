@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from datetime import datetime
 import re
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class ExpectedCourseSelection(BaseModel):
@@ -75,4 +77,101 @@ class SISNavigationRequest(BaseModel):
     term_label: str | None = Field(
         default=None,
         pattern=r"^\d{4}-\d{2}\s+Sem\s+[12]$",
+    )
+
+
+Weekday = Literal[
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+]
+
+
+class SISTimetableMeeting(ExpectedCourseSelection):
+    class_number: str | None = Field(default=None, pattern=r"^\d{3,8}$")
+    weekday: Weekday
+    start_time: str = Field(pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+    end_time: str = Field(pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+    room: str | None = Field(default=None, max_length=120)
+
+    @model_validator(mode="after")
+    def validate_time_range(self):
+        if self.end_time <= self.start_time:
+            raise ValueError("Meeting end_time must be later than start_time.")
+        return self
+
+
+class SISExamEntry(ExpectedCourseSelection):
+    exam_date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    start_time: str | None = Field(
+        default=None, pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$"
+    )
+    end_time: str | None = Field(
+        default=None, pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$"
+    )
+    venue: str | None = Field(default=None, max_length=160)
+    seat: str | None = Field(default=None, max_length=80)
+
+
+class SISTimetableSyncRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    term_label: str = Field(pattern=r"^\d{4}-\d{2}\s+Sem\s+[12]$")
+
+
+class SISNextClassRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    term_label: str | None = Field(
+        default=None, pattern=r"^\d{4}-\d{2}\s+Sem\s+[12]$"
+    )
+    as_of: datetime | None = None
+    days_ahead: int = Field(default=14, ge=1, le=28)
+
+
+class SISFreeSlotsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    term_label: str | None = Field(
+        default=None, pattern=r"^\d{4}-\d{2}\s+Sem\s+[12]$"
+    )
+    weekdays: list[Weekday] = Field(
+        default_factory=lambda: [
+            "monday",
+            "tuesday",
+            "wednesday",
+            "thursday",
+            "friday",
+        ]
+    )
+    window_start: str = Field(
+        default="09:00", pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$"
+    )
+    window_end: str = Field(
+        default="18:00", pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$"
+    )
+    minimum_minutes: int = Field(default=60, ge=15, le=720)
+
+    @model_validator(mode="after")
+    def validate_window(self):
+        if self.window_end <= self.window_start:
+            raise ValueError("window_end must be later than window_start.")
+        if len(set(self.weekdays)) != len(self.weekdays):
+            raise ValueError("weekdays must not contain duplicates.")
+        return self
+
+
+class SISTimetableConflictRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    term_label: str | None = Field(
+        default=None, pattern=r"^\d{4}-\d{2}\s+Sem\s+[12]$"
+    )
+    candidate_meetings: list[SISTimetableMeeting] = Field(min_length=1, max_length=50)
+
+
+class SISExamStatusRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    term_label: str | None = Field(
+        default=None, pattern=r"^\d{4}-\d{2}\s+Sem\s+[12]$"
     )

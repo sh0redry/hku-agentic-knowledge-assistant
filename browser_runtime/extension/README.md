@@ -38,20 +38,21 @@ in-memory development pin, or set `BROWSER_EXTENSION_IDS` explicitly in
 ## Multi-system diagnostics
 
 The popup and the GUI **Connections** tab show one record for each supported
-system: `portal`, `sis`, `moodle`, and `library`. Each record contains only an
+system: `portal`, `sis`, `timetable`, `moodle`, and `library`. Each record contains only an
 approved origin, a path without query string or fragment, inferred
 authentication/page state, parser version where available, and heartbeat
 freshness. Complete authentication URLs, tickets, relay state, and tokens are
 not sent to the local service.
 
-Only Portal and SIS can be bound for existing commands. Opening Moodle or My
+Portal, SIS, and the dedicated My Weekly Schedule application can be bound for
+existing commands. Opening Moodle or My
 Library in Chrome makes them discoverable, but does not grant HKU AGENTS a read
 or write capability for either page.
 
 ## Security contract
 
 - Exact approved host permissions only: `https://studentportal.hku.hk/*`,
-  `https://hkuportal.hku.hk/*`, `https://sis-main.hku.hk/*`,
+  `https://hkuportal.hku.hk/*`, `https://sis-main.hku.hk/*`, `https://sweb.hku.hk/*`,
   `https://moodle.hku.hk/*`, `https://julac-hku.primo.exlibrisgroup.com/*`, and
   `https://lib.hku.hk/*`.
 - Local companion permission only: `http://127.0.0.1/*`.
@@ -62,10 +63,24 @@ or write capability for either page.
   sign-on destination; unrelated Portal controls cannot be clicked.
 - Navigation stops when login is incomplete, the target is missing or ambiguous,
   an origin differs, or the verified destination does not become ready in time.
+- PeopleSoft `errorPg=err` tabs are classified as SSO failures and are never
+  preferred over an existing authenticated SIS tab. An authenticated SIS session
+  is reused before the Portal opens another one-time SSO destination.
 - Live preflight reads and compares the current cart but cannot modify it.
 - Only structured page state leaves Portal/SIS content scripts. Full HTML is never sent.
+- Weekly timetable synchronization uses only the fixed
+  `https://sweb.hku.hk/student/servlet/MyWeekly/showTimetable` target and its
+  dedicated parser. Enrollment Add Classes is never reported as the authoritative
+  weekly timetable source.
+- Weekly parser `0.2.1` recognizes absolutely positioned course cards from their
+  SUN-SAT column geometry. It derives Sem 1/2 only from unambiguous displayed-week
+  months and reports June-August as undetermined.
 - Moodle and Library have no content scripts in Phase A; tab discovery strips
   query strings and fragments before reporting state.
+- SIS parser `0.3.1` additionally normalizes read-only Class Schedule meetings
+  and visible Examination Timetables entries. It does not create or edit calendar data.
+- Verified functional SIS pages take precedence over stale hidden sign-in text
+  retained by legacy PeopleSoft frames when determining authentication state.
 - Temporary Course List rows and Class Schedule rows are returned in separate fields.
 - The SIS listener loads at `document_start` so legacy PeopleSoft frame pages can
   be observed even when their top-level document does not promptly become idle.

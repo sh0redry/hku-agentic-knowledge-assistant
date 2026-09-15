@@ -3,11 +3,13 @@
 importScripts("connection_lifecycle.js", "browser_targets.js");
 
 const SIS_URL_PATTERN = "https://sis-main.hku.hk/*";
+const WEEKLY_TIMETABLE_URL_PATTERN = "https://sweb.hku.hk/*";
 const PORTAL_URL_PATTERNS = [
   "https://hkuportal.hku.hk/*",
   "https://studentportal.hku.hk/*"
 ];
 const SIS_ORIGIN = "https://sis-main.hku.hk";
+const WEEKLY_TIMETABLE_ORIGIN = "https://sweb.hku.hk";
 const PORTAL_ORIGINS = new Set([
   "https://hkuportal.hku.hk",
   "https://studentportal.hku.hk"
@@ -18,13 +20,15 @@ const ALLOWED_COMMANDS = new Set([
   "hku.inspect_portal",
   "hku.open_sis",
   "hku.open_enrollment_add_classes",
+  "hku.open_weekly_timetable",
   "sis.bind_tab",
   "sis.inspect_page",
   "sis.inspect_cart",
   "sis.open_enrollment_add_classes",
   "sis.select_term",
   "sis.preflight",
-  "sis.get_status"
+  "sis.get_status",
+  "timetable.inspect_weekly"
 ]);
 const NAVIGATION_DEADLINE_MS = 30000;
 
@@ -192,8 +196,19 @@ async function querySisTabs() {
   return tabs;
 }
 
+async function queryWeeklyTimetableTabs() {
+  return chrome.tabs.query({ url: WEEKLY_TIMETABLE_URL_PATTERN });
+}
+
 async function findSisTab() {
-  const tabs = await querySisTabs();
+  const allTabs = await querySisTabs();
+  const tabs = allTabs.filter((tab) => !isKnownSisSsoErrorPage(tab.url));
+  if (!tabs.length && allTabs.some((tab) => isKnownSisSsoErrorPage(tab.url))) {
+    throw commandError(
+      "SIS_SSO_FAILED",
+      "Only the PeopleSoft SSO error page is open; an authenticated SIS page is required."
+    );
+  }
   if (!tabs.length) throw commandError("SIS_TAB_NOT_FOUND", "Open HKU SIS in Chrome first.");
   tabs.sort((left, right) =>
     Number(right.active) - Number(left.active) || Number(right.lastAccessed || 0) - Number(left.lastAccessed || 0)
@@ -204,7 +219,9 @@ async function findSisTab() {
 function allowedOrigin(url) {
   try {
     const origin = new URL(url).origin;
-    return PORTAL_ORIGINS.has(origin) || origin === SIS_ORIGIN ? origin : null;
+    return PORTAL_ORIGINS.has(origin) || origin === SIS_ORIGIN || origin === WEEKLY_TIMETABLE_ORIGIN
+      ? origin
+      : null;
   } catch (_error) {
     return null;
   }
@@ -220,9 +237,15 @@ function isKnownPortalErrorPage(url) {
   }
 }
 
+function isKnownSisSsoErrorPage(url) {
+  const target = self.HKUBrowserTargets.classifyUrl(url);
+  return target?.system === "sis" && target.page_kind === "sso_error";
+}
+
 function hkuTabPriority(tab) {
   const origin = allowedOrigin(tab?.url);
-  if (origin === "https://studentportal.hku.hk") return 3;
+  if (origin === "https://studentportal.hku.hk") return 4;
+  if (origin === WEEKLY_TIMETABLE_ORIGIN) return 3;
   if (origin === SIS_ORIGIN) return 2;
   if (origin === "https://hkuportal.hku.hk") return 1;
   return 0;
@@ -233,10 +256,13 @@ async function findHkuTab() {
   if (
     active[0]?.url &&
     allowedOrigin(active[0].url) &&
-    !isKnownPortalErrorPage(active[0].url)
+    !isKnownPortalErrorPage(active[0].url) &&
+    !isKnownSisSsoErrorPage(active[0].url)
   ) return active[0];
-  const tabs = (await chrome.tabs.query({ url: [...PORTAL_URL_PATTERNS, SIS_URL_PATTERN] }))
-    .filter((tab) => !isKnownPortalErrorPage(tab.url));
+  const tabs = (await chrome.tabs.query({
+    url: [...PORTAL_URL_PATTERNS, SIS_URL_PATTERN, WEEKLY_TIMETABLE_URL_PATTERN]
+  }))
+    .filter((tab) => !isKnownPortalErrorPage(tab.url) && !isKnownSisSsoErrorPage(tab.url));
   if (!tabs.length) {
     throw commandError(
       "HKU_TAB_NOT_FOUND",
@@ -278,11 +304,20 @@ async function inspectBoundHkuTab() {
       boundTabId = null;
     }
   }
-  if (!tab?.url || !allowedOrigin(tab.url) || isKnownPortalErrorPage(tab.url)) {
+  if (
+    !tab?.url ||
+    !allowedOrigin(tab.url) ||
+    isKnownPortalErrorPage(tab.url) ||
+    isKnownSisSsoErrorPage(tab.url)
+  ) {
     tab = await findHkuTab();
   }
   const origin = allowedOrigin(tab.url);
-  const command = PORTAL_ORIGINS.has(origin) ? "hku.inspect_portal" : "sis.inspect_page";
+  const command = PORTAL_ORIGINS.has(origin)
+    ? "hku.inspect_portal"
+    : origin === WEEKLY_TIMETABLE_ORIGIN
+      ? "timetable.inspect_weekly"
+      : "sis.inspect_page";
   const snapshot = await sendTabCommand(tab.id, command);
   boundTabId = tab.id;
   lastSnapshot = snapshot;
@@ -299,7 +334,11 @@ async function inspectBoundSisTab(command, payload = {}) {
       boundTabId = null;
     }
   }
-  if (!tab?.url || allowedOrigin(tab.url) !== SIS_ORIGIN) {
+  if (
+    !tab?.url ||
+    allowedOrigin(tab.url) !== SIS_ORIGIN ||
+    isKnownSisSsoErrorPage(tab.url)
+  ) {
     tab = await findSisTab();
     boundTabId = tab.id;
   }
@@ -317,59 +356,142 @@ function delay(milliseconds) {
 
 async function waitForSisSnapshot(deadline, preferredTabId = null, existingSisTabIds = new Set()) {
   let lastError = null;
+  let ssoFailureSeenAt = null;
   while (Date.now() < deadline) {
     try {
-      let tab = null;
-      if (preferredTabId !== null) {
-        try {
-          const preferred = await chrome.tabs.get(preferredTabId);
-          if (allowedOrigin(preferred.url) === SIS_ORIGIN) {
-            tab = preferred;
-          } else {
-            lastError = commandError(
-              "SIS_TARGET_NOT_READY",
-              "The bound Portal tab has not reached the verified SIS origin yet."
-            );
-          }
-        } catch (_error) {
-          preferredTabId = null;
-        }
+      const sisTabs = await querySisTabs();
+      if (sisTabs.some((tab) => isKnownSisSsoErrorPage(tab.url))) {
+        ssoFailureSeenAt ??= Date.now();
       }
-      if (!tab) {
-        const newSisTabs = (await querySisTabs()).filter(
-          (candidate) => !existingSisTabIds.has(candidate.id)
-        );
-        newSisTabs.sort((left, right) =>
-          Number(right.openerTabId === preferredTabId) - Number(left.openerTabId === preferredTabId) ||
-          Number(right.active) - Number(left.active) ||
-          Number(right.lastAccessed || 0) - Number(left.lastAccessed || 0)
-        );
-        if (newSisTabs.length > 0) {
-          tab = newSisTabs[0];
-          preferredTabId = tab.id;
+      const candidates = sisTabs.filter((tab) => !isKnownSisSsoErrorPage(tab.url));
+      candidates.sort((left, right) =>
+        Number(!existingSisTabIds.has(right.id)) - Number(!existingSisTabIds.has(left.id)) ||
+        Number(right.id === preferredTabId) - Number(left.id === preferredTabId) ||
+        Number(right.openerTabId === preferredTabId) - Number(left.openerTabId === preferredTabId) ||
+        Number(right.active) - Number(left.active) ||
+        Number(right.lastAccessed || 0) - Number(left.lastAccessed || 0)
+      );
+      if (!candidates.length) {
+        if (ssoFailureSeenAt && Date.now() - ssoFailureSeenAt >= 2000) {
+          throw commandError(
+            "SIS_SSO_FAILED",
+            "HKU Portal opened the PeopleSoft SSO error page instead of an authenticated SIS session."
+          );
         }
-      }
-      if (!tab) {
         await delay(300);
         continue;
       }
-      const snapshot = await sendTabCommand(tab.id, "sis.inspect_page");
-      boundTabId = tab.id;
-      lastSnapshot = snapshot;
-      void sendHeartbeat();
-      if (snapshot.logged_in === false) {
-        throw commandError("SIS_LOGIN_REQUIRED", "Complete SIS authentication in Chrome.");
+      for (const tab of candidates) {
+        try {
+          const snapshot = await sendTabCommand(tab.id, "sis.inspect_page");
+          if (snapshot.logged_in === true) {
+            boundTabId = tab.id;
+            lastSnapshot = snapshot;
+            void sendHeartbeat();
+            return snapshot;
+          }
+          if (snapshot.logged_in === false) {
+            lastError = commandError("SIS_LOGIN_REQUIRED", "Complete SIS authentication in Chrome.");
+          }
+        } catch (error) {
+          lastError = error;
+        }
       }
-      if (snapshot.logged_in === true) return snapshot;
     } catch (error) {
-      if (error.code === "SIS_LOGIN_REQUIRED") throw error;
+      if (error.code === "SIS_SSO_FAILED") throw error;
       lastError = error;
+    }
+    if (ssoFailureSeenAt && Date.now() - ssoFailureSeenAt >= 2000) {
+      throw commandError(
+        "SIS_SSO_FAILED",
+        "HKU Portal opened the PeopleSoft SSO error page instead of an authenticated SIS session."
+      );
     }
     await delay(300);
   }
   throw commandError(
     "NAVIGATION_TIMEOUT",
     lastError?.message || "SIS did not open before the navigation deadline."
+  );
+}
+
+async function findAuthenticatedSisSnapshot() {
+  const tabs = (await querySisTabs()).filter((tab) => !isKnownSisSsoErrorPage(tab.url));
+  tabs.sort((left, right) =>
+    Number(right.active) - Number(left.active) ||
+    Number(right.lastAccessed || 0) - Number(left.lastAccessed || 0)
+  );
+  for (const tab of tabs) {
+    try {
+      const snapshot = await sendTabCommand(tab.id, "sis.inspect_page");
+      if (snapshot.logged_in === true) {
+        boundTabId = tab.id;
+        lastSnapshot = snapshot;
+        void sendHeartbeat();
+        return snapshot;
+      }
+    } catch (_error) {
+      // Continue across stale tabs and tabs that have not loaded the content script.
+    }
+  }
+  return null;
+}
+
+async function findAuthenticatedWeeklyTimetableSnapshot() {
+  const tabs = await queryWeeklyTimetableTabs();
+  tabs.sort((left, right) =>
+    Number(right.active) - Number(left.active) ||
+    Number(right.lastAccessed || 0) - Number(left.lastAccessed || 0)
+  );
+  for (const tab of tabs) {
+    try {
+      const snapshot = await sendTabCommand(tab.id, "timetable.inspect_weekly");
+      if (snapshot.logged_in === true && snapshot.page_kind === "weekly_timetable") {
+        boundTabId = tab.id;
+        lastSnapshot = snapshot;
+        void sendHeartbeat();
+        return snapshot;
+      }
+    } catch (_error) {
+      // Continue across stale or partially loaded timetable tabs.
+    }
+  }
+  return null;
+}
+
+async function waitForWeeklyTimetableSnapshot(deadline, preferredTabId = null) {
+  let lastError = null;
+  while (Date.now() < deadline) {
+    const tabs = await queryWeeklyTimetableTabs();
+    tabs.sort((left, right) =>
+      Number(right.id === preferredTabId) - Number(left.id === preferredTabId) ||
+      Number(right.active) - Number(left.active) ||
+      Number(right.lastAccessed || 0) - Number(left.lastAccessed || 0)
+    );
+    for (const tab of tabs) {
+      try {
+        const snapshot = await sendTabCommand(tab.id, "timetable.inspect_weekly");
+        if (snapshot.logged_in === true && snapshot.page_kind === "weekly_timetable") {
+          boundTabId = tab.id;
+          lastSnapshot = snapshot;
+          void sendHeartbeat();
+          return snapshot;
+        }
+        if (snapshot.logged_in === false) {
+          lastError = commandError(
+            "TIMETABLE_LOGIN_REQUIRED",
+            "Complete HKU authentication for My Weekly Schedule in Chrome."
+          );
+        }
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    await delay(300);
+  }
+  throw commandError(
+    lastError?.code || "TIMETABLE_NAVIGATION_TIMEOUT",
+    lastError?.message || "My Weekly Schedule did not become ready before the navigation deadline."
   );
 }
 
@@ -421,16 +543,85 @@ async function waitForCartSnapshot(deadline, requestedTermLabel = null) {
   );
 }
 
-async function openSis(deadline = Date.now() + NAVIGATION_DEADLINE_MS) {
+async function openSisOutcome(deadline = Date.now() + NAVIGATION_DEADLINE_MS) {
   const snapshot = await inspectBoundHkuTab();
-  if (snapshot.origin === SIS_ORIGIN) return snapshot;
+  if (snapshot.origin === SIS_ORIGIN) {
+    return { snapshot, portalNavigationPerformed: false };
+  }
   if (!PORTAL_ORIGINS.has(snapshot.origin) || snapshot.page_kind !== "portal_home") {
     throw commandError("PORTAL_LOGIN_REQUIRED", "Complete HKU Portal login and MFA first.");
+  }
+  const authenticatedSis = await findAuthenticatedSisSnapshot();
+  if (authenticatedSis) {
+    return { snapshot: authenticatedSis, portalNavigationPerformed: false };
   }
   const portalTabId = boundTabId;
   const existingSisTabIds = new Set((await querySisTabs()).map((tab) => tab.id));
   await sendTabCommand(portalTabId, "hku.open_sis");
-  return waitForSisSnapshot(deadline, portalTabId, existingSisTabIds);
+  return {
+    snapshot: await waitForSisSnapshot(deadline, portalTabId, existingSisTabIds),
+    portalNavigationPerformed: true
+  };
+}
+
+async function openSis(deadline = Date.now() + NAVIGATION_DEADLINE_MS) {
+  return (await openSisOutcome(deadline)).snapshot;
+}
+
+async function openWeeklyTimetable() {
+  const deadline = Date.now() + NAVIGATION_DEADLINE_MS;
+  const source = await inspectBoundHkuTab();
+  if (
+    source.origin === WEEKLY_TIMETABLE_ORIGIN &&
+    source.logged_in === true &&
+    source.page_kind === "weekly_timetable"
+  ) {
+    return {
+      read_only: true,
+      navigation_only: true,
+      timetable_write_requests_sent: 0,
+      source_origin: source.origin,
+      source_page_kind: source.page_kind,
+      target_origin: WEEKLY_TIMETABLE_ORIGIN,
+      target_page_kind: "weekly_timetable",
+      steps: ["target_already_open"],
+      snapshot: source
+    };
+  }
+  if (!PORTAL_ORIGINS.has(source.origin) || source.page_kind !== "portal_home") {
+    throw commandError(
+      "PORTAL_LOGIN_REQUIRED",
+      "Open and authenticate HKU Portal before synchronizing My Weekly Schedule."
+    );
+  }
+  const existing = await findAuthenticatedWeeklyTimetableSnapshot();
+  if (existing) {
+    return {
+      read_only: true,
+      navigation_only: true,
+      timetable_write_requests_sent: 0,
+      source_origin: source.origin,
+      source_page_kind: source.page_kind,
+      target_origin: WEEKLY_TIMETABLE_ORIGIN,
+      target_page_kind: "weekly_timetable",
+      steps: ["weekly_timetable_tab_reused"],
+      snapshot: existing
+    };
+  }
+  const portalTabId = boundTabId;
+  await sendTabCommand(portalTabId, "hku.open_weekly_timetable");
+  const snapshot = await waitForWeeklyTimetableSnapshot(deadline, portalTabId);
+  return {
+    read_only: true,
+    navigation_only: true,
+    timetable_write_requests_sent: 0,
+    source_origin: source.origin,
+    source_page_kind: source.page_kind,
+    target_origin: WEEKLY_TIMETABLE_ORIGIN,
+    target_page_kind: "weekly_timetable",
+    steps: ["portal_to_weekly_timetable"],
+    snapshot
+  };
 }
 
 async function openEnrollmentAddClasses(requestedTermLabel = null) {
@@ -447,10 +638,16 @@ async function openEnrollmentAddClasses(requestedTermLabel = null) {
     );
   }
   const steps = [];
+  let sisSessionReused = false;
   let sisSnapshot = source;
   if (PORTAL_ORIGINS.has(source.origin)) {
-    sisSnapshot = await openSis(deadline);
-    steps.push("portal_to_sis");
+    const sisOutcome = await openSisOutcome(deadline);
+    sisSnapshot = sisOutcome.snapshot;
+    if (sisOutcome.portalNavigationPerformed) {
+      steps.push("portal_to_sis");
+    } else {
+      sisSessionReused = true;
+    }
   }
   if (sisSnapshot.origin !== SIS_ORIGIN || sisSnapshot.logged_in !== true) {
     throw commandError("SIS_LOGIN_REQUIRED", "An authenticated SIS page is required.");
@@ -471,6 +668,7 @@ async function openEnrollmentAddClasses(requestedTermLabel = null) {
     source_page_kind: source.page_kind,
     target_origin: SIS_ORIGIN,
     target_page_kind: "cart",
+    sis_session_reused: sisSessionReused,
     steps,
     snapshot: sisSnapshot
   };
@@ -493,7 +691,11 @@ async function executeCommand(command, payload = {}) {
   if (command === "hku.bind_tab") {
     const tab = await findHkuTab();
     const origin = allowedOrigin(tab.url);
-    const inspectCommand = PORTAL_ORIGINS.has(origin) ? "hku.inspect_portal" : "sis.inspect_page";
+    const inspectCommand = PORTAL_ORIGINS.has(origin)
+      ? "hku.inspect_portal"
+      : origin === WEEKLY_TIMETABLE_ORIGIN
+        ? "timetable.inspect_weekly"
+        : "sis.inspect_page";
     const snapshot = await sendTabCommand(tab.id, inspectCommand);
     boundTabId = tab.id;
     lastSnapshot = snapshot;
@@ -502,6 +704,7 @@ async function executeCommand(command, payload = {}) {
   }
   if (command === "hku.inspect_portal") return inspectBoundHkuTab();
   if (command === "hku.open_sis") return openSis();
+  if (command === "hku.open_weekly_timetable") return openWeeklyTimetable();
   if (command === "hku.open_enrollment_add_classes") {
     return openEnrollmentAddClasses(payload.term_label || null);
   }
@@ -515,6 +718,13 @@ async function executeCommand(command, payload = {}) {
   }
   if (command === "sis.select_term") return inspectBoundSisTab(command, payload);
   if (command === "sis.preflight") return inspectBoundSisTab("sis.inspect_cart");
+  if (command === "timetable.inspect_weekly") {
+    const snapshot = await findAuthenticatedWeeklyTimetableSnapshot();
+    if (!snapshot) {
+      throw commandError("TIMETABLE_TAB_NOT_FOUND", "Open My Weekly Schedule in Chrome first.");
+    }
+    return snapshot;
+  }
   return inspectBoundSisTab(command);
 }
 

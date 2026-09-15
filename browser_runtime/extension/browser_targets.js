@@ -1,11 +1,12 @@
 (function (root) {
   "use strict";
 
-  const SYSTEM_ORDER = ["portal", "sis", "moodle", "library"];
+  const SYSTEM_ORDER = ["portal", "sis", "timetable", "moodle", "library"];
   const TARGET_PATTERNS = [
     "https://hkuportal.hku.hk/*",
     "https://studentportal.hku.hk/*",
     "https://sis-main.hku.hk/*",
+    "https://sweb.hku.hk/*",
     "https://moodle.hku.hk/*",
     "https://julac-hku.primo.exlibrisgroup.com/*",
     "https://lib.hku.hk/*"
@@ -35,12 +36,29 @@
       };
     }
     if (location.origin === "https://sis-main.hku.hk") {
-      const login = path.includes("login") || path.endsWith("z_signon.jsp");
+      let ssoError = false;
+      let login = path.includes("login") || path.endsWith("z_signon.jsp");
+      try {
+        const parsed = new URL(value);
+        ssoError = parsed.searchParams.get("errorPg")?.toLowerCase() === "err";
+        login = login || parsed.searchParams.get("cmd")?.toLowerCase() === "login";
+      } catch (_error) {
+        // sanitizedLocation already rejected malformed values.
+      }
       return {
         system: "sis",
         ...location,
-        logged_in: login ? false : null,
-        page_kind: login ? "login" : "sis_page"
+        logged_in: login || ssoError ? false : null,
+        page_kind: ssoError ? "sso_error" : login ? "login" : "sis_page"
+      };
+    }
+    if (location.origin === "https://sweb.hku.hk") {
+      const timetable = path === "/student/servlet/myweekly/showtimetable";
+      return {
+        system: "timetable",
+        ...location,
+        logged_in: null,
+        page_kind: timetable ? "weekly_timetable" : "timetable_page"
       };
     }
     if (location.origin === "https://moodle.hku.hk") {
@@ -99,7 +117,8 @@
 
   function score(tab, target) {
     return Number(target.logged_in === true) * 1e15 +
-      Number(tab.active) * 1e14 + Number(tab.lastAccessed || 0);
+      Number(target.logged_in !== false) * 1e14 +
+      Number(tab.active) * 1e13 + Number(tab.lastAccessed || 0);
   }
 
   function buildRegistry(tabs, boundTabId = null, boundSnapshot = null) {

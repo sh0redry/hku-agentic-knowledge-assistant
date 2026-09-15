@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from browser_bridge.security import sanitize_path
 
-from connectors.sis.models import CourseSelection
+from connectors.sis.models import CourseSelection, SISExamEntry, SISTimetableMeeting
 
 
 class StrictMessage(BaseModel):
@@ -20,6 +20,7 @@ class BrowserTabState(StrictMessage):
         "https://hkuportal.hku.hk",
         "https://studentportal.hku.hk",
         "https://sis-main.hku.hk",
+        "https://sweb.hku.hk",
     ] | None = None
     logged_in: bool | None = None
     page_kind: Literal[
@@ -30,6 +31,8 @@ class BrowserTabState(StrictMessage):
         "term_selection",
         "cart",
         "status",
+        "exam_schedule",
+        "weekly_timetable",
         "blocked",
         "unknown",
     ] = "unknown"
@@ -49,11 +52,12 @@ class BrowserTabState(StrictMessage):
 
 
 class BrowserTargetState(StrictMessage):
-    system: Literal["portal", "sis", "moodle", "library"]
+    system: Literal["portal", "sis", "timetable", "moodle", "library"]
     origin: Literal[
         "https://hkuportal.hku.hk",
         "https://studentportal.hku.hk",
         "https://sis-main.hku.hk",
+        "https://sweb.hku.hk",
         "https://moodle.hku.hk",
         "https://julac-hku.primo.exlibrisgroup.com",
         "https://lib.hku.hk",
@@ -80,6 +84,7 @@ class BrowserTargetState(StrictMessage):
                 "https://studentportal.hku.hk",
             },
             "sis": {"https://sis-main.hku.hk"},
+            "timetable": {"https://sweb.hku.hk"},
             "moodle": {"https://moodle.hku.hk"},
             "library": {
                 "https://julac-hku.primo.exlibrisgroup.com",
@@ -108,7 +113,57 @@ class SISPageSnapshot(BrowserTabState):
     visible_courses: list[CourseSelection] = Field(default_factory=list, max_length=200)
     temporary_courses: list[CourseSelection] = Field(default_factory=list, max_length=200)
     schedule_courses: list[CourseSelection] = Field(default_factory=list, max_length=200)
+    schedule_meetings: list[SISTimetableMeeting] = Field(default_factory=list, max_length=1000)
+    exam_publication_state: Literal[
+        "unavailable", "not_published", "partially_published", "published"
+    ] = "unavailable"
+    exam_entries: list[SISExamEntry] = Field(default_factory=list, max_length=200)
     diagnostics: SISParserDiagnostics | None = None
+
+
+class WeeklyTimetableParserDiagnostics(StrictMessage):
+    parser_version: str = Field(pattern=r"^\d+\.\d+\.\d+$", max_length=20)
+    term_detection_method: Literal[
+        "page_label", "inferred_from_week_start", "unavailable"
+    ]
+    table_count: int = Field(ge=0, le=10000)
+    row_count: int = Field(ge=0, le=50000)
+    timetable_marker_found: bool
+    meeting_candidate_count: int = Field(ge=0, le=1000)
+    parsed_meeting_count: int = Field(ge=0, le=1000)
+    unparsed_candidate_count: int = Field(ge=0, le=1000)
+
+
+class WeeklyTimetableSnapshot(StrictMessage):
+    bound: Literal[True]
+    origin: Literal["https://sweb.hku.hk"]
+    logged_in: bool | None = None
+    page_kind: Literal["weekly_timetable", "login", "blocked", "unknown"]
+    term_label: str | None = Field(default=None, max_length=100)
+    week_range: str | None = Field(default=None, max_length=160)
+    meeting_count: int = Field(default=0, ge=0, le=1000)
+    meetings: list[SISTimetableMeeting] = Field(default_factory=list, max_length=1000)
+    diagnostics: WeeklyTimetableParserDiagnostics
+
+
+class WeeklyTimetableNavigationResult(StrictMessage):
+    read_only: Literal[True]
+    navigation_only: Literal[True]
+    timetable_write_requests_sent: Literal[0]
+    source_origin: Literal[
+        "https://hkuportal.hku.hk",
+        "https://studentportal.hku.hk",
+        "https://sweb.hku.hk",
+    ]
+    source_page_kind: str = Field(min_length=1, max_length=40)
+    target_origin: Literal["https://sweb.hku.hk"]
+    target_page_kind: Literal["weekly_timetable"]
+    steps: list[Literal[
+        "portal_to_weekly_timetable",
+        "weekly_timetable_tab_reused",
+        "target_already_open",
+    ]] = Field(min_length=1, max_length=2)
+    snapshot: WeeklyTimetableSnapshot
 
 
 class PortalNavigationDiagnostics(StrictMessage):
@@ -136,6 +191,7 @@ class SISNavigationResult(StrictMessage):
     source_page_kind: str = Field(min_length=1, max_length=40)
     target_origin: Literal["https://sis-main.hku.hk"]
     target_page_kind: Literal["cart"]
+    sis_session_reused: bool = False
     steps: list[Literal[
         "portal_to_sis",
         "sis_fixed_route_to_enrollment_add_classes",

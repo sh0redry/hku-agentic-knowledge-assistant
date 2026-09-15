@@ -7,6 +7,11 @@
     /\b([A-Z]{2,8})\s*([0-9]{3,5}[A-Z]?)\s*[-\u2010-\u2015]\s*([A-Z0-9-]{1,20})\b/i;
   const CLASS_PATTERN = /\bclass\s*(?:nbr|number|no\.?|#)\s*:?\s*([0-9]{3,8})\b/i;
   const SECTION_PATTERN = /\bsection\s*:?\s*([A-Z0-9-]{1,20})\b/i;
+  const DAY_TIME_PATTERN = /\b(Mo|Tu|We|Th|Fr|Sa|Su)\s+([0-2][0-9]:[0-5][0-9])\s*[-\u2010-\u2015]\s*([0-2][0-9]:[0-5][0-9])\b/gi;
+  const WEEKDAYS = {
+    Mo: "monday", Tu: "tuesday", We: "wednesday", Th: "thursday",
+    Fr: "friday", Sa: "saturday", Su: "sunday"
+  };
 
   function normalizeText(value) {
     return String(value || "").replace(/\s+/g, " ").trim();
@@ -14,6 +19,26 @@
 
   function normalizeHeader(value) {
     return normalizeText(value).toLowerCase().replace(/[^a-z0-9]+/g, " ");
+  }
+
+  function textLines(value) {
+    return String(value || "")
+      .split(/[\r\n]+/)
+      .map(normalizeText)
+      .filter(Boolean);
+  }
+
+  function parseDayTimes(value) {
+    const meetings = [];
+    for (const match of String(value || "").matchAll(DAY_TIME_PATTERN)) {
+      if (match[3] <= match[2]) continue;
+      meetings.push({
+        weekday: WEEKDAYS[match[1][0].toUpperCase() + match[1].slice(1).toLowerCase()],
+        start_time: match[2],
+        end_time: match[3]
+      });
+    }
+    return meetings;
   }
 
   function valueFromColumn(cells, headers, predicate) {
@@ -123,11 +148,25 @@
   function classifyPage(documentObject, url) {
     const bodyText = normalizeText(documentObject.body && documentObject.body.textContent).toLowerCase();
     const hasPassword = Boolean(documentObject.querySelector("input[type='password']"));
-    if (hasPassword || /sign in|log in/.test(bodyText.slice(0, 2500))) return "login";
+    let loginUrl = false;
+    try {
+      const parsed = new URL(url);
+      loginUrl = parsed.pathname.toLowerCase().includes("login") ||
+        parsed.pathname.toLowerCase().endsWith("z_signon.jsp") ||
+        parsed.searchParams.get("cmd")?.toLowerCase() === "login" ||
+        parsed.searchParams.get("errorPg")?.toLowerCase() === "err";
+    } catch (_error) {
+      // Synthetic documents and incomplete frame URLs are classified from DOM evidence.
+    }
+    if (hasPassword || loginUrl) return "login";
     if (/access denied|not authorized|session (?:has )?expired/.test(bodyText)) return "blocked";
     if (/select term/.test(bodyText) && /select a term then select continue/.test(bodyText)) {
       return "term_selection";
     }
+    if (
+      (/exam(?:ination)? date/.test(bodyText) && /exam(?:ination)? time|start time/.test(bodyText)) ||
+      (/examination timetables?/.test(bodyText) && /not (?:yet )?published|no exam/.test(bodyText))
+    ) return "exam_schedule";
     // The left SIS navigation frame always contains the text "Enrollment Add
     // Classes". It is therefore not sufficient evidence that the main cart
     // page is open. The target page itself always exposes a course-list/cart
@@ -137,6 +176,9 @@
     }
     if (/enrollment status|class schedule/.test(bodyText)) return "status";
     if (/student center|manage classes/.test(bodyText) || /studentcenter/i.test(url)) return "home";
+    // Legacy PeopleSoft frames can retain hidden sign-in text after SSO.
+    // It is login evidence only when no verified functional marker matched above.
+    if (/\bsign in\b|\blog in\b/.test(bodyText.slice(0, 2500))) return "login";
     return "unknown";
   }
 
@@ -224,6 +266,92 @@
     return groups;
   }
 
+  function scheduleMeetingKey(meeting) {
+    return [meeting.course_code, meeting.section, meeting.class_number || "", meeting.weekday,
+      meeting.start_time, meeting.end_time, meeting.room || ""].join("|");
+  }
+
+  function extractScheduleMeetings(documentObject, boundaries = null) {
+    const courseBoundaries = boundaries || createCourseBoundaries(documentObject);
+    const meetings = [];
+    const seen = new Set();
+    for (const link of documentObject.querySelectorAll("a")) {
+      const linkText = normalizeText(link.textContent);
+      if (!COURSE_SECTION_PATTERN.test(linkText) || !/\([0-9]{3,8}\)/.test(linkText)) continue;
+      const row = typeof link.closest === "function" ? link.closest("tr") : null;
+      if (!row || classifyCourseRegion(row, courseBoundaries) !== "schedule") continue;
+      const course = parseCourseRow([linkText], ["Class"]);
+      if (!course) continue;
+      const cells = Array.from(row.querySelectorAll(":scope > th, :scope > td"));
+      const dayTimeIndex = cells.findIndex((cell) => parseDayTimes(cell.textContent).length > 0);
+      if (dayTimeIndex < 0) continue;
+      const parsedTimes = parseDayTimes(cells[dayTimeIndex].textContent);
+      const roomLines = dayTimeIndex + 1 < cells.length
+        ? textLines(cells[dayTimeIndex + 1].innerText || cells[dayTimeIndex + 1].textContent)
+        : [];
+      parsedTimes.forEach((time, index) => {
+        const room = roomLines[index] || (roomLines.length === 1 ? roomLines[0] : null);
+        const meeting = { ...course, ...time, room };
+        const key = scheduleMeetingKey(meeting);
+        if (!seen.has(key)) {
+          seen.add(key);
+          meetings.push(meeting);
+        }
+      });
+    }
+    return meetings.slice(0, 1000);
+  }
+
+  function normalizedExamDate(value) {
+    const iso = normalizeText(value).match(/\b(20[0-9]{2})[-\/]([01]?[0-9])[-\/]([0-3]?[0-9])\b/);
+    if (iso) return `${iso[1]}-${String(iso[2]).padStart(2, "0")}-${String(iso[3]).padStart(2, "0")}`;
+    const local = normalizeText(value).match(/\b([0-3]?[0-9])[-\/]([01]?[0-9])[-\/](20[0-9]{2})\b/);
+    if (local) return `${local[3]}-${String(local[2]).padStart(2, "0")}-${String(local[1]).padStart(2, "0")}`;
+    return null;
+  }
+
+  function extractExamEntries(documentObject) {
+    const entries = [];
+    const seen = new Set();
+    for (const row of documentObject.querySelectorAll("tr")) {
+      const cells = Array.from(row.querySelectorAll(":scope > th, :scope > td"));
+      const values = cells.map((cell) => normalizeText(cell.textContent));
+      const rowText = normalizeText(values.join(" "));
+      const combinedCourseMatch = rowText.match(COURSE_SECTION_PATTERN);
+      const courseMatch = combinedCourseMatch || rowText.match(COURSE_PATTERN);
+      const date = normalizedExamDate(rowText);
+      if (!courseMatch || !date) continue;
+      const timeMatch = rowText.match(/\b([0-2][0-9]:[0-5][0-9])\s*[-\u2010-\u2015]\s*([0-2][0-9]:[0-5][0-9])\b/);
+      const headers = cells.map((cell) => normalizeHeader(cell.getAttribute?.("data-header") || ""));
+      const venueIndex = headers.findIndex((header) => /venue|room|location/.test(header));
+      const seatIndex = headers.findIndex((header) => /seat/.test(header));
+      const entry = {
+        course_code: `${courseMatch[1]}${courseMatch[2]}`.toUpperCase(),
+        section: combinedCourseMatch ? combinedCourseMatch[3].toUpperCase() : "ALL",
+        exam_date: date,
+        start_time: timeMatch ? timeMatch[1] : null,
+        end_time: timeMatch ? timeMatch[2] : null,
+        venue: venueIndex >= 0 ? values[venueIndex] || null : null,
+        seat: seatIndex >= 0 ? values[seatIndex] || null : null
+      };
+      const key = JSON.stringify(entry);
+      if (!seen.has(key)) {
+        seen.add(key);
+        entries.push(entry);
+      }
+    }
+    return entries.slice(0, 200);
+  }
+
+  function examPublicationState(documentObject, pageKind, entries) {
+    if (pageKind !== "exam_schedule") return "unavailable";
+    const text = normalizeText(documentObject.body && documentObject.body.textContent).toLowerCase();
+    if (/not (?:yet )?published|no exam(?:ination)? (?:schedule|timetable)/.test(text)) {
+      return entries.length ? "partially_published" : "not_published";
+    }
+    return entries.length ? "published" : "not_published";
+  }
+
   function extractCourses(documentObject, pageKind = "status", boundaries = null) {
     if (pageKind === "cart") {
       return extractCartCourseGroups(documentObject, boundaries).temporary.slice(0, 200);
@@ -251,7 +379,7 @@
 
   function parserDiagnostics(documentObject, boundaries, groups) {
     return {
-      parser_version: "0.2.2",
+      parser_version: "0.3.1",
       table_count: documentObject.querySelectorAll("table").length,
       row_count: documentObject.querySelectorAll("tr").length,
       cart_marker_found: Boolean(boundaries.cartMarker),
@@ -273,14 +401,23 @@
     if (pageKind === "status") {
       groups.schedule = extractCourses(documentObject, pageKind, boundaries);
     }
+    const scheduleMeetings = extractScheduleMeetings(documentObject, boundaries);
+    const examEntries = extractExamEntries(documentObject);
     const primaryCourses = pageKind === "cart" ? groups.temporary : groups.schedule;
     const sisMarker = Boolean(
       documentObject.querySelector("[id*='DERIVED_SSS'], [id*='SSR_'], form[action*='psp']")
     );
+    const authenticatedPage = [
+      "term_selection", "cart", "status", "home", "exam_schedule"
+    ].includes(pageKind);
     return {
       bound: true,
       origin: SIS_ORIGIN,
-      logged_in: pageKind === "login" ? false : sisMarker ? true : null,
+      logged_in: pageKind === "login" || pageKind === "blocked"
+        ? false
+        : authenticatedPage || sisMarker
+          ? true
+          : null,
       page_kind: pageKind,
       term_label: pageKind === "term_selection" ? null : selectedTerm(documentObject),
       available_terms: terms,
@@ -290,6 +427,9 @@
       visible_courses: groups.temporary,
       temporary_courses: groups.temporary,
       schedule_courses: groups.schedule,
+      schedule_meetings: scheduleMeetings,
+      exam_publication_state: examPublicationState(documentObject, pageKind, examEntries),
+      exam_entries: examEntries,
       diagnostics: parserDiagnostics(documentObject, boundaries, groups)
     };
   }
@@ -299,6 +439,7 @@
       cart: 500,
       term_selection: 450,
       status: 400,
+      exam_schedule: 425,
       home: 300,
       blocked: 250,
       login: 200,
@@ -313,7 +454,10 @@
     const best = snapshots.reduce(
       (best, candidate) => snapshotScore(candidate) > snapshotScore(best) ? candidate : best
     );
-    const loggedIn = snapshots.some((snapshot) => snapshot.logged_in === true)
+    const bestIsAuthenticated = [
+      "term_selection", "cart", "status", "home", "exam_schedule"
+    ].includes(best.page_kind);
+    const loggedIn = bestIsAuthenticated || snapshots.some((snapshot) => snapshot.logged_in === true)
       ? true
       : snapshots.some((snapshot) => snapshot.logged_in === false)
         ? false
@@ -361,8 +505,12 @@
     collectSameOriginDocuments,
     extractCartCourseGroups,
     extractCourses,
+    extractScheduleMeetings,
+    extractExamEntries,
+    examPublicationState,
     inspect,
     normalizeText,
+    parseDayTimes,
     parseCourseRow,
     selectedTerm,
     availableTerms

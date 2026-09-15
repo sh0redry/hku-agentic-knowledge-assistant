@@ -1,6 +1,12 @@
 from __future__ import annotations
 
-from browser_bridge.models import PortalPageSnapshot, SISNavigationResult, SISPageSnapshot
+from browser_bridge.models import (
+    PortalPageSnapshot,
+    SISNavigationResult,
+    SISPageSnapshot,
+    WeeklyTimetableNavigationResult,
+    WeeklyTimetableSnapshot,
+)
 from browser_bridge.service import BrowserBridgeError, BrowserBridgeService
 from connectors.base import BaseConnector
 from connectors.sis.protocol import BrowserCommand, BrowserCommandName
@@ -24,6 +30,8 @@ class BrowserSISConnector(BaseConnector):
             "https://studentportal.hku.hk",
         }:
             return PortalPageSnapshot.model_validate(data).model_dump(mode="json")
+        if data.get("origin") == "https://sweb.hku.hk":
+            return WeeklyTimetableSnapshot.model_validate(data).model_dump(mode="json")
         return SISPageSnapshot.model_validate(data).model_dump(mode="json")
 
     async def inspect_portal(self) -> dict:
@@ -41,6 +49,10 @@ class BrowserSISConnector(BaseConnector):
             payload=payload,
         )
         return SISNavigationResult.model_validate(data).model_dump(mode="json")
+
+    async def open_weekly_timetable(self) -> dict:
+        data = await self._command(BrowserCommandName.OPEN_WEEKLY_TIMETABLE)
+        return WeeklyTimetableNavigationResult.model_validate(data).model_dump(mode="json")
 
     async def bind_tab(self) -> dict:
         data = await self._command(BrowserCommandName.BIND_SIS_TAB)

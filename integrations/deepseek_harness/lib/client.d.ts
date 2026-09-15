@@ -74,6 +74,27 @@ export declare class HKUAgentsClient {
             section: string;
         }>;
     }, signal?: AbortSignal): Promise<IntegrationEnvelope>;
+    syncWeeklyTimetable(input: {
+        term_label: string;
+    }, signal?: AbortSignal): Promise<IntegrationEnvelope>;
+    nextClass(input: {
+        term_label?: string;
+        as_of?: string;
+        days_ahead?: number;
+    }, signal?: AbortSignal): Promise<IntegrationEnvelope>;
+    findFreeSlots(input: {
+        term_label?: string;
+        weekdays?: string[];
+        window_start?: string;
+        window_end?: string;
+        minimum_minutes?: number;
+    }, signal?: AbortSignal): Promise<IntegrationEnvelope>;
+    checkTimetableConflicts(input: {
+        [key: string]: JsonValue;
+    }, signal?: AbortSignal): Promise<IntegrationEnvelope>;
+    examStatus(input: {
+        term_label?: string;
+    }, signal?: AbortSignal): Promise<IntegrationEnvelope>;
     private request;
 }
 //# sourceMappingURL=client.d.ts.map

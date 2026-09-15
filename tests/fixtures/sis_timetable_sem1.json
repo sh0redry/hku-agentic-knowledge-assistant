@@ -1,0 +1,13 @@
+{
+  "term_label": "2026-27 Sem 1",
+  "timezone": "Asia/Hong_Kong",
+  "meetings": [
+    {"course_code": "COMP1110", "section": "1A", "class_number": "4360", "weekday": "thursday", "start_time": "18:00", "end_time": "18:50", "room": "CPD-LG.01"},
+    {"course_code": "COMP1110", "section": "1A", "class_number": "4360", "weekday": "tuesday", "start_time": "17:00", "end_time": "18:50", "room": "CPD-LG.01"},
+    {"course_code": "COMP3230", "section": "1B", "class_number": "1778", "weekday": "monday", "start_time": "13:00", "end_time": "14:50", "room": "CPD-3.04"},
+    {"course_code": "COMP3230", "section": "1B", "class_number": "1778", "weekday": "friday", "start_time": "13:00", "end_time": "14:50", "room": "CPD-3.04"},
+    {"course_code": "COMP3278", "section": "1A", "class_number": "1772", "weekday": "monday", "start_time": "15:00", "end_time": "15:50", "room": "CYPP2"},
+    {"course_code": "COMP3278", "section": "1A", "class_number": "1772", "weekday": "wednesday", "start_time": "09:00", "end_time": "10:50", "room": "CYPP2"},
+    {"course_code": "ECON2280", "section": "1A", "class_number": "2172", "weekday": "friday", "start_time": "09:00", "end_time": "11:50", "room": "MB217"}
+  ]
+}

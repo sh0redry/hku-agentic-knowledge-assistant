@@ -1,12 +1,17 @@
 # HKU AGENTS for DeepSeek Harness
 
-This package contributes five restricted HKU SIS tools to DeepSeek Harness:
+This package contributes ten restricted HKU SIS tools to DeepSeek Harness:
 
 - `hku_sis_status`
 - `hku_sis_navigate_and_preflight` (preferred one-step read-only check)
 - `hku_sis_open_enrollment_add_classes`
 - `hku_sis_sync_course_lists`
 - `hku_sis_preflight`
+- `hku_sis_timetable_sync`
+- `hku_sis_next_class`
+- `hku_sis_find_free_slots`
+- `hku_sis_check_timetable_conflicts`
+- `hku_sis_exam_status`
 
 It is a thin adapter over the authenticated HKU AGENTS Integration API. It does
 not parse HTML, hold browser cookies, choose URLs or selectors, or perform SIS
@@ -48,7 +53,7 @@ From the repository root, with the `dsh` CLI installed:
 cd integrations/deepseek_harness
 npm run build
 npm pack
-dsh plugin --profile web add ./dsh-hku-agents-0.4.1.tgz
+dsh plugin --profile web add ./dsh-hku-agents-0.6.0.tgz
 dsh --profile web --dump-config
 dsh --profile web
 ```

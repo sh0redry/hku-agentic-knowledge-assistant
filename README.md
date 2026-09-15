@@ -98,6 +98,20 @@ from enrollment writes, which remain fixed at zero.
 The current SIS state and term-specific class number are always obtained from the
 bound browser tab and cannot be supplied by chat or by the user-facing form.
 
+Phase B adds a read-only Timetable GUI and matching Harness tools. A live sync
+opens the dedicated HKU **My Weekly Schedule** application at `sweb.hku.hk` and
+normalizes its timetable into process memory; next-class,
+weekday-free-slot, and candidate-conflict calculations then run locally without
+additional browser interaction. Examination publication status can be inspected
+from an already-open bound SIS Examination Timetables page. No calendar,
+enrollment, timetable, or examination data can be modified. The SIS Enrollment
+Class Schedule remains an enrollment-status source and is not used as the
+authoritative weekly timetable.
+The weekly page does not expose an academic-term label, so the bridge records its
+visible week range and conservatively derives Sem 1 for September-December or
+Sem 2 for January-May; June-August remains explicitly undetermined. Course cards
+are read from their verified SUN-SAT grid columns rather than assumed table rows.
+
 Ollama is still available as an optional local provider by setting `LLM_PROVIDER=ollama`.
 
 This repository demonstrates how to build an **Agentic RAG (Retrieval-Augmented Generation)** system using LangGraph with minimal code. Most RAG tutorials show basic concepts but lack guidance on building modular, agent-driven systems — this project bridges that gap by providing **both learning materials and an extensible architecture**.

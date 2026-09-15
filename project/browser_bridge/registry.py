@@ -7,11 +7,12 @@ from typing import Iterable
 from browser_bridge.models import BrowserTabState, BrowserTargetState
 
 
-TARGET_SYSTEMS = ("portal", "sis", "moodle", "library")
+TARGET_SYSTEMS = ("portal", "sis", "timetable", "moodle", "library")
 
 RECOVERY = {
     "portal": "Open HKU Portal and complete login/MFA manually.",
     "sis": "Use a verified Portal-to-SIS navigation command after Portal login.",
+    "timetable": "Open My Weekly Schedule through the authenticated HKU Portal.",
     "moodle": "Open Moodle through HKU Portal and use the HKU Portal User login when required.",
     "library": "Open My Library through HKU Portal and complete any visible authentication step.",
 }
@@ -46,6 +47,8 @@ class BrowserSessionRegistry:
                 }
                 else "sis"
                 if legacy_tab.origin == "https://sis-main.hku.hk"
+                else "timetable"
+                if legacy_tab.origin == "https://sweb.hku.hk"
                 else None
             )
             if system and system not in incoming:

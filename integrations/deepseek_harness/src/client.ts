@@ -195,6 +195,52 @@ export class HKUAgentsClient {
     return this.request('POST', '/api/v1/integration/sis/preflight', input, signal)
   }
 
+  syncWeeklyTimetable(
+    input: { term_label: string },
+    signal?: AbortSignal,
+  ): Promise<IntegrationEnvelope> {
+    return this.request(
+      'POST',
+      '/api/v1/integration/sis/timetable/sync-weekly',
+      { term_label: input.term_label },
+      signal,
+    )
+  }
+
+  nextClass(
+    input: { term_label?: string; as_of?: string; days_ahead?: number },
+    signal?: AbortSignal,
+  ): Promise<IntegrationEnvelope> {
+    return this.request('POST', '/api/v1/integration/sis/timetable/next-class', input, signal)
+  }
+
+  findFreeSlots(
+    input: {
+      term_label?: string
+      weekdays?: string[]
+      window_start?: string
+      window_end?: string
+      minimum_minutes?: number
+    },
+    signal?: AbortSignal,
+  ): Promise<IntegrationEnvelope> {
+    return this.request('POST', '/api/v1/integration/sis/timetable/free-slots', input, signal)
+  }
+
+  checkTimetableConflicts(
+    input: { [key: string]: JsonValue },
+    signal?: AbortSignal,
+  ): Promise<IntegrationEnvelope> {
+    return this.request('POST', '/api/v1/integration/sis/timetable/check-conflicts', input, signal)
+  }
+
+  examStatus(
+    input: { term_label?: string },
+    signal?: AbortSignal,
+  ): Promise<IntegrationEnvelope> {
+    return this.request('POST', '/api/v1/integration/sis/timetable/exam-status', input, signal)
+  }
+
   private async request(
     method: 'GET' | 'POST',
     path: string,

@@ -9,7 +9,15 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from agents.models import TaskStatus
 from api.schemas import IntegrationResponse, IntegrationTaskSummary
 from browser_bridge.service import BrowserBridgeError
-from connectors.sis.models import SISLivePreflightRequest, SISNavigationRequest
+from connectors.sis.models import (
+    SISExamStatusRequest,
+    SISFreeSlotsRequest,
+    SISLivePreflightRequest,
+    SISNavigationRequest,
+    SISNextClassRequest,
+    SISTimetableConflictRequest,
+    SISTimetableSyncRequest,
+)
 
 
 class IntegrationAPIError(RuntimeError):
@@ -92,6 +100,17 @@ def create_integration_router(expected_token: str) -> APIRouter:
                 "Open the extension popup to inspect its connection state or select "
                 "Reconnect now."
             )
+        if error_code == "SIS_SSO_FAILED":
+            return (
+                "Do not sign in on the PeopleSoft error page. Close that failed SIS tab, "
+                "refresh the authenticated HKU Portal tab, bind it again, and retry once. "
+                "If Portal asks for login or MFA, complete it manually."
+            )
+        if error_code in {"TIMETABLE_LOGIN_REQUIRED", "TIMETABLE_NAVIGATION_TIMEOUT"}:
+            return (
+                "Refresh the authenticated HKU Portal tab and retry My Weekly Schedule. "
+                "Complete any visible HKU CAS login or MFA manually."
+            )
         return fallback
 
     @router.get("/status", response_model=IntegrationResponse)
@@ -131,6 +150,106 @@ def create_integration_router(expected_token: str) -> APIRouter:
                 ),
             ) from exc
         return response(correlation_id, ok=True, result=snapshot)
+
+    async def run_timetable_task(
+        request: Request,
+        correlation_id: str,
+        capability_id: str,
+        body,
+    ) -> IntegrationResponse:
+        record = await request.app.state.container.tasks.submit_and_wait(
+            capability_id,
+            body.model_dump(mode="json"),
+            correlation_id=correlation_id,
+        )
+        if record.status != TaskStatus.COMPLETED:
+            task_error = record.error or {
+                "code": "TASK_FAILED",
+                "message": "The read-only timetable task did not complete.",
+            }
+            error_code = task_error.get("code", "TASK_FAILED")
+            recovery = (
+                "Synchronize the requested My Weekly Schedule term before running local timetable calculations."
+                if error_code in {"TIMETABLE_NOT_SYNCED", "TIMETABLE_TERM_MISMATCH"}
+                else "Keep My Weekly Schedule open and report the task diagnostics so its live term marker can be added safely."
+                if error_code == "TIMETABLE_TERM_UNDETERMINED"
+                else "Reload the unpacked HKU AGENTS Browser Bridge extension, then retry."
+                if error_code == "EXTENSION_UPDATE_REQUIRED"
+                else browser_recovery(
+                    error_code,
+                    "Check the bound SIS page and browser connection, then retry.",
+                )
+            )
+            return response(
+                correlation_id,
+                ok=False,
+                task=record,
+                error={
+                    "code": error_code,
+                    "message": task_error.get("message", "The timetable task failed."),
+                    "recovery": recovery,
+                },
+            )
+        return response(correlation_id, ok=True, task=record, result=record.result)
+
+    @router.post("/sis/timetable/sync-weekly", response_model=IntegrationResponse)
+    async def sync_weekly_timetable(
+        body: SISTimetableSyncRequest,
+        request: Request,
+        correlation_id: str = Depends(authorize),
+    ):
+        return await run_timetable_task(
+            request, correlation_id, "sis.timetable.sync_weekly", body
+        )
+
+    @router.post("/sis/timetable/next-class", response_model=IntegrationResponse)
+    async def next_sis_class(
+        request: Request,
+        body: SISNextClassRequest | None = None,
+        correlation_id: str = Depends(authorize),
+    ):
+        return await run_timetable_task(
+            request,
+            correlation_id,
+            "sis.timetable.next_class",
+            body or SISNextClassRequest(),
+        )
+
+    @router.post("/sis/timetable/free-slots", response_model=IntegrationResponse)
+    async def find_sis_free_slots(
+        request: Request,
+        body: SISFreeSlotsRequest | None = None,
+        correlation_id: str = Depends(authorize),
+    ):
+        return await run_timetable_task(
+            request,
+            correlation_id,
+            "sis.timetable.find_free_slots",
+            body or SISFreeSlotsRequest(),
+        )
+
+    @router.post("/sis/timetable/check-conflicts", response_model=IntegrationResponse)
+    async def check_sis_timetable_conflicts(
+        body: SISTimetableConflictRequest,
+        request: Request,
+        correlation_id: str = Depends(authorize),
+    ):
+        return await run_timetable_task(
+            request, correlation_id, "sis.timetable.check_conflicts", body
+        )
+
+    @router.post("/sis/timetable/exam-status", response_model=IntegrationResponse)
+    async def inspect_sis_exam_status(
+        request: Request,
+        body: SISExamStatusRequest | None = None,
+        correlation_id: str = Depends(authorize),
+    ):
+        return await run_timetable_task(
+            request,
+            correlation_id,
+            "sis.timetable.exam_status",
+            body or SISExamStatusRequest(),
+        )
 
     @router.post("/sis/navigate", response_model=IntegrationResponse)
     async def navigate_to_enrollment_add_classes(

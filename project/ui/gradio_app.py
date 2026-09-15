@@ -50,6 +50,32 @@ def _expected_course_rows(value: str) -> list[dict]:
     return rows
 
 
+def _meeting_rows(value: str) -> list[dict]:
+    rows = []
+    for line_number, raw_line in enumerate(value.splitlines(), start=1):
+        line = raw_line.strip()
+        if not line:
+            continue
+        parts = [part.strip() for part in line.split("|")]
+        if len(parts) not in {5, 6} or not all(parts[:5]):
+            raise ValueError(
+                f"Line {line_number} must use COURSE | SECTION | WEEKDAY | START | END | ROOM(optional)."
+            )
+        rows.append(
+            {
+                "course_code": parts[0],
+                "section": parts[1],
+                "weekday": parts[2].lower(),
+                "start_time": parts[3],
+                "end_time": parts[4],
+                "room": parts[5] if len(parts) == 6 and parts[5] else None,
+            }
+        )
+    if not rows:
+        raise ValueError("At least one candidate meeting is required.")
+    return rows
+
+
 def create_gradio_ui(container):
     knowledge_capability = container.registry.get("knowledge.answer")
     sis_browser = container.connectors["sis_browser"]
@@ -200,6 +226,66 @@ def create_gradio_ui(container):
                     },
                 }
             )
+
+    async def timetable_sync_handler(term_label):
+        try:
+            return _pretty(
+                await asyncio.to_thread(api_client.timetable_sync_weekly, term_label.strip())
+            )
+        except Exception as exc:
+            return _pretty({"ok": False, "read_only": True, "message": str(exc)})
+
+    async def timetable_next_handler(term_label):
+        try:
+            return _pretty(
+                await asyncio.to_thread(
+                    api_client.timetable_next_class,
+                    {"term_label": term_label.strip()},
+                )
+            )
+        except Exception as exc:
+            return _pretty({"ok": False, "read_only": True, "message": str(exc)})
+
+    async def timetable_free_handler(term_label, window_start, window_end, minimum_minutes):
+        try:
+            return _pretty(
+                await asyncio.to_thread(
+                    api_client.timetable_free_slots,
+                    {
+                        "term_label": term_label.strip(),
+                        "window_start": window_start.strip(),
+                        "window_end": window_end.strip(),
+                        "minimum_minutes": int(minimum_minutes),
+                    },
+                )
+            )
+        except Exception as exc:
+            return _pretty({"ok": False, "read_only": True, "message": str(exc)})
+
+    async def timetable_conflict_handler(term_label, candidate_text):
+        try:
+            return _pretty(
+                await asyncio.to_thread(
+                    api_client.timetable_check_conflicts,
+                    {
+                        "term_label": term_label.strip(),
+                        "candidate_meetings": _meeting_rows(candidate_text),
+                    },
+                )
+            )
+        except Exception as exc:
+            return _pretty({"ok": False, "read_only": True, "message": str(exc)})
+
+    async def timetable_exam_handler(term_label):
+        try:
+            return _pretty(
+                await asyncio.to_thread(
+                    api_client.timetable_exam_status,
+                    {"term_label": term_label.strip()},
+                )
+            )
+        except Exception as exc:
+            return _pretty({"ok": False, "read_only": True, "message": str(exc)})
 
     async def live_sis_call(action, operation):
         completed_at = lambda: datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -492,6 +578,71 @@ def create_gradio_ui(container):
                 preflight_handler,
                 inputs=[term_label, current_term, expected, visible],
                 outputs=preflight_output,
+                queue=False,
+            )
+
+        with gr.Tab("Timetable"):
+            gr.Markdown(
+                "## Read-only HKU weekly timetable\n"
+                "Sync uses the fixed Portal/CAS → sweb My Weekly Schedule route. "
+                "Enrollment Add Classes is not used as the timetable source. Derived tools "
+                "use process-memory data and do not "
+                "interact with Chrome."
+            )
+            timetable_term = gr.Textbox(value="2026-27 Sem 1", label="SIS term")
+            with gr.Row():
+                timetable_sync_button = gr.Button("Sync weekly timetable", variant="primary")
+                timetable_next_button = gr.Button("Find next class")
+            timetable_output = gr.Code(
+                value="Bind an authenticated Portal or My Weekly Schedule tab before synchronization.",
+                language="json",
+                label="Timetable result",
+            )
+            timetable_sync_button.click(
+                timetable_sync_handler,
+                inputs=timetable_term,
+                outputs=timetable_output,
+                show_progress="minimal",
+                queue=False,
+            )
+            timetable_next_button.click(
+                timetable_next_handler,
+                inputs=timetable_term,
+                outputs=timetable_output,
+                queue=False,
+            )
+            with gr.Row():
+                free_start = gr.Textbox(value="09:00", label="Free-time window start")
+                free_end = gr.Textbox(value="18:00", label="Free-time window end")
+                free_minimum = gr.Number(value=60, precision=0, label="Minimum minutes")
+            free_button = gr.Button("Find weekday free slots")
+            free_button.click(
+                timetable_free_handler,
+                inputs=[timetable_term, free_start, free_end, free_minimum],
+                outputs=timetable_output,
+                queue=False,
+            )
+            candidate_meetings = gr.Textbox(
+                value="COMP3297 | 2B | thursday | 10:00 | 11:50 | CYCP1",
+                lines=4,
+                label="Candidate: COURSE | SECTION | WEEKDAY | START | END | ROOM(optional)",
+            )
+            conflict_button = gr.Button("Check candidate conflicts")
+            conflict_button.click(
+                timetable_conflict_handler,
+                inputs=[timetable_term, candidate_meetings],
+                outputs=timetable_output,
+                queue=False,
+            )
+            gr.Markdown(
+                "Exam status currently inspects an already-open, bound SIS Examination "
+                "Timetables page; it performs no navigation or write."
+            )
+            exam_button = gr.Button("Inspect examination timetable status")
+            exam_button.click(
+                timetable_exam_handler,
+                inputs=timetable_term,
+                outputs=timetable_output,
                 queue=False,
             )
 
