@@ -167,6 +167,7 @@ class PlatformAPITests(unittest.TestCase):
                 "sis.timetable.exam_status",
                 "moodle.dashboard.inspect",
                 "moodle.courses.list",
+                "moodle.assignments.upcoming",
             },
         )
         connections = self.client.get("/api/v1/connections").json()["connections"]
@@ -1029,7 +1030,7 @@ class SafetyFrameworkTests(unittest.TestCase):
                 "http://127.0.0.1/*",
             ],
         )
-        self.assertEqual(manifest["version"], "0.10.4")
+        self.assertEqual(manifest["version"], "0.11.5")
 
         node = shutil.which("node")
         if node is None:

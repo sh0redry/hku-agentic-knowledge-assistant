@@ -239,5 +239,20 @@ export function apply(ctx, config) {
             return client.listMoodleCourses(execution.signal);
         },
     }));
+    ctx.tools.register(defineTool({
+        name: 'hku_moodle_upcoming_assignments',
+        description: 'Read assignment and activity deadlines currently visible in the authenticated Moodle Dashboard for a bounded 1-90 day future window. Private titles and dates remain process-local and are not persisted in task history. It does not open activity pages or read grades, participants, submissions, or submission status, and performs no Moodle write.',
+        parameters: {
+            days_ahead: {
+                type: 'number',
+                description: 'Future window in days, from 1 through 90. Defaults to 14.',
+            },
+        },
+        output: envelopeOutput,
+        timeoutMs: config.timeoutMs,
+        async execute(args, execution) {
+            return client.listUpcomingMoodleAssignments(args, execution.signal);
+        },
+    }));
 }
 //# sourceMappingURL=index.js.map

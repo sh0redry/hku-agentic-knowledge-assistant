@@ -97,6 +97,9 @@ export declare class HKUAgentsClient {
     }, signal?: AbortSignal): Promise<IntegrationEnvelope>;
     inspectMoodleDashboard(signal?: AbortSignal): Promise<IntegrationEnvelope>;
     listMoodleCourses(signal?: AbortSignal): Promise<IntegrationEnvelope>;
+    listUpcomingMoodleAssignments(input: {
+        days_ahead?: number;
+    }, signal?: AbortSignal): Promise<IntegrationEnvelope>;
     private request;
 }
 //# sourceMappingURL=client.d.ts.map

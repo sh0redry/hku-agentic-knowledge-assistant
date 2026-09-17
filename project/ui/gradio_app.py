@@ -301,6 +301,17 @@ def create_gradio_ui(container):
         except Exception as exc:
             return _pretty({"ok": False, "read_only": True, "message": str(exc)})
 
+    async def moodle_assignments_handler(days_ahead):
+        try:
+            return _pretty(
+                await asyncio.to_thread(
+                    api_client.moodle_upcoming_assignments,
+                    int(days_ahead),
+                )
+            )
+        except Exception as exc:
+            return _pretty({"ok": False, "read_only": True, "message": str(exc)})
+
     async def live_sis_call(action, operation):
         completed_at = lambda: datetime.now(timezone.utc).isoformat(timespec="seconds")
         try:
@@ -698,6 +709,33 @@ def create_gradio_ui(container):
             moodle_courses_button.click(
                 moodle_courses_handler,
                 outputs=moodle_courses_output,
+                show_progress="minimal",
+                queue=False,
+            )
+            gr.Markdown(
+                "### Upcoming assignments and activities\n"
+                "Reads only machine-dated items currently visible in the Moodle Dashboard "
+                "Timeline/Upcoming DOM. It does not open activity pages or read grades, "
+                "participants, submission content, or submission status. Private rows are "
+                "excluded from SQLite task history."
+            )
+            moodle_assignment_days = gr.Number(
+                value=14,
+                minimum=1,
+                maximum=90,
+                precision=0,
+                label="Days ahead",
+            )
+            moodle_assignments_button = gr.Button("List upcoming Moodle assignments")
+            moodle_assignments_output = gr.Code(
+                value="Choose a 1-90 day window, then read visible Dashboard deadlines.",
+                language="json",
+                label="Moodle upcoming assignments",
+            )
+            moodle_assignments_button.click(
+                moodle_assignments_handler,
+                inputs=moodle_assignment_days,
+                outputs=moodle_assignments_output,
                 show_progress="minimal",
                 queue=False,
             )

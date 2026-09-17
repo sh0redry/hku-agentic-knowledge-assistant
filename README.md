@@ -84,11 +84,12 @@ python project/app.py
 For the optional browser connection, load `browser_runtime/extension` as an
 unpacked extension and pair it from the GUI's **Connections** tab. The GUI now
 tracks sanitized Portal, SIS, Moodle, and Library connection state separately.
-Moodle now has a diagnostic-only Dashboard inspection plus a separately scoped
-visible-course-membership reader; Library remains discovery-only. The extension
+Moodle now has a diagnostic-only Dashboard inspection plus separately scoped
+visible-course-membership and upcoming-assignment readers; Library remains discovery-only. The extension
 has no cookie or domain write permissions. Course membership is returned only
 by the explicit course-list capability, remains process-local, and excludes
-assignments, grades, participants, messages, and submissions.
+grades, participants, messages, submissions, and submission status. Assignment
+rows are read only by the explicit bounded deadline capability.
 
 Configure a separate random `BROWSER_PAIRING_TOKEN` of at least 32 characters
 in the ignored `project/.env` file for automatic extension reconnection across
@@ -115,14 +116,16 @@ visible week range and conservatively derives Sem 1 for September-December or
 Sem 2 for January-May; June-August remains explicitly undetermined. Course cards
 are read from their verified SUN-SAT grid columns rather than assumed table rows.
 
-Phase C begins with a restricted Portal-to-Moodle SSO path and explicit Moodle
+Phase C provides a restricted Portal-to-Moodle SSO path and explicit Moodle
 authentication/page-state detection. The GUI's **Moodle** tab can open and
 inspect the authenticated Dashboard or explicitly list courses visible in the
 Dashboard DOM. Course rows contain only Moodle ID, name, conservatively parsed
 course code/section/academic year, and explicit lifecycle state. They are kept
 in process memory and excluded from SQLite task history. Browser navigation is
 reported separately from Moodle writes, which remain fixed at zero. Deadline
-and To-do extraction remain deferred.
+and full HTML remain unavailable. The explicit upcoming-assignment action reads
+only machine-dated Timeline/Upcoming rows visible in the Dashboard for a bounded
+1-90 day window; it does not open activities or read submission status.
 
 Ollama is still available as an optional local provider by setting `LLM_PROVIDER=ollama`.
 

@@ -11,7 +11,11 @@ from agents.enrollment.agent import (
     SISPreflightCapability,
 )
 from agents.knowledge.agent import KnowledgeAnswerCapability
-from agents.moodle.agent import MoodleCourseListCapability, MoodleDashboardInspectCapability
+from agents.moodle.agent import (
+    MoodleCourseListCapability,
+    MoodleDashboardInspectCapability,
+    MoodleUpcomingAssignmentsCapability,
+)
 from agents.timetable.agent import (
     SISExamStatusCapability,
     SISFreeSlotsCapability,
@@ -27,7 +31,7 @@ from services.policy import PolicyEngine
 from services.store import SQLiteStore
 from services.tasks import TaskManager
 from services.timetable import TimetableService
-from services.moodle import MoodleCourseService
+from services.moodle import MoodleAssignmentService, MoodleCourseService
 
 
 class ApplicationContainer:
@@ -50,6 +54,7 @@ class ApplicationContainer:
         }
         self.timetable = TimetableService()
         self.moodle_courses = MoodleCourseService()
+        self.moodle_assignments = MoodleAssignmentService()
 
         self.registry.register(KnowledgeAnswerCapability())
         self.registry.register(SISPreflightCapability(self.connectors["sis_simulator"]))
@@ -71,6 +76,11 @@ class ApplicationContainer:
         self.registry.register(
             MoodleCourseListCapability(
                 self.connectors["sis_browser"], self.moodle_courses
+            )
+        )
+        self.registry.register(
+            MoodleUpcomingAssignmentsCapability(
+                self.connectors["sis_browser"], self.moodle_assignments
             )
         )
 

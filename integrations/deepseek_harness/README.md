@@ -1,6 +1,6 @@
 # HKU AGENTS for DeepSeek Harness
 
-This package contributes twelve restricted HKU tools to DeepSeek Harness:
+This package contributes thirteen restricted HKU tools to DeepSeek Harness:
 
 - `hku_sis_status`
 - `hku_sis_navigate_and_preflight` (preferred one-step read-only check)
@@ -14,13 +14,16 @@ This package contributes twelve restricted HKU tools to DeepSeek Harness:
 - `hku_sis_exam_status`
 - `hku_moodle_inspect_dashboard` (Phase C diagnostics only; no course data)
 - `hku_moodle_list_courses` (visible membership only; private rows are process-local)
+- `hku_moodle_upcoming_assignments` (bounded visible Dashboard deadlines only)
 
 It is a thin adapter over the authenticated HKU AGENTS Integration API. It does
 not parse HTML, hold browser cookies, choose URLs or selectors, or perform SIS
 writes. The Moodle diagnostic tool returns only page-state markers. The course
 list tool exposes visible course membership in its current response but excludes
-private rows from persistent task history. Neither tool reads assignments,
-grades, participants, messages, or submissions. The local HKU AGENTS app and Chrome extension own deterministic Portal
+private rows from persistent task history. The upcoming-assignment tool reads only
+machine-dated Timeline/Upcoming rows for a bounded future window and likewise
+does not persist private rows. It does not open activity pages or read grades,
+participants, messages, submissions, or submission status. The local HKU AGENTS app and Chrome extension own deterministic Portal
 navigation and must be running separately. Login, password entry, CAPTCHA, and
 MFA always remain manual.
 

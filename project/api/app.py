@@ -272,6 +272,15 @@ def create_api_app(
         except BrowserBridgeError as exc:
             raise bridge_http_error(exc) from exc
 
+    @app.get("/api/v1/browser/moodle/assignments")
+    async def list_moodle_upcoming_assignments():
+        try:
+            return await app.state.container.connectors[
+                "sis_browser"
+            ].list_moodle_upcoming_assignments()
+        except BrowserBridgeError as exc:
+            raise bridge_http_error(exc) from exc
+
     @app.post("/api/v1/browser/sis/open-enrollment-add-classes")
     async def open_enrollment_add_classes(body: SISNavigationRequest | None = None):
         try:

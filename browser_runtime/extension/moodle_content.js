@@ -5,7 +5,8 @@
     if (![
       "moodle.inspect_dashboard",
       "moodle.open_dashboard",
-      "moodle.list_courses"
+      "moodle.list_courses",
+      "moodle.list_upcoming_assignments"
     ].includes(message?.command)) {
       return false;
     }
@@ -14,6 +15,8 @@
         ? self.HKUMoodleParser.openDashboard(document, location)
         : message.command === "moodle.list_courses"
           ? self.HKUMoodleParser.parseCourses(document, location)
+          : message.command === "moodle.list_upcoming_assignments"
+            ? self.HKUMoodleParser.parseUpcomingAssignments(document, location)
           : self.HKUMoodleParser.inspect(document, location);
       sendResponse({ ok: true, data });
     } catch (error) {

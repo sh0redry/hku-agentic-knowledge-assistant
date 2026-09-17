@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -224,6 +225,61 @@ class MoodleCourseListSnapshot(BrowserTabState):
             raise ValueError("Moodle course count does not match the structured rows.")
         if self.diagnostics.parsed_course_count != len(self.courses):
             raise ValueError("Moodle parser count does not match the structured rows.")
+        return self
+
+
+class MoodleAssignment(StrictMessage):
+    event_id: str | None = Field(default=None, pattern=r"^\d{1,20}$", max_length=20)
+    module_id: str | None = Field(default=None, pattern=r"^\d{1,20}$", max_length=20)
+    course_id: str | None = Field(default=None, pattern=r"^\d{1,20}$", max_length=20)
+    course_name: str | None = Field(default=None, min_length=1, max_length=300)
+    title: str = Field(min_length=1, max_length=300)
+    activity_type: Literal["assignment", "quiz", "workshop", "lesson", "forum", "other"]
+    due_at: datetime
+    due_at_source: Literal[
+        "machine",
+        "display_text_hong_kong",
+        "display_text_hong_kong_inferred_year",
+        "display_text_hong_kong_combined_fragments",
+        "display_text_hong_kong_combined_fragments_inferred_year",
+    ]
+    source: Literal["timeline", "upcoming", "todo"]
+
+
+class MoodleAssignmentParserDiagnostics(MoodleParserDiagnostics):
+    assignment_candidate_count: int = Field(ge=0, le=10000)
+    parsed_assignment_count: int = Field(ge=0, le=10000)
+    unparsed_assignment_candidate_count: int = Field(ge=0, le=10000)
+    missing_assignment_title_candidate_count: int = Field(ge=0, le=10000)
+    missing_assignment_due_at_candidate_count: int = Field(ge=0, le=10000)
+    duplicate_assignment_candidate_count: int = Field(ge=0, le=10000)
+    assignment_placeholder_candidate_count: int = Field(ge=0, le=10000)
+    visible_assignment_date_text_candidate_count: int = Field(ge=0, le=10000)
+    parsed_assignment_display_date_count: int = Field(ge=0, le=10000)
+    inferred_assignment_year_count: int = Field(default=0, ge=0, le=10000)
+    combined_assignment_date_fragments_parsed_count: int = Field(default=0, ge=0, le=10000)
+    assignment_date_text_with_year_count: int = Field(default=0, ge=0, le=10000)
+    assignment_date_text_with_month_name_count: int = Field(default=0, ge=0, le=10000)
+    assignment_date_text_with_12_hour_time_count: int = Field(default=0, ge=0, le=10000)
+    assignment_date_text_with_24_hour_time_count: int = Field(default=0, ge=0, le=10000)
+    assignment_date_text_with_relative_day_count: int = Field(default=0, ge=0, le=10000)
+    assignment_date_text_with_numeric_date_count: int = Field(default=0, ge=0, le=10000)
+
+
+class MoodleAssignmentListSnapshot(BrowserTabState):
+    origin: Literal["https://moodle.hku.hk"]
+    logged_in: Literal[True]
+    page_kind: Literal["dashboard"]
+    assignment_count: int = Field(ge=0, le=1000)
+    assignments: list[MoodleAssignment] = Field(default_factory=list, max_length=1000)
+    diagnostics: MoodleAssignmentParserDiagnostics
+
+    @model_validator(mode="after")
+    def validate_assignment_counts(self):
+        if self.assignment_count != len(self.assignments):
+            raise ValueError("Moodle assignment count does not match the structured rows.")
+        if self.diagnostics.parsed_assignment_count != len(self.assignments):
+            raise ValueError("Moodle assignment parser count does not match the structured rows.")
         return self
 
 

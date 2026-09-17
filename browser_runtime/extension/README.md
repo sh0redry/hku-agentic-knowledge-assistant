@@ -6,10 +6,12 @@ local HKU AGENTS process. Existing Portal/SIS commands still use the compatible
 single active binding. The extension can follow three fixed navigation targets:
 the Portal SIS sign-on entry, the exact SIS `Enrollment Add Classes` component
 route, and a validated Portal Moodle entry. Moodle has a diagnostic parser plus
-an explicitly separate visible-course-membership command in Phase C; Library
+separately scoped visible-course-membership and upcoming-assignment commands in Phase C; Library
 remains discovery-only. The diagnostic command returns markers and aggregate
-counts only. The course command returns structured course identity but never
-assignments, grades, participants, messages, submissions, or full HTML. The extension never
+counts only. The course command returns structured course identity. The upcoming
+assignment command returns only machine-dated Timeline/Upcoming rows and never
+opens their activity pages or reads grades, participants, messages, submissions,
+submission status, or full HTML. The extension never
 enters credentials, reads cookies, searches courses, enters Step 2/3, or submits
 forms.
 
@@ -54,7 +56,7 @@ not sent to the local service.
 
 Portal, SIS, the dedicated My Weekly Schedule application, and Moodle can be
 bound for their restricted commands. Moodle exposes only a diagnostic Dashboard
-  inspection and visible-course-list capabilities; opening My Library in Chrome makes it discoverable but
+  inspection, visible-course-list, and upcoming-assignment capabilities; opening My Library in Chrome makes it discoverable but
 does not grant HKU AGENTS a read or write capability for that page.
 
 ## Security contract
@@ -84,10 +86,21 @@ does not grant HKU AGENTS a read or write capability for that page.
 - Weekly parser `0.2.1` recognizes absolutely positioned course cards from their
   SUN-SAT column geometry. It derives Sem 1/2 only from unambiguous displayed-week
   months and reports June-August as undetermined.
-- Moodle parser `0.2.4` recognizes login and authenticated Dashboard state. Its
+- Moodle parser `0.3.5` recognizes login and authenticated Dashboard state. Its
   diagnostic command releases only boolean markers and aggregate counts; its
   separately named course command releases Moodle course ID, name, normalized
-  code/section/academic year when present, and conservative state. Library
+  code/section/academic year when present, and conservative state. Its assignment
+  command accepts no URL or selector and releases only title, bounded machine-readable
+  deadline, optional course context, activity type, and numeric Moodle identifiers.
+  Dashboard dates may be assembled from an event-group date plus the activity's
+  own time, or from separate date and time fragments scoped to the same activity.
+  HKU's custom `To do` cards are discovered through fixed-origin Moodle activity
+  links and bounded card ancestors; duplicate main-column/sidebar copies collapse
+  to one activity by Moodle module identity.
+  When Moodle omits the year, the nearest plausible Hong Kong calendar
+  year is inferred and exposed as `display_text_hong_kong_inferred_year` rather
+  than being presented as a machine-supplied timestamp.
+  Private rows stay process-local and are excluded from SQLite task history. Library
   remains discovery-only. Tab discovery strips query strings and fragments
   before reporting state.
 - SIS parser `0.3.1` additionally normalizes read-only Class Schedule meetings

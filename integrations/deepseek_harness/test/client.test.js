@@ -116,7 +116,7 @@ test('client preserves stable API errors without leaking the token', async () =>
   }
 })
 
-test('plugin registers exactly twelve restricted HKU tools and forwards preflight input', async () => {
+test('plugin registers exactly thirteen restricted HKU tools and forwards preflight input', async () => {
   const previous = process.env.INTEGRATION_API_TOKEN
   process.env.INTEGRATION_API_TOKEN = TOKEN
   let receivedBody
@@ -150,6 +150,7 @@ test('plugin registers exactly twelve restricted HKU tools and forwards prefligh
             'hku_sis_exam_status',
             'hku_moodle_inspect_dashboard',
             'hku_moodle_list_courses',
+            'hku_moodle_upcoming_assignments',
           ],
         )
 
@@ -362,6 +363,53 @@ test('Moodle course tool sends an empty request and preserves privacy indicators
         assert.equal(result.result.course_membership_read, true)
         assert.equal(result.result.assignment_data_read, false)
         assert.equal(result.result.grade_data_read, false)
+        assert.equal(result.result.moodle_writes_performed, 0)
+      },
+    )
+  } finally {
+    if (previous === undefined) delete process.env.INTEGRATION_API_TOKEN
+    else process.env.INTEGRATION_API_TOKEN = previous
+  }
+})
+
+test('Moodle assignment tool forwards only the bounded window and preserves privacy indicators', async () => {
+  const previous = process.env.INTEGRATION_API_TOKEN
+  process.env.INTEGRATION_API_TOKEN = TOKEN
+  try {
+    await withServer(
+      (request, response) => {
+        assert.equal(request.method, 'POST')
+        assert.equal(request.url, '/api/v1/integration/moodle/assignments/upcoming')
+        const chunks = []
+        request.on('data', chunk => chunks.push(chunk))
+        request.on('end', () => {
+          assert.deepEqual(JSON.parse(Buffer.concat(chunks).toString('utf8')), {
+            days_ahead: 14,
+          })
+          response.setHeader('content-type', 'application/json')
+          response.end(JSON.stringify(envelope({
+            read_only: true,
+            assignment_data_read: true,
+            grade_data_read: false,
+            submission_data_read: false,
+            activity_pages_opened: 0,
+            moodle_writes_performed: 0,
+          })))
+        })
+      },
+      async baseUrl => {
+        const tools = []
+        const ctx = { tools: { register(tool) { tools.push(tool) } } }
+        apply(ctx, { baseUrl, tokenEnv: 'INTEGRATION_API_TOKEN', timeoutMs: 5000 })
+        const tool = tools.find(item => item.name === 'hku_moodle_upcoming_assignments')
+        const result = await tool.execute(
+          { days_ahead: 14 },
+          { signal: new AbortController().signal },
+        )
+        assert.equal(result.result.assignment_data_read, true)
+        assert.equal(result.result.grade_data_read, false)
+        assert.equal(result.result.submission_data_read, false)
+        assert.equal(result.result.activity_pages_opened, 0)
         assert.equal(result.result.moodle_writes_performed, 0)
       },
     )

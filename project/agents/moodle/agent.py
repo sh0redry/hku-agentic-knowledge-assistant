@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict
+from datetime import datetime, timedelta, timezone
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from agents.base import BaseCapability
 from agents.errors import CapabilityError
@@ -13,7 +15,7 @@ from agents.models import (
 )
 from browser_bridge.service import BrowserBridgeError
 from connectors.sis.browser import BrowserSISConnector
-from services.moodle import MoodleCourseService
+from services.moodle import MoodleAssignmentService, MoodleCourseService
 
 
 class MoodleDashboardInspectRequest(BaseModel):
@@ -22,6 +24,12 @@ class MoodleDashboardInspectRequest(BaseModel):
 
 class MoodleCourseListRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+class MoodleUpcomingAssignmentsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    days_ahead: int = Field(default=14, ge=1, le=90)
 
 
 def _supported_parser(value: object, minimum: tuple[int, int, int]) -> bool:
@@ -72,7 +80,7 @@ class MoodleDashboardInspectCapability(BaseCapability):
             if exc.code in {"COMMAND_NOT_ALLOWED", "PAGE_SCRIPT_UNAVAILABLE"}:
                 raise CapabilityError(
                     "EXTENSION_UPDATE_REQUIRED",
-                    "Reload HKU AGENTS Browser Bridge 0.10.4 and refresh HKU Portal and Moodle.",
+                    "Reload HKU AGENTS Browser Bridge 0.11.5 and refresh HKU Portal and Moodle.",
                 ) from exc
             raise CapabilityError(exc.code, str(exc)) from exc
         snapshot = navigation["snapshot"]
@@ -83,10 +91,10 @@ class MoodleDashboardInspectCapability(BaseCapability):
                 "The verified Moodle Dashboard is not ready for inspection.",
                 {"page_kind": snapshot.get("page_kind"), "diagnostics": diagnostics},
             )
-        if not _supported_parser(diagnostics.get("parser_version"), (0, 2, 4)):
+        if not _supported_parser(diagnostics.get("parser_version"), (0, 3, 2)):
             raise CapabilityError(
                 "EXTENSION_UPDATE_REQUIRED",
-                "Reload HKU AGENTS Browser Bridge 0.10.4 before Moodle inspection.",
+                "Reload HKU AGENTS Browser Bridge 0.11.5 before Moodle inspection.",
             )
         steps = navigation.get("steps", [])
         return {
@@ -167,15 +175,15 @@ class MoodleCourseListCapability(BaseCapability):
             if exc.code in {"COMMAND_NOT_ALLOWED", "PAGE_SCRIPT_UNAVAILABLE"}:
                 raise CapabilityError(
                     "EXTENSION_UPDATE_REQUIRED",
-                    "Reload HKU AGENTS Browser Bridge 0.10.4 and refresh HKU Portal and Moodle.",
+                    "Reload HKU AGENTS Browser Bridge 0.11.5 and refresh HKU Portal and Moodle.",
                 ) from exc
             raise CapabilityError(exc.code, str(exc)) from exc
 
         diagnostics = snapshot.get("diagnostics") or {}
-        if not _supported_parser(diagnostics.get("parser_version"), (0, 2, 4)):
+        if not _supported_parser(diagnostics.get("parser_version"), (0, 3, 2)):
             raise CapabilityError(
                 "EXTENSION_UPDATE_REQUIRED",
-                "Reload HKU AGENTS Browser Bridge 0.10.4 before listing Moodle courses.",
+                "Reload HKU AGENTS Browser Bridge 0.11.5 before listing Moodle courses.",
             )
         unparsed = int(diagnostics.get("unparsed_course_candidate_count", 0))
         if unparsed:
@@ -226,6 +234,152 @@ class MoodleCourseListCapability(BaseCapability):
                 key: value for key, value in navigation.items() if key != "snapshot"
             },
             "course_list": course_list,
+            "diagnostics": diagnostics,
+            "warnings": warnings,
+        }
+
+
+class MoodleUpcomingAssignmentsCapability(BaseCapability):
+    input_model = MoodleUpcomingAssignmentsRequest
+    manifest = CapabilityManifest(
+        id="moodle.assignments.upcoming",
+        version=1,
+        agent="moodle",
+        title="List upcoming HKU Moodle assignments",
+        description=(
+            "Read machine-dated assignment and activity deadlines visible on the "
+            "authenticated Moodle Dashboard for a bounded future window. It does not "
+            "open course activities or read grades, participants, or submissions."
+        ),
+        mode=CapabilityMode.READ,
+        risk=RiskLevel.MEDIUM,
+        confirmation=ConfirmationMode.NONE,
+        required_connections=["sis_browser"],
+        availability="local_browser_read_only_private_memory",
+        input_schema="MoodleUpcomingAssignmentsRequest",
+        output_schema="MoodleUpcomingAssignmentsResult",
+        timeout_seconds=42,
+    )
+
+    def __init__(
+        self, connector: BrowserSISConnector, assignments: MoodleAssignmentService
+    ) -> None:
+        self.connector = connector
+        self.assignments = assignments
+
+    def persisted_result(self, result: dict) -> dict:
+        assignment_list = result.get("assignment_list") or {}
+        return {
+            "read_only": True,
+            "domain_writes_performed": 0,
+            "moodle_writes_performed": 0,
+            "days_ahead": result.get("window", {}).get("days_ahead"),
+            "assignment_count": assignment_list.get("assignment_count", 0),
+            "source_fetched_at": assignment_list.get("fetched_at"),
+            "private_assignment_details_persisted": False,
+        }
+
+    async def execute(
+        self, validated_input: MoodleUpcomingAssignmentsRequest, context: ExecutionContext
+    ) -> dict:
+        try:
+            binding = await self.connector.bind_hku_tab()
+            navigation = await self.connector.open_moodle()
+            snapshot = await self.connector.list_moodle_upcoming_assignments()
+        except BrowserBridgeError as exc:
+            if exc.code in {"COMMAND_NOT_ALLOWED", "PAGE_SCRIPT_UNAVAILABLE"}:
+                raise CapabilityError(
+                    "EXTENSION_UPDATE_REQUIRED",
+                    "Reload HKU AGENTS Browser Bridge 0.11.5 and refresh HKU Portal and Moodle.",
+                ) from exc
+            raise CapabilityError(exc.code, str(exc)) from exc
+
+        diagnostics = snapshot.get("diagnostics") or {}
+        if not _supported_parser(diagnostics.get("parser_version"), (0, 3, 5)):
+            raise CapabilityError(
+                "EXTENSION_UPDATE_REQUIRED",
+                "Reload HKU AGENTS Browser Bridge 0.11.5 before reading Moodle assignments.",
+            )
+        if int(diagnostics.get("unparsed_assignment_candidate_count", 0)):
+            raise CapabilityError(
+                "MOODLE_ASSIGNMENT_PARSE_INCOMPLETE",
+                "One or more visible Moodle assignment candidates could not be parsed safely.",
+                {"diagnostics": diagnostics},
+            )
+
+        now = datetime.now(timezone.utc)
+        ends_at = now + timedelta(days=validated_input.days_ahead)
+        visible = []
+        overdue_count = 0
+        beyond_window_count = 0
+        for item in snapshot.get("assignments", []):
+            due_at = datetime.fromisoformat(str(item["due_at"]).replace("Z", "+00:00"))
+            if due_at < now:
+                overdue_count += 1
+            elif due_at > ends_at:
+                beyond_window_count += 1
+            else:
+                visible.append(item)
+
+        assignment_list = self.assignments.update(
+            visible,
+            {
+                "kind": "moodle_dashboard_visible_deadlines",
+                "origin": snapshot.get("origin"),
+                "page_kind": snapshot.get("page_kind"),
+                "parser_version": diagnostics.get("parser_version"),
+                "visibility_scope": "dashboard_dom",
+            },
+        )
+        warnings = []
+        if int(diagnostics.get("parsed_assignment_display_date_count", 0)):
+            warnings.append(
+                "One or more deadlines were normalized from strict English Moodle "
+                "display text using the Asia/Hong_Kong timezone; inspect due_at_source."
+            )
+        if int(diagnostics.get("inferred_assignment_year_count", 0)):
+            warnings.append(
+                "One or more displayed deadlines omitted the year; the parser selected "
+                "the nearest plausible Asia/Hong_Kong year. Inspect due_at_source."
+            )
+        if int(diagnostics.get("assignment_candidate_count", 0)) == 0:
+            warnings.append(
+                "No assignment candidates were exposed in the current Dashboard DOM; "
+                "an empty result does not prove there are no Moodle deadlines."
+            )
+        steps = navigation.get("steps", [])
+        return {
+            "read_only": True,
+            "systems_contacted": ["portal", "moodle"]
+            if binding.get("origin") != "https://moodle.hku.hk"
+            else ["moodle"],
+            "navigation_interactions_performed": _navigation_performed(steps),
+            "data_reads_performed": 1,
+            "domain_writes_performed": 0,
+            "moodle_writes_performed": 0,
+            "assignment_data_read": True,
+            "grade_data_read": False,
+            "participant_data_read": False,
+            "submission_data_read": False,
+            "activity_pages_opened": 0,
+            "window": {
+                "as_of": now.isoformat(),
+                "days_ahead": validated_input.days_ahead,
+                "ends_at": ends_at.isoformat(),
+            },
+            "binding": {
+                "origin": binding.get("origin"),
+                "page_kind": binding.get("page_kind"),
+                "logged_in": binding.get("logged_in"),
+            },
+            "navigation": {
+                key: value for key, value in navigation.items() if key != "snapshot"
+            },
+            "assignment_list": assignment_list,
+            "excluded": {
+                "overdue_count": overdue_count,
+                "beyond_window_count": beyond_window_count,
+            },
             "diagnostics": diagnostics,
             "warnings": warnings,
         }

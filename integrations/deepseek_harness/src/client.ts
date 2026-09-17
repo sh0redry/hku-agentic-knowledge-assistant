@@ -249,6 +249,13 @@ export class HKUAgentsClient {
     return this.request('POST', '/api/v1/integration/moodle/courses/list', {}, signal)
   }
 
+  listUpcomingMoodleAssignments(
+    input: { days_ahead?: number },
+    signal?: AbortSignal,
+  ): Promise<IntegrationEnvelope> {
+    return this.request('POST', '/api/v1/integration/moodle/assignments/upcoming', input, signal)
+  }
+
   private async request(
     method: 'GET' | 'POST',
     path: string,

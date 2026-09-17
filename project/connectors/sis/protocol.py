@@ -36,6 +36,7 @@ class BrowserCommandName(str, Enum):
     INSPECT_WEEKLY_TIMETABLE = "timetable.inspect_weekly"
     INSPECT_MOODLE_DASHBOARD = "moodle.inspect_dashboard"
     LIST_MOODLE_COURSES = "moodle.list_courses"
+    LIST_MOODLE_UPCOMING_ASSIGNMENTS = "moodle.list_upcoming_assignments"
 
 
 class BrowserCommand(BaseModel):

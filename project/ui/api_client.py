@@ -141,3 +141,10 @@ class HKUAgentsAPIClient:
 
     def moodle_list_courses(self) -> dict:
         return self._integration_request("POST", "/moodle/courses/list", json={})
+
+    def moodle_upcoming_assignments(self, days_ahead: int) -> dict:
+        return self._integration_request(
+            "POST",
+            "/moodle/assignments/upcoming",
+            json={"days_ahead": int(days_ahead)},
+        )
