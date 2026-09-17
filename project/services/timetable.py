@@ -90,6 +90,11 @@ class TimetableService:
             )
         return snapshot
 
+    def optional_snapshot(self) -> dict | None:
+        """Return the private process-local snapshot without turning absence into an error."""
+        with self._lock:
+            return dict(self._snapshot) if self._snapshot else None
+
     def next_class(
         self,
         *,

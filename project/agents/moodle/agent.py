@@ -329,6 +329,11 @@ class MoodleUpcomingAssignmentsCapability(BaseCapability):
                 "page_kind": snapshot.get("page_kind"),
                 "parser_version": diagnostics.get("parser_version"),
                 "visibility_scope": "dashboard_dom",
+                "window": {
+                    "as_of": now.isoformat(),
+                    "days_ahead": validated_input.days_ahead,
+                    "ends_at": ends_at.isoformat(),
+                },
             },
         )
         warnings = []

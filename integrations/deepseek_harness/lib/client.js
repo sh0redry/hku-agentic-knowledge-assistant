@@ -123,6 +123,9 @@ export class HKUAgentsClient {
     listUpcomingMoodleAssignments(input, signal) {
         return this.request('POST', '/api/v1/integration/moodle/assignments/upcoming', input, signal);
     }
+    dailyBriefing(input, signal) {
+        return this.request('POST', '/api/v1/integration/briefing/today', input, signal);
+    }
     async request(method, path, body, parentSignal) {
         const token = process.env[this.tokenEnv]?.trim();
         if (!token || token.length < 32) {

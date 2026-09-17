@@ -100,6 +100,12 @@ export declare class HKUAgentsClient {
     listUpcomingMoodleAssignments(input: {
         days_ahead?: number;
     }, signal?: AbortSignal): Promise<IntegrationEnvelope>;
+    dailyBriefing(input: {
+        term_label?: string;
+        as_of?: string;
+        days_ahead?: number;
+        max_cache_age_minutes?: number;
+    }, signal?: AbortSignal): Promise<IntegrationEnvelope>;
     private request;
 }
 //# sourceMappingURL=client.d.ts.map

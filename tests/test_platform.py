@@ -168,6 +168,7 @@ class PlatformAPITests(unittest.TestCase):
                 "moodle.dashboard.inspect",
                 "moodle.courses.list",
                 "moodle.assignments.upcoming",
+                "briefing.today",
             },
         )
         connections = self.client.get("/api/v1/connections").json()["connections"]

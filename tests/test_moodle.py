@@ -368,6 +368,10 @@ class MoodleDashboardIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(result["excluded"]["overdue_count"], 1)
         self.assertEqual(result["excluded"]["beyond_window_count"], 1)
+        self.assertEqual(
+            self.container.moodle_assignments.snapshot()["source"]["window"]["days_ahead"],
+            14,
+        )
 
         stored = self.container.store.get_task(response["task"]["id"])
         self.assertEqual(stored.result["assignment_count"], 1)

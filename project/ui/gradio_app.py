@@ -312,6 +312,19 @@ def create_gradio_ui(container):
         except Exception as exc:
             return _pretty({"ok": False, "read_only": True, "message": str(exc)})
 
+    async def daily_briefing_handler(term_label, days_ahead, max_cache_age_minutes):
+        try:
+            return _pretty(
+                await asyncio.to_thread(
+                    api_client.daily_briefing,
+                    term_label,
+                    int(days_ahead),
+                    int(max_cache_age_minutes),
+                )
+            )
+        except Exception as exc:
+            return _pretty({"ok": False, "read_only": True, "message": str(exc)})
+
     async def live_sis_call(action, operation):
         completed_at = lambda: datetime.now(timezone.utc).isoformat(timespec="seconds")
         try:
@@ -414,6 +427,41 @@ def create_gradio_ui(container):
                     safe_call(api_client.browser_status),
                 ),
                 outputs=[health_output, browser_health_output],
+                queue=False,
+            )
+
+        with gr.Tab("Daily Briefing"):
+            gr.Markdown(
+                "Combines only the current process-memory timetable and Moodle deadline "
+                "caches. This does not navigate the browser or refresh either source. "
+                "Synchronize both sources first; missing, stale, mismatched, and "
+                "insufficiently covered caches are reported explicitly."
+            )
+            briefing_term = gr.Textbox(
+                label="Optional exact term label",
+                placeholder="2026-27 Sem 1",
+            )
+            briefing_days = gr.Number(
+                value=7, minimum=1, maximum=14, precision=0, label="Days ahead"
+            )
+            briefing_max_age = gr.Number(
+                value=120,
+                minimum=1,
+                maximum=10080,
+                precision=0,
+                label="Maximum cache age (minutes)",
+            )
+            briefing_button = gr.Button("Build local daily briefing", variant="primary")
+            briefing_output = gr.Code(
+                value="Synchronize the timetable and Moodle deadlines first.",
+                language="json",
+                label="Daily briefing",
+            )
+            briefing_button.click(
+                daily_briefing_handler,
+                inputs=[briefing_term, briefing_days, briefing_max_age],
+                outputs=briefing_output,
+                show_progress="minimal",
                 queue=False,
             )
 

@@ -99,6 +99,7 @@ Core endpoints:
 | `POST /api/v1/integration/moodle/dashboard/inspect` | Navigate to and inspect the Moodle Dashboard using a diagnostic-only contract |
 | `POST /api/v1/integration/moodle/courses/list` | Navigate and list visible Moodle course membership without reading learning activity data |
 | `POST /api/v1/integration/moodle/assignments/upcoming` | Return visible Dashboard deadlines within a bounded 1-90 day window |
+| `POST /api/v1/integration/briefing/today` | Combine fresh process-local timetable and Moodle deadline caches without browser interaction |
 | `POST /api/v1/chat` | Execute the existing Knowledge Agent through the platform boundary |
 | `POST /api/v1/sis/preflight` | Run the zero-network SIS simulator |
 | `GET /api/v1/tasks/{task_id}/events` | Stream task events over SSE |
@@ -232,13 +233,24 @@ caller, while SQLite task history stores only the count, fetch time, and
 warning because it does not prove that the account has no courses.
 
 `POST /api/v1/integration/moodle/assignments/upcoming` accepts only
-`days_ahead` from 1 through 90. It reads machine-dated Timeline/Upcoming rows
-currently exposed by the authenticated Dashboard, filters the requested future
+`days_ahead` from 1 through 90. It reads structured Timeline, Upcoming, and HKU
+To-do rows currently exposed by the authenticated Dashboard, filters the requested future
 window locally, and returns title, deadline, activity type, optional course
 context, and numeric Moodle identifiers. It never follows an activity link or
 reads grade, participant, submission, or submission-status data. Complete rows
 remain in process memory; SQLite task history stores only the count, fetch time,
 window, and `private_assignment_details_persisted: false`.
+
+### Cache-only daily briefing
+
+`POST /api/v1/integration/briefing/today` combines the current process-memory
+weekly timetable and Moodle deadline cache. It returns the next class, remaining
+classes today, and assignments due within a 1-14 day window without any browser
+interaction. Each source independently reports `ready`, `missing`, `stale`,
+`term_mismatch`, or `insufficient_coverage`; rows from a non-ready source are
+omitted instead of being represented as an authoritative empty result. The task
+history stores only source states and counts with
+`private_briefing_details_persisted: false`.
 
 ### Read-only timetable tools
 

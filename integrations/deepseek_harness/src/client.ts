@@ -256,6 +256,18 @@ export class HKUAgentsClient {
     return this.request('POST', '/api/v1/integration/moodle/assignments/upcoming', input, signal)
   }
 
+  dailyBriefing(
+    input: {
+      term_label?: string
+      as_of?: string
+      days_ahead?: number
+      max_cache_age_minutes?: number
+    },
+    signal?: AbortSignal,
+  ): Promise<IntegrationEnvelope> {
+    return this.request('POST', '/api/v1/integration/briefing/today', input, signal)
+  }
+
   private async request(
     method: 'GET' | 'POST',
     path: string,

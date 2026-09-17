@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from agents.models import TaskStatus
+from agents.briefing.agent import DailyBriefingRequest
 from agents.moodle.agent import (
     MoodleCourseListRequest,
     MoodleDashboardInspectRequest,
@@ -282,6 +283,39 @@ def create_integration_router(expected_token: str) -> APIRouter:
             "moodle.assignments.upcoming",
             body,
         )
+
+    @router.post("/briefing/today", response_model=IntegrationResponse)
+    async def daily_briefing(
+        request: Request,
+        body: DailyBriefingRequest | None = None,
+        correlation_id: str = Depends(authorize),
+    ):
+        record = await request.app.state.container.tasks.submit_and_wait(
+            "briefing.today",
+            (body or DailyBriefingRequest()).model_dump(mode="json"),
+            correlation_id=correlation_id,
+        )
+        if record.status != TaskStatus.COMPLETED:
+            task_error = record.error or {
+                "code": "TASK_FAILED",
+                "message": "The local daily briefing task did not complete.",
+            }
+            return response(
+                correlation_id,
+                ok=False,
+                task=record,
+                error={
+                    "code": task_error.get("code", "TASK_FAILED"),
+                    "message": task_error.get(
+                        "message", "The local daily briefing task failed."
+                    ),
+                    "recovery": (
+                        "Synchronize the weekly timetable and Moodle upcoming assignments, "
+                        "then retry without restarting HKU AGENTS."
+                    ),
+                },
+            )
+        return response(correlation_id, ok=True, task=record, result=record.result)
 
     @router.post("/sis/timetable/sync-weekly", response_model=IntegrationResponse)
     async def sync_weekly_timetable(

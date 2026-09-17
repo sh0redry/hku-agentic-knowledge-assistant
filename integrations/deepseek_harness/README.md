@@ -1,6 +1,6 @@
 # HKU AGENTS for DeepSeek Harness
 
-This package contributes thirteen restricted HKU tools to DeepSeek Harness:
+This package contributes fourteen restricted HKU tools to DeepSeek Harness:
 
 - `hku_sis_status`
 - `hku_sis_navigate_and_preflight` (preferred one-step read-only check)
@@ -15,17 +15,23 @@ This package contributes thirteen restricted HKU tools to DeepSeek Harness:
 - `hku_moodle_inspect_dashboard` (Phase C diagnostics only; no course data)
 - `hku_moodle_list_courses` (visible membership only; private rows are process-local)
 - `hku_moodle_upcoming_assignments` (bounded visible Dashboard deadlines only)
+- `hku_daily_briefing` (cache-only timetable and Moodle deadline composition)
 
 It is a thin adapter over the authenticated HKU AGENTS Integration API. It does
 not parse HTML, hold browser cookies, choose URLs or selectors, or perform SIS
 writes. The Moodle diagnostic tool returns only page-state markers. The course
 list tool exposes visible course membership in its current response but excludes
 private rows from persistent task history. The upcoming-assignment tool reads only
-machine-dated Timeline/Upcoming rows for a bounded future window and likewise
+structured Timeline, Upcoming, and HKU To-do rows for a bounded future window and likewise
 does not persist private rows. It does not open activity pages or read grades,
 participants, messages, submissions, or submission status. The local HKU AGENTS app and Chrome extension own deterministic Portal
 navigation and must be running separately. Login, password entry, CAPTCHA, and
 MFA always remain manual.
+
+The daily briefing never refreshes either source and never interacts with the
+browser. Run timetable synchronization and Moodle upcoming assignments first in
+the same HKU AGENTS process. Missing, stale, term-mismatched, or insufficiently
+covered caches are reported explicitly and their private rows are omitted.
 
 ## Prerequisites
 
@@ -61,7 +67,7 @@ From the repository root, with the `dsh` CLI installed:
 cd integrations/deepseek_harness
 npm run build
 npm pack
-dsh plugin --profile web add ./dsh-hku-agents-0.6.0.tgz
+dsh plugin --profile web add ./dsh-hku-agents-0.10.0.tgz
 dsh --profile web --dump-config
 dsh --profile web
 ```

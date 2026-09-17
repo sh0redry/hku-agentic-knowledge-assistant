@@ -116,7 +116,7 @@ test('client preserves stable API errors without leaking the token', async () =>
   }
 })
 
-test('plugin registers exactly thirteen restricted HKU tools and forwards preflight input', async () => {
+test('plugin registers exactly fourteen restricted HKU tools and forwards preflight input', async () => {
   const previous = process.env.INTEGRATION_API_TOKEN
   process.env.INTEGRATION_API_TOKEN = TOKEN
   let receivedBody
@@ -151,6 +151,7 @@ test('plugin registers exactly thirteen restricted HKU tools and forwards prefli
             'hku_moodle_inspect_dashboard',
             'hku_moodle_list_courses',
             'hku_moodle_upcoming_assignments',
+            'hku_daily_briefing',
           ],
         )
 
@@ -411,6 +412,56 @@ test('Moodle assignment tool forwards only the bounded window and preserves priv
         assert.equal(result.result.submission_data_read, false)
         assert.equal(result.result.activity_pages_opened, 0)
         assert.equal(result.result.moodle_writes_performed, 0)
+      },
+    )
+  } finally {
+    if (previous === undefined) delete process.env.INTEGRATION_API_TOKEN
+    else process.env.INTEGRATION_API_TOKEN = previous
+  }
+})
+
+test('daily briefing tool forwards only cache-derived inputs', async () => {
+  const previous = process.env.INTEGRATION_API_TOKEN
+  process.env.INTEGRATION_API_TOKEN = TOKEN
+  try {
+    await withServer(
+      (request, response) => {
+        assert.equal(request.method, 'POST')
+        assert.equal(request.url, '/api/v1/integration/briefing/today')
+        const chunks = []
+        request.on('data', chunk => chunks.push(chunk))
+        request.on('end', () => {
+          assert.deepEqual(JSON.parse(Buffer.concat(chunks).toString('utf8')), {
+            term_label: '2026-27 Sem 1',
+            days_ahead: 7,
+            max_cache_age_minutes: 120,
+          })
+          response.setHeader('content-type', 'application/json')
+          response.end(JSON.stringify(envelope({
+            read_only: true,
+            derived_locally: true,
+            browser_interactions_performed: false,
+            domain_writes_performed: 0,
+            complete: true,
+          })))
+        })
+      },
+      async baseUrl => {
+        const tools = []
+        const ctx = { tools: { register(tool) { tools.push(tool) } } }
+        apply(ctx, { baseUrl, tokenEnv: 'INTEGRATION_API_TOKEN', timeoutMs: 5000 })
+        const tool = tools.find(item => item.name === 'hku_daily_briefing')
+        const result = await tool.execute(
+          {
+            term_label: '2026-27 Sem 1',
+            days_ahead: 7,
+            max_cache_age_minutes: 120,
+          },
+          { signal: new AbortController().signal },
+        )
+        assert.equal(result.result.derived_locally, true)
+        assert.equal(result.result.browser_interactions_performed, false)
+        assert.equal(result.result.domain_writes_performed, 0)
       },
     )
   } finally {

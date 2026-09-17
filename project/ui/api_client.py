@@ -148,3 +148,17 @@ class HKUAgentsAPIClient:
             "/moodle/assignments/upcoming",
             json={"days_ahead": int(days_ahead)},
         )
+
+    def daily_briefing(
+        self,
+        term_label: str,
+        days_ahead: int,
+        max_cache_age_minutes: int,
+    ) -> dict:
+        payload = {
+            "days_ahead": int(days_ahead),
+            "max_cache_age_minutes": int(max_cache_age_minutes),
+        }
+        if term_label.strip():
+            payload["term_label"] = term_label.strip()
+        return self._integration_request("POST", "/briefing/today", json=payload)

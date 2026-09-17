@@ -254,5 +254,32 @@ export function apply(ctx, config) {
             return client.listUpcomingMoodleAssignments(args, execution.signal);
         },
     }));
+    ctx.tools.register(defineTool({
+        name: 'hku_daily_briefing',
+        description: 'Build a read-only daily briefing solely from the process-local timetable and Moodle deadline caches. This tool performs no browser interaction and no write. Inspect result.complete and each result.source_status entry; missing, stale, term-mismatched, or insufficiently covered sources are omitted rather than treated as empty. Synchronize both source tools first without restarting HKU AGENTS.',
+        parameters: {
+            term_label: {
+                type: 'string',
+                description: 'Optional exact term label used to validate the timetable cache.',
+            },
+            as_of: {
+                type: 'string',
+                description: 'Optional ISO-8601 timestamp; defaults to the current time.',
+            },
+            days_ahead: {
+                type: 'number',
+                description: 'Briefing deadline and next-class horizon, from 1 through 14 days.',
+            },
+            max_cache_age_minutes: {
+                type: 'number',
+                description: 'Maximum accepted age of either process-memory cache; defaults to 120 minutes.',
+            },
+        },
+        output: envelopeOutput,
+        timeoutMs: config.timeoutMs,
+        async execute(args, execution) {
+            return client.dailyBriefing(args, execution.signal);
+        },
+    }));
 }
 //# sourceMappingURL=index.js.map
