@@ -157,9 +157,19 @@ class DailyBriefingService:
                 "status": status,
                 "fetched_at": notice_snapshot.get("fetched_at"),
                 "age_minutes": age,
+                "available_notice_count": len(
+                    notice_snapshot.get("notices", [])
+                ),
             }
             if status == "ready":
-                recent_notices = list(notice_snapshot.get("notices", []))[:5]
+                recent_notices = sorted(
+                    notice_snapshot.get("notices", []),
+                    key=lambda item: (
+                        item.get("published_date") or "",
+                        item.get("title") or "",
+                    ),
+                    reverse=True,
+                )[:5]
 
         for source, details in source_status.items():
             if details["status"] != "ready":

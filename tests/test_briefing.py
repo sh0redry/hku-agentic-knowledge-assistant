@@ -93,8 +93,64 @@ class DailyBriefingServiceTests(unittest.TestCase):
         self.assertEqual(result["counts"]["upcoming_assignments"], 1)
         self.assertEqual(result["counts"]["recent_portal_notices"], 1)
         self.assertEqual(
+            result["source_status"]["portal_notices"]["available_notice_count"], 1
+        )
+        self.assertEqual(
             result["upcoming_assignments"][0]["title"], "Private assignment"
         )
+        self.assertEqual(
+            result["recent_portal_notices"][0]["title"],
+            "Registry service update",
+        )
+
+    def test_portal_notices_are_sorted_bounded_and_stale_rows_are_omitted(self):
+        notices = PortalNoticeService()
+        rows = [
+            {
+                "title": f"Notice {day}",
+                "published_date": f"2026-09-{day:02d}",
+                "source_label": "Registry",
+                "url": f"https://studentportal.hku.hk/news/{day}",
+                "url_query_redacted": False,
+            }
+            for day in range(1, 8)
+        ]
+        notices.update(rows, {"kind": "fixture"})
+        with notices._lock:
+            notices._snapshot["notices"].reverse()
+
+        service = DailyBriefingService(
+            TimetableService(), MoodleAssignmentService(), notices
+        )
+        current = datetime.now(timezone.utc)
+        fresh = service.build(
+            term_label=None,
+            as_of=current,
+            days_ahead=7,
+            max_cache_age_minutes=120,
+        )
+
+        self.assertEqual(
+            [item["title"] for item in fresh["recent_portal_notices"]],
+            ["Notice 7", "Notice 6", "Notice 5", "Notice 4", "Notice 3"],
+        )
+        self.assertEqual(fresh["counts"]["recent_portal_notices"], 5)
+        self.assertEqual(
+            fresh["source_status"]["portal_notices"]["available_notice_count"], 7
+        )
+
+        with notices._lock:
+            notices._snapshot["fetched_at"] = "2026-01-01T00:00:00Z"
+        stale = service.build(
+            term_label=None,
+            as_of=current,
+            days_ahead=7,
+            max_cache_age_minutes=120,
+        )
+
+        self.assertEqual(stale["source_status"]["portal_notices"]["status"], "stale")
+        self.assertEqual(stale["recent_portal_notices"], [])
+        self.assertEqual(stale["counts"]["recent_portal_notices"], 0)
 
     def test_missing_caches_are_explicit_not_empty_successes(self):
         result = DailyBriefingService(
