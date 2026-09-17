@@ -325,6 +325,12 @@ def create_gradio_ui(container):
         except Exception as exc:
             return _pretty({"ok": False, "read_only": True, "message": str(exc)})
 
+    async def portal_notices_handler():
+        try:
+            return _pretty(await asyncio.to_thread(api_client.portal_notices))
+        except Exception as exc:
+            return _pretty({"ok": False, "read_only": True, "message": str(exc)})
+
     async def live_sis_call(action, operation):
         completed_at = lambda: datetime.now(timezone.utc).isoformat(timespec="seconds")
         try:
@@ -432,9 +438,10 @@ def create_gradio_ui(container):
 
         with gr.Tab("Daily Briefing"):
             gr.Markdown(
-                "Combines only the current process-memory timetable and Moodle deadline "
-                "caches. This does not navigate the browser or refresh either source. "
-                "Synchronize both sources first; missing, stale, mismatched, and "
+                "Combines only the current process-memory timetable, Moodle deadline, "
+                "and Portal notice "
+                "caches. This does not navigate the browser or refresh any source. "
+                "Synchronize all three sources first; missing, stale, mismatched, and "
                 "insufficiently covered caches are reported explicitly."
             )
             briefing_term = gr.Textbox(
@@ -453,7 +460,7 @@ def create_gradio_ui(container):
             )
             briefing_button = gr.Button("Build local daily briefing", variant="primary")
             briefing_output = gr.Code(
-                value="Synchronize the timetable and Moodle deadlines first.",
+                value="Synchronize the timetable, Moodle deadlines, and Portal notices first.",
                 language="json",
                 label="Daily briefing",
             )
@@ -784,6 +791,28 @@ def create_gradio_ui(container):
                 moodle_assignments_handler,
                 inputs=moodle_assignment_days,
                 outputs=moodle_assignments_output,
+                show_progress="minimal",
+                queue=False,
+            )
+
+        with gr.Tab("Portal Notices"):
+            gr.Markdown(
+                "## HKU Portal News (read-only)\n"
+                "Reads only verifiable News cards currently exposed in the authenticated "
+                "Portal home-page DOM. It does not open notice detail pages. Notice rows "
+                "are cached in process memory and excluded from SQLite task history."
+            )
+            portal_notices_button = gr.Button(
+                "Read visible Portal notices", variant="primary"
+            )
+            portal_notices_output = gr.Code(
+                value="Keep the authenticated HKU Portal home page open.",
+                language="json",
+                label="Portal notices",
+            )
+            portal_notices_button.click(
+                portal_notices_handler,
+                outputs=portal_notices_output,
                 show_progress="minimal",
                 queue=False,
             )

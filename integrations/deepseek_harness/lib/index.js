@@ -255,8 +255,18 @@ export function apply(ctx, config) {
         },
     }));
     ctx.tools.register(defineTool({
+        name: 'hku_portal_list_notices',
+        description: 'Read only the News notices currently visible on the authenticated HKU Portal home page. It performs no navigation and opens no notice detail pages. Private notice rows remain process-local and are not persisted in task history. Run this before hku_daily_briefing when Portal notices should be included.',
+        parameters: {},
+        output: envelopeOutput,
+        timeoutMs: config.timeoutMs,
+        async execute(_args, execution) {
+            return client.listPortalNotices(execution.signal);
+        },
+    }));
+    ctx.tools.register(defineTool({
         name: 'hku_daily_briefing',
-        description: 'Build a read-only daily briefing solely from the process-local timetable and Moodle deadline caches. This tool performs no browser interaction and no write. Inspect result.complete and each result.source_status entry; missing, stale, term-mismatched, or insufficiently covered sources are omitted rather than treated as empty. Synchronize both source tools first without restarting HKU AGENTS.',
+        description: 'Build a read-only daily briefing solely from the process-local timetable, Moodle deadline, and Portal notice caches. This tool performs no browser interaction and no write. Inspect result.complete and each result.source_status entry; missing, stale, term-mismatched, or insufficiently covered sources are omitted rather than treated as empty. Synchronize all three source tools first without restarting HKU AGENTS.',
         parameters: {
             term_label: {
                 type: 'string',

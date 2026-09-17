@@ -256,6 +256,10 @@ export class HKUAgentsClient {
     return this.request('POST', '/api/v1/integration/moodle/assignments/upcoming', input, signal)
   }
 
+  listPortalNotices(signal?: AbortSignal): Promise<IntegrationEnvelope> {
+    return this.request('POST', '/api/v1/integration/portal/notices/list', {}, signal)
+  }
+
   dailyBriefing(
     input: {
       term_label?: string

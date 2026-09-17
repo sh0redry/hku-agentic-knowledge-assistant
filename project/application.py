@@ -17,6 +17,7 @@ from agents.moodle.agent import (
     MoodleDashboardInspectCapability,
     MoodleUpcomingAssignmentsCapability,
 )
+from agents.portal.agent import PortalNoticeListCapability
 from agents.timetable.agent import (
     SISExamStatusCapability,
     SISFreeSlotsCapability,
@@ -34,6 +35,7 @@ from services.tasks import TaskManager
 from services.timetable import TimetableService
 from services.moodle import MoodleAssignmentService, MoodleCourseService
 from services.briefing import DailyBriefingService
+from services.portal import PortalNoticeService
 
 
 class ApplicationContainer:
@@ -57,8 +59,9 @@ class ApplicationContainer:
         self.timetable = TimetableService()
         self.moodle_courses = MoodleCourseService()
         self.moodle_assignments = MoodleAssignmentService()
+        self.portal_notices = PortalNoticeService()
         self.daily_briefing = DailyBriefingService(
-            self.timetable, self.moodle_assignments
+            self.timetable, self.moodle_assignments, self.portal_notices
         )
 
         self.registry.register(KnowledgeAnswerCapability())
@@ -86,6 +89,11 @@ class ApplicationContainer:
         self.registry.register(
             MoodleUpcomingAssignmentsCapability(
                 self.connectors["sis_browser"], self.moodle_assignments
+            )
+        )
+        self.registry.register(
+            PortalNoticeListCapability(
+                self.connectors["sis_browser"], self.portal_notices
             )
         )
         self.registry.register(DailyBriefingCapability(self.daily_briefing))

@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from services.moodle import MoodleAssignmentService
+from services.portal import PortalNoticeService
 from services.timetable import TimetableService, WEEKDAYS
 
 
@@ -40,9 +41,11 @@ class DailyBriefingService:
         self,
         timetable: TimetableService,
         assignments: MoodleAssignmentService,
+        notices: PortalNoticeService,
     ) -> None:
         self.timetable = timetable
         self.assignments = assignments
+        self.notices = notices
 
     def build(
         self,
@@ -136,12 +139,33 @@ class DailyBriefingService:
                         upcoming_assignments.append(item)
                 upcoming_assignments.sort(key=lambda item: item["due_at"])
 
+        notice_snapshot = self.notices.snapshot()
+        recent_notices: list[dict] = []
+        if notice_snapshot is None:
+            source_status["portal_notices"] = {
+                "status": "missing",
+                "fetched_at": None,
+            }
+        else:
+            age = _age_minutes(notice_snapshot.get("fetched_at"), cache_checked_at)
+            status = (
+                "stale"
+                if age is None or age > max_cache_age_minutes
+                else "ready"
+            )
+            source_status["portal_notices"] = {
+                "status": status,
+                "fetched_at": notice_snapshot.get("fetched_at"),
+                "age_minutes": age,
+            }
+            if status == "ready":
+                recent_notices = list(notice_snapshot.get("notices", []))[:5]
+
         for source, details in source_status.items():
             if details["status"] != "ready":
                 warnings.append(f"Source '{source}' is {details['status']}; its private rows were omitted.")
 
         deferred_sources = {
-            "portal_notices": "not_implemented",
             "exam_status": "not_implemented",
             "library_due_items": "not_implemented",
         }
@@ -161,9 +185,11 @@ class DailyBriefingService:
             "next_class": next_class,
             "remaining_classes_today": remaining_classes,
             "upcoming_assignments": upcoming_assignments,
+            "recent_portal_notices": recent_notices,
             "counts": {
                 "remaining_classes_today": len(remaining_classes),
                 "upcoming_assignments": len(upcoming_assignments),
+                "recent_portal_notices": len(recent_notices),
                 "ready_sources": sum(
                     item["status"] == "ready" for item in source_status.values()
                 ),

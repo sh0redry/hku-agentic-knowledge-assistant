@@ -26,6 +26,7 @@ class BrowserCommandName(str, Enum):
     OPEN_ENROLLMENT_ADD_CLASSES = "hku.open_enrollment_add_classes"
     OPEN_WEEKLY_TIMETABLE = "hku.open_weekly_timetable"
     OPEN_MOODLE = "hku.open_moodle"
+    LIST_PORTAL_NOTICES = "portal.list_notices"
     BIND_SIS_TAB = "sis.bind_tab"
     INSPECT_PAGE = "sis.inspect_page"
     INSPECT_CART = "sis.inspect_cart"

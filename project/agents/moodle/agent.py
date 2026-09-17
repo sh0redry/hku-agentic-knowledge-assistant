@@ -80,7 +80,7 @@ class MoodleDashboardInspectCapability(BaseCapability):
             if exc.code in {"COMMAND_NOT_ALLOWED", "PAGE_SCRIPT_UNAVAILABLE"}:
                 raise CapabilityError(
                     "EXTENSION_UPDATE_REQUIRED",
-                    "Reload HKU AGENTS Browser Bridge 0.11.5 and refresh HKU Portal and Moodle.",
+                    "Reload HKU AGENTS Browser Bridge 0.12.3 and refresh HKU Portal and Moodle.",
                 ) from exc
             raise CapabilityError(exc.code, str(exc)) from exc
         snapshot = navigation["snapshot"]
@@ -94,7 +94,7 @@ class MoodleDashboardInspectCapability(BaseCapability):
         if not _supported_parser(diagnostics.get("parser_version"), (0, 3, 2)):
             raise CapabilityError(
                 "EXTENSION_UPDATE_REQUIRED",
-                "Reload HKU AGENTS Browser Bridge 0.11.5 before Moodle inspection.",
+                "Reload HKU AGENTS Browser Bridge 0.12.3 before Moodle inspection.",
             )
         steps = navigation.get("steps", [])
         return {
@@ -175,7 +175,7 @@ class MoodleCourseListCapability(BaseCapability):
             if exc.code in {"COMMAND_NOT_ALLOWED", "PAGE_SCRIPT_UNAVAILABLE"}:
                 raise CapabilityError(
                     "EXTENSION_UPDATE_REQUIRED",
-                    "Reload HKU AGENTS Browser Bridge 0.11.5 and refresh HKU Portal and Moodle.",
+                    "Reload HKU AGENTS Browser Bridge 0.12.3 and refresh HKU Portal and Moodle.",
                 ) from exc
             raise CapabilityError(exc.code, str(exc)) from exc
 
@@ -183,7 +183,7 @@ class MoodleCourseListCapability(BaseCapability):
         if not _supported_parser(diagnostics.get("parser_version"), (0, 3, 2)):
             raise CapabilityError(
                 "EXTENSION_UPDATE_REQUIRED",
-                "Reload HKU AGENTS Browser Bridge 0.11.5 before listing Moodle courses.",
+                "Reload HKU AGENTS Browser Bridge 0.12.3 before listing Moodle courses.",
             )
         unparsed = int(diagnostics.get("unparsed_course_candidate_count", 0))
         if unparsed:
@@ -290,7 +290,7 @@ class MoodleUpcomingAssignmentsCapability(BaseCapability):
             if exc.code in {"COMMAND_NOT_ALLOWED", "PAGE_SCRIPT_UNAVAILABLE"}:
                 raise CapabilityError(
                     "EXTENSION_UPDATE_REQUIRED",
-                    "Reload HKU AGENTS Browser Bridge 0.11.5 and refresh HKU Portal and Moodle.",
+                    "Reload HKU AGENTS Browser Bridge 0.12.3 and refresh HKU Portal and Moodle.",
                 ) from exc
             raise CapabilityError(exc.code, str(exc)) from exc
 
@@ -298,7 +298,7 @@ class MoodleUpcomingAssignmentsCapability(BaseCapability):
         if not _supported_parser(diagnostics.get("parser_version"), (0, 3, 5)):
             raise CapabilityError(
                 "EXTENSION_UPDATE_REQUIRED",
-                "Reload HKU AGENTS Browser Bridge 0.11.5 before reading Moodle assignments.",
+                "Reload HKU AGENTS Browser Bridge 0.12.3 before reading Moodle assignments.",
             )
         if int(diagnostics.get("unparsed_assignment_candidate_count", 0)):
             raise CapabilityError(

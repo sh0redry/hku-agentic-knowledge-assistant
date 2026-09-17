@@ -19,6 +19,7 @@ from api.app import create_api_app
 from application import ApplicationContainer
 from services.briefing import DailyBriefingService
 from services.moodle import MoodleAssignmentService
+from services.portal import PortalNoticeService
 from services.timetable import TimetableService
 
 
@@ -51,6 +52,7 @@ class DailyBriefingServiceTests(unittest.TestCase):
     def test_combines_ready_caches_without_browser_interaction(self):
         timetable = TimetableService()
         moodle = MoodleAssignmentService()
+        notices = PortalNoticeService()
         data = timetable_fixture()
         timetable.update(data["term_label"], data["meetings"], {"kind": "fixture"})
         as_of = datetime.fromisoformat("2026-09-17T17:00:00+08:00")
@@ -65,8 +67,18 @@ class DailyBriefingServiceTests(unittest.TestCase):
                 },
             },
         )
+        notices.update(
+            [{
+                "title": "Registry service update",
+                "published_date": "2026-09-17",
+                "source_label": "Academic Services",
+                "url": "https://studentportal.hku.hk/news/123",
+                "url_query_redacted": False,
+            }],
+            {"kind": "fixture"},
+        )
 
-        result = DailyBriefingService(timetable, moodle).build(
+        result = DailyBriefingService(timetable, moodle, notices).build(
             term_label=data["term_label"],
             as_of=as_of,
             days_ahead=7,
@@ -79,13 +91,14 @@ class DailyBriefingServiceTests(unittest.TestCase):
         self.assertEqual(result["next_class"]["course_code"], "COMP1110")
         self.assertEqual(result["counts"]["remaining_classes_today"], 1)
         self.assertEqual(result["counts"]["upcoming_assignments"], 1)
+        self.assertEqual(result["counts"]["recent_portal_notices"], 1)
         self.assertEqual(
             result["upcoming_assignments"][0]["title"], "Private assignment"
         )
 
     def test_missing_caches_are_explicit_not_empty_successes(self):
         result = DailyBriefingService(
-            TimetableService(), MoodleAssignmentService()
+            TimetableService(), MoodleAssignmentService(), PortalNoticeService()
         ).build(
             term_label=None,
             as_of=datetime.fromisoformat("2026-09-17T17:00:00+08:00"),
@@ -98,12 +111,16 @@ class DailyBriefingServiceTests(unittest.TestCase):
         self.assertEqual(
             result["source_status"]["moodle_assignments"]["status"], "missing"
         )
+        self.assertEqual(
+            result["source_status"]["portal_notices"]["status"], "missing"
+        )
         self.assertEqual(result["remaining_classes_today"], [])
         self.assertEqual(result["upcoming_assignments"], [])
 
     def test_term_mismatch_and_short_moodle_coverage_are_omitted(self):
         timetable = TimetableService()
         moodle = MoodleAssignmentService()
+        notices = PortalNoticeService()
         data = timetable_fixture()
         timetable.update(data["term_label"], data["meetings"], {"kind": "fixture"})
         now = datetime.now(timezone.utc)
@@ -118,8 +135,9 @@ class DailyBriefingServiceTests(unittest.TestCase):
                 },
             },
         )
+        notices.update([], {"kind": "fixture"})
 
-        result = DailyBriefingService(timetable, moodle).build(
+        result = DailyBriefingService(timetable, moodle, notices).build(
             term_label="2026-27 Sem 2",
             as_of=now,
             days_ahead=7,
@@ -169,6 +187,16 @@ class DailyBriefingIntegrationTests(unittest.TestCase):
                 },
             },
         )
+        self.container.portal_notices.update(
+            [{
+                "title": "Private Portal headline",
+                "published_date": now.date().isoformat(),
+                "source_label": "Registry",
+                "url": "https://studentportal.hku.hk/news/private",
+                "url_query_redacted": False,
+            }],
+            {"kind": "fixture"},
+        )
 
         response = self.client.post(
             "/api/v1/integration/briefing/today",
@@ -187,13 +215,16 @@ class DailyBriefingIntegrationTests(unittest.TestCase):
         self.assertFalse(result["browser_interactions_performed"])
         self.assertEqual(result["domain_writes_performed"], 0)
         self.assertEqual(result["upcoming_assignments"][0]["title"], "Secret deadline title")
+        self.assertEqual(result["recent_portal_notices"][0]["title"], "Private Portal headline")
 
         stored = self.container.store.get_task(response["task"]["id"])
         self.assertFalse(stored.result["private_briefing_details_persisted"])
         self.assertNotIn("Secret deadline title", str(stored.result))
         self.assertNotIn("COMP1110", str(stored.result))
+        self.assertNotIn("Private Portal headline", str(stored.result))
         self.assertNotIn("upcoming_assignments", stored.result)
         self.assertNotIn("remaining_classes_today", stored.result)
+        self.assertNotIn("recent_portal_notices", stored.result)
 
     def test_invalid_window_is_rejected_at_api_boundary(self):
         response = self.client.post(

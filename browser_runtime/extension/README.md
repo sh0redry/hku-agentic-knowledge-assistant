@@ -6,7 +6,8 @@ local HKU AGENTS process. Existing Portal/SIS commands still use the compatible
 single active binding. The extension can follow three fixed navigation targets:
 the Portal SIS sign-on entry, the exact SIS `Enrollment Add Classes` component
 route, and a validated Portal Moodle entry. Moodle has a diagnostic parser plus
-separately scoped visible-course-membership and upcoming-assignment commands in Phase C; Library
+separately scoped visible-course-membership and upcoming-assignment commands in Phase C.
+Portal News has a separate read-only structured parser in Phase D; Library
 remains discovery-only. The diagnostic command returns markers and aggregate
 counts only. The course command returns structured course identity. The upcoming
 assignment command returns only machine-dated Timeline/Upcoming rows and never
@@ -40,6 +41,9 @@ forms.
    Complete any Moodle login or MFA step yourself, then retry the inspection.
    If SSO lands on the authenticated Moodle home page, the bridge follows only
    the fixed `https://moodle.hku.hk/my/` Dashboard route before inspecting it.
+10. To test Portal News, keep the authenticated Portal home page open and use
+    **Read visible Portal notices**. The bridge reads structured visible cards,
+    performs no navigation, and never opens a notice detail page.
 
 When the unpacked extension receives a new ID, restart HKU AGENTS to clear the
 in-memory development pin, or set `BROWSER_EXTENSION_IDS` explicitly in
@@ -79,6 +83,9 @@ does not grant HKU AGENTS a read or write capability for that page.
   is reused before the Portal opens another one-time SSO destination.
 - Live preflight reads and compares the current cart but cannot modify it.
 - Only structured page state leaves Portal/SIS content scripts. Full HTML is never sent.
+- Portal notice parser `0.1.3` accepts only dated visible candidates whose detail
+  URL remains on an HKU HTTPS host. It releases title, publication date, optional
+  source label, and URL; incomplete candidates fail closed and raw HTML is never sent.
 - Weekly timetable synchronization uses only the fixed
   `https://sweb.hku.hk/student/servlet/MyWeekly/showTimetable` target and its
   dedicated parser. Enrollment Add Classes is never reported as the authoritative

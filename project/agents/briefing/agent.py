@@ -34,7 +34,8 @@ class DailyBriefingCapability(BaseCapability):
         agent="briefing",
         title="HKU Daily Briefing",
         description=(
-            "Combine the process-local SIS timetable and Moodle deadline caches. "
+            "Combine the process-local SIS timetable, Moodle deadline, and Portal "
+            "notice caches. "
             "This capability performs no browser interaction and reports missing, "
             "stale, mismatched, or insufficiently covered sources explicitly."
         ),

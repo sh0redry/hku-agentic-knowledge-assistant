@@ -149,6 +149,9 @@ class HKUAgentsAPIClient:
             json={"days_ahead": int(days_ahead)},
         )
 
+    def portal_notices(self) -> dict:
+        return self._integration_request("POST", "/portal/notices/list", json={})
+
     def daily_briefing(
         self,
         term_label: str,

@@ -99,7 +99,8 @@ Core endpoints:
 | `POST /api/v1/integration/moodle/dashboard/inspect` | Navigate to and inspect the Moodle Dashboard using a diagnostic-only contract |
 | `POST /api/v1/integration/moodle/courses/list` | Navigate and list visible Moodle course membership without reading learning activity data |
 | `POST /api/v1/integration/moodle/assignments/upcoming` | Return visible Dashboard deadlines within a bounded 1-90 day window |
-| `POST /api/v1/integration/briefing/today` | Combine fresh process-local timetable and Moodle deadline caches without browser interaction |
+| `POST /api/v1/integration/portal/notices/list` | Read visible Portal News cards into a private process-memory cache without opening details |
+| `POST /api/v1/integration/briefing/today` | Combine fresh process-local timetable, Moodle deadline, and Portal notice caches without browser interaction |
 | `POST /api/v1/chat` | Execute the existing Knowledge Agent through the platform boundary |
 | `POST /api/v1/sis/preflight` | Run the zero-network SIS simulator |
 | `GET /api/v1/tasks/{task_id}/events` | Stream task events over SSE |
@@ -241,12 +242,20 @@ reads grade, participant, submission, or submission-status data. Complete rows
 remain in process memory; SQLite task history stores only the count, fetch time,
 window, and `private_assignment_details_persisted: false`.
 
-### Cache-only daily briefing
+### Read-only Portal notices and cache-only daily briefing
+
+`POST /api/v1/integration/portal/notices/list` reads only News cards visible in
+the authenticated Portal home-page DOM. Each accepted row has an HKU HTTPS URL,
+title, publication date, and optional source label. The command performs no
+navigation and opens no detail page. Ambiguous or unparseable visible candidates
+fail closed, and complete rows remain only in process memory; task history stores
+counts and `private_notice_details_persisted: false`.
 
 `POST /api/v1/integration/briefing/today` combines the current process-memory
-weekly timetable and Moodle deadline cache. It returns the next class, remaining
-classes today, and assignments due within a 1-14 day window without any browser
-interaction. Each source independently reports `ready`, `missing`, `stale`,
+weekly timetable, Moodle deadline, and Portal notice caches. It returns the next
+class, remaining classes today, assignments due within a 1-14 day window, and up
+to five newest visible Portal notices without any browser interaction. Each
+source independently reports `ready`, `missing`, `stale`,
 `term_mismatch`, or `insufficient_coverage`; rows from a non-ready source are
 omitted instead of being represented as an authoritative empty result. The task
 history stores only source states and counts with

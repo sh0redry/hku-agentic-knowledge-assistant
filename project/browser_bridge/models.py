@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import date, datetime
+from urllib.parse import urlparse
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -319,6 +320,53 @@ class PortalPageSnapshot(BrowserTabState):
     origin: Literal["https://hkuportal.hku.hk", "https://studentportal.hku.hk"]
     page_kind: Literal["portal_login", "portal_home", "blocked", "unknown"]
     navigation_diagnostics: PortalNavigationDiagnostics
+
+
+class PortalNotice(StrictMessage):
+    title: str = Field(min_length=6, max_length=500)
+    published_date: date
+    source_label: str | None = Field(default=None, min_length=1, max_length=200)
+    url: str = Field(min_length=12, max_length=1000)
+    url_query_redacted: bool = False
+
+    @field_validator("url")
+    @classmethod
+    def validate_notice_url(cls, value: str) -> str:
+        parsed = urlparse(value)
+        hostname = (parsed.hostname or "").lower()
+        if parsed.scheme != "https" or not (
+            hostname == "hku.hk" or hostname.endswith(".hku.hk")
+        ):
+            raise ValueError("Portal notice URL must remain on an HKU HTTPS host.")
+        if parsed.query or parsed.fragment:
+            raise ValueError("Portal notice URL must not contain a query or fragment.")
+        return value
+
+
+class PortalNoticeParserDiagnostics(StrictMessage):
+    parser_version: str = Field(pattern=r"^\d+\.\d+\.\d+$", max_length=20)
+    news_marker_found: bool
+    notice_candidate_count: int = Field(ge=0, le=1000)
+    parsed_notice_count: int = Field(ge=0, le=1000)
+    unparsed_notice_candidate_count: int = Field(ge=0, le=1000)
+    unsafe_notice_url_candidate_count: int = Field(ge=0, le=1000)
+    duplicate_notice_candidate_count: int = Field(ge=0, le=1000)
+
+
+class PortalNoticeListSnapshot(PortalPageSnapshot):
+    logged_in: Literal[True]
+    page_kind: Literal["portal_home"]
+    notice_count: int = Field(ge=0, le=500)
+    notices: list[PortalNotice] = Field(default_factory=list, max_length=500)
+    diagnostics: PortalNoticeParserDiagnostics
+
+    @model_validator(mode="after")
+    def validate_notice_counts(self):
+        if self.notice_count != len(self.notices):
+            raise ValueError("Portal notice count does not match the structured rows.")
+        if self.diagnostics.parsed_notice_count != len(self.notices):
+            raise ValueError("Portal notice parser count does not match the structured rows.")
+        return self
 
 
 class SISNavigationResult(StrictMessage):

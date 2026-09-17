@@ -100,6 +100,7 @@ export declare class HKUAgentsClient {
     listUpcomingMoodleAssignments(input: {
         days_ahead?: number;
     }, signal?: AbortSignal): Promise<IntegrationEnvelope>;
+    listPortalNotices(signal?: AbortSignal): Promise<IntegrationEnvelope>;
     dailyBriefing(input: {
         term_label?: string;
         as_of?: string;

@@ -13,6 +13,7 @@ from agents.moodle.agent import (
     MoodleDashboardInspectRequest,
     MoodleUpcomingAssignmentsRequest,
 )
+from agents.portal.agent import PortalNoticeListRequest
 from api.schemas import IntegrationResponse, IntegrationTaskSummary
 from browser_bridge.service import BrowserBridgeError
 from connectors.sis.models import (
@@ -220,7 +221,7 @@ def create_integration_router(expected_token: str) -> APIRouter:
             }
             error_code = task_error.get("code", "TASK_FAILED")
             recovery = (
-                "Reload the unpacked HKU AGENTS Browser Bridge 0.11.5, then refresh HKU Portal and Moodle."
+                "Reload the unpacked HKU AGENTS Browser Bridge 0.12.3, then refresh HKU Portal and Moodle."
                 if error_code == "EXTENSION_UPDATE_REQUIRED"
                 else "Complete the HKU Portal User login and any MFA in Moodle, then retry."
                 if error_code == "MOODLE_LOGIN_REQUIRED"
@@ -310,9 +311,46 @@ def create_integration_router(expected_token: str) -> APIRouter:
                         "message", "The local daily briefing task failed."
                     ),
                     "recovery": (
-                        "Synchronize the weekly timetable and Moodle upcoming assignments, "
+                        "Synchronize the weekly timetable, Moodle upcoming assignments, "
+                        "and Portal notices, "
                         "then retry without restarting HKU AGENTS."
                     ),
+                },
+            )
+        return response(correlation_id, ok=True, task=record, result=record.result)
+
+    @router.post("/portal/notices/list", response_model=IntegrationResponse)
+    async def list_portal_notices(
+        request: Request,
+        body: PortalNoticeListRequest | None = None,
+        correlation_id: str = Depends(authorize),
+    ):
+        record = await request.app.state.container.tasks.submit_and_wait(
+            "portal.notices.list",
+            (body or PortalNoticeListRequest()).model_dump(mode="json"),
+            correlation_id=correlation_id,
+        )
+        if record.status != TaskStatus.COMPLETED:
+            task_error = record.error or {
+                "code": "TASK_FAILED",
+                "message": "The Portal notice task did not complete.",
+            }
+            error_code = task_error.get("code", "TASK_FAILED")
+            recovery = (
+                "Reload HKU AGENTS Browser Bridge 0.12.3 and refresh HKU Portal."
+                if error_code == "EXTENSION_UPDATE_REQUIRED"
+                else "Keep the authenticated HKU Portal home page open and report the count-only parser diagnostics."
+                if error_code == "PORTAL_NOTICE_PARSE_INCOMPLETE"
+                else "Open HKU Portal, complete login/MFA, and retry."
+            )
+            return response(
+                correlation_id,
+                ok=False,
+                task=record,
+                error={
+                    "code": error_code,
+                    "message": task_error.get("message", "The Portal notice task failed."),
+                    "recovery": recovery,
                 },
             )
         return response(correlation_id, ok=True, task=record, result=record.result)

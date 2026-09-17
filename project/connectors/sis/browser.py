@@ -6,6 +6,7 @@ from browser_bridge.models import (
     MoodleCourseListSnapshot,
     MoodleNavigationResult,
     PortalPageSnapshot,
+    PortalNoticeListSnapshot,
     SISNavigationResult,
     SISPageSnapshot,
     WeeklyTimetableNavigationResult,
@@ -43,6 +44,10 @@ class BrowserSISConnector(BaseConnector):
     async def inspect_portal(self) -> dict:
         data = await self._command(BrowserCommandName.INSPECT_PORTAL)
         return PortalPageSnapshot.model_validate(data).model_dump(mode="json")
+
+    async def list_portal_notices(self) -> dict:
+        data = await self._command(BrowserCommandName.LIST_PORTAL_NOTICES)
+        return PortalNoticeListSnapshot.model_validate(data).model_dump(mode="json")
 
     async def open_sis(self) -> dict:
         data = await self._command(BrowserCommandName.OPEN_SIS)

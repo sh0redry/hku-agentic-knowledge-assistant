@@ -128,10 +128,13 @@ Timeline, Upcoming, and HKU To-do deadline rows; it does not open activities or
 read submission status.
 
 Phase D now includes a first cache-only `briefing.today` slice. It combines the
-current process-memory weekly timetable and Moodle deadline cache into next
-class, remaining classes today, and upcoming assignments. It never navigates a
-browser; missing, stale, term-mismatched, or insufficiently covered sources are
-reported explicitly, and private briefing rows are excluded from task history.
+current process-memory weekly timetable, Moodle deadline, and Portal News caches
+into next class, remaining classes today, upcoming assignments, and the five
+newest visible Portal notices. The separately scoped `portal.notices.list`
+capability reads the authenticated Portal home-page DOM without opening notice
+detail pages. Briefing generation never navigates a browser; missing, stale,
+term-mismatched, or insufficiently covered sources are reported explicitly, and
+private source rows are excluded from task history.
 
 Ollama is still available as an optional local provider by setting `LLM_PROVIDER=ollama`.
 

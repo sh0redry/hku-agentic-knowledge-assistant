@@ -123,6 +123,9 @@ export class HKUAgentsClient {
     listUpcomingMoodleAssignments(input, signal) {
         return this.request('POST', '/api/v1/integration/moodle/assignments/upcoming', input, signal);
     }
+    listPortalNotices(signal) {
+        return this.request('POST', '/api/v1/integration/portal/notices/list', {}, signal);
+    }
     dailyBriefing(input, signal) {
         return this.request('POST', '/api/v1/integration/briefing/today', input, signal);
     }

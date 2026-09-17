@@ -24,6 +24,7 @@ const ALLOWED_COMMANDS = new Set([
   "hku.open_enrollment_add_classes",
   "hku.open_weekly_timetable",
   "hku.open_moodle",
+  "portal.list_notices",
   "sis.bind_tab",
   "sis.inspect_page",
   "sis.inspect_cart",
@@ -209,6 +210,42 @@ async function queryWeeklyTimetableTabs() {
 
 async function queryMoodleTabs() {
   return chrome.tabs.query({ url: MOODLE_URL_PATTERN });
+}
+
+async function queryPortalTabs() {
+  return chrome.tabs.query({ url: PORTAL_URL_PATTERNS });
+}
+
+async function findAuthenticatedPortalTab() {
+  const tabs = (await queryPortalTabs()).filter((tab) => !isKnownPortalErrorPage(tab.url));
+  tabs.sort((left, right) =>
+    Number(right.active) - Number(left.active) ||
+    Number(right.lastAccessed || 0) - Number(left.lastAccessed || 0)
+  );
+  for (const tab of tabs) {
+    try {
+      const snapshot = await sendTabCommand(tab.id, "hku.inspect_portal");
+      if (snapshot.logged_in === true && snapshot.page_kind === "portal_home") return tab;
+    } catch (_error) {
+      // Continue across stale, login, or partially loaded Portal tabs.
+    }
+  }
+  return null;
+}
+
+async function readPortalNotices() {
+  const tab = await findAuthenticatedPortalTab();
+  if (!tab) {
+    throw commandError(
+      "PORTAL_LOGIN_REQUIRED",
+      "Open HKU Portal, complete login/MFA, and keep the home page available in Chrome."
+    );
+  }
+  const snapshot = await sendTabCommand(tab.id, "portal.list_notices");
+  boundTabId = tab.id;
+  lastSnapshot = snapshot;
+  void sendHeartbeat();
+  return snapshot;
 }
 
 async function findSisTab() {
@@ -945,6 +982,7 @@ async function executeCommand(command, payload = {}) {
   if (command === "hku.open_sis") return openSis();
   if (command === "hku.open_weekly_timetable") return openWeeklyTimetable();
   if (command === "hku.open_moodle") return openMoodleDashboard();
+  if (command === "portal.list_notices") return readPortalNotices();
   if (command === "hku.open_enrollment_add_classes") {
     return openEnrollmentAddClasses(payload.term_label || null);
   }
