@@ -5,6 +5,7 @@
     if (![
       "moodle.inspect_dashboard",
       "moodle.open_dashboard",
+      "moodle.start_portal_sso",
       "moodle.list_courses",
       "moodle.list_upcoming_assignments"
     ].includes(message?.command)) {
@@ -13,6 +14,8 @@
     try {
       const data = message.command === "moodle.open_dashboard"
         ? self.HKUMoodleParser.openDashboard(document, location)
+        : message.command === "moodle.start_portal_sso"
+          ? self.HKUMoodleParser.startPortalSso(document, location)
         : message.command === "moodle.list_courses"
           ? self.HKUMoodleParser.parseCourses(document, location)
           : message.command === "moodle.list_upcoming_assignments"

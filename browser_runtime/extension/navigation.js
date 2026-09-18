@@ -106,8 +106,13 @@
         candidates.push({ element, label, destination });
       }
     }
-    const exactMoodle = candidates.filter((candidate) => candidate.label === "moodle");
-    return exactMoodle.length ? exactMoodle : candidates;
+    const priority = (candidate) => {
+      const portalOwned = PORTAL_ORIGINS.has(candidate.destination.origin) ? 2 : 0;
+      const exactMoodle = candidate.label === "moodle" ? 1 : 0;
+      return portalOwned + exactMoodle;
+    };
+    const bestPriority = Math.max(0, ...candidates.map(priority));
+    return candidates.filter((candidate) => priority(candidate) === bestPriority);
   }
 
   function isApprovedSisEntry(destination) {
@@ -161,7 +166,7 @@
       temporary_course_count: 0,
       schedule_course_count: 0,
       navigation_diagnostics: {
-        parser_version: "0.4.4",
+        parser_version: "0.4.5",
         sis_entry_candidate_count: candidates.length,
         sis_entry_available: candidates.length > 0,
         candidate_labels: [...new Set(candidates.map((candidate) => candidate.label))].slice(0, 5),
@@ -394,7 +399,8 @@
       source_origin: locationObject.origin,
       target_origin: MOODLE_ORIGIN,
       navigation_started: true,
-      portal_entry_clicked: true
+      portal_entry_clicked: true,
+      portal_sso_entry_clicked: PORTAL_ORIGINS.has(candidate.destination.origin)
     };
   }
 

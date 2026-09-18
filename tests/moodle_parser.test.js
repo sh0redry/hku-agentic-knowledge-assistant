@@ -25,7 +25,7 @@ const dashboard = parser.inspect(dashboardDocument(), {
 });
 assert.equal(dashboard.logged_in, true);
 assert.equal(dashboard.page_kind, "dashboard");
-assert.equal(dashboard.diagnostics.parser_version, "0.3.5");
+assert.equal(dashboard.diagnostics.parser_version, "0.4.1");
 assert.equal(dashboard.diagnostics.dashboard_marker_found, true);
 assert.equal(dashboard.diagnostics.course_link_candidate_count, 0);
 assert.equal(JSON.stringify(dashboard).includes("Private Course Name"), false);
@@ -486,6 +486,54 @@ const login = parser.inspect({
 assert.equal(login.logged_in, false);
 assert.equal(login.page_kind, "login");
 assert.equal(login.diagnostics.login_marker_found, true);
+assert.equal(login.diagnostics.sso_entry_available, false);
+
+let queuedSsoNavigation = null;
+const portalSsoControl = {
+  tagName: "A",
+  textContent: "HKU Portal user login",
+  clicked: 0,
+  getAttribute(name) {
+    if (name === "href") return "javascript:void(0)";
+    if (name === "aria-label") return "Sign in";
+    return null;
+  },
+  click() { this.clicked += 1; }
+};
+const ssoLoginDocument = {
+  body: { textContent: "Log in to the site HKU Portal User" },
+  querySelector() { return null; },
+  querySelectorAll(selector) {
+    return selector.includes("button") ? [portalSsoControl] : [];
+  }
+};
+const ssoLoginLocation = {
+  origin: "https://moodle.hku.hk",
+  pathname: "/login/index.php",
+  href: "https://moodle.hku.hk/login/index.php"
+};
+const ssoStart = parser.startPortalSso(
+  ssoLoginDocument,
+  ssoLoginLocation,
+  action => { queuedSsoNavigation = action; }
+);
+assert.equal(ssoStart.sso_interaction_performed, true);
+assert.equal(ssoStart.credentials_entered, false);
+assert.equal(ssoStart.mfa_interactions_performed, false);
+assert.equal(portalSsoControl.clicked, 0);
+queuedSsoNavigation();
+assert.equal(portalSsoControl.clicked, 1);
+
+assert.throws(
+  () => parser.startPortalSso({
+    body: { textContent: "Log in to the site Password" },
+    querySelector(selector) {
+      return selector === "input[type='password']" ? {} : null;
+    },
+    querySelectorAll() { return []; }
+  }, ssoLoginLocation),
+  error => error.code === "MOODLE_SSO_ENTRY_NOT_FOUND"
+);
 assert.throws(
   () => parser.openDashboard({
     body: { textContent: "HKU Portal User login" },

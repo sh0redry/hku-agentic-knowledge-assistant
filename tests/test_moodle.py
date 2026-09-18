@@ -16,7 +16,9 @@ sys.path.insert(0, str(PROJECT))
 
 from api.app import create_api_app
 from application import ApplicationContainer
+from browser_bridge.models import MoodleNavigationResult
 from browser_bridge.service import BrowserBridgeError
+from pydantic import ValidationError
 
 
 class MoodleDashboardIntegrationTests(unittest.TestCase):
@@ -32,6 +34,44 @@ class MoodleDashboardIntegrationTests(unittest.TestCase):
     def tearDown(self):
         self.client.close()
         self.temp_dir.cleanup()
+
+    def test_navigation_contract_forbids_claimed_credential_or_mfa_interaction(self):
+        payload = {
+            "read_only": True,
+            "navigation_only": True,
+            "moodle_write_requests_sent": 0,
+            "source_origin": "https://studentportal.hku.hk",
+            "source_page_kind": "portal_home",
+            "target_origin": "https://moodle.hku.hk",
+            "target_page_kind": "dashboard",
+            "portal_session_reused": True,
+            "moodle_session_reused": False,
+            "sso_interactions_performed": True,
+            "credentials_entered": False,
+            "mfa_interactions_performed": False,
+            "steps": ["portal_to_moodle", "moodle_portal_sso_started"],
+            "snapshot": {
+                "origin": "https://moodle.hku.hk",
+                "logged_in": True,
+                "page_kind": "dashboard",
+                "diagnostics": {
+                    "parser_version": "0.4.1",
+                    "dashboard_marker_found": True,
+                    "login_marker_found": False,
+                    "user_menu_found": True,
+                    "course_link_candidate_count": 0,
+                    "timeline_marker_found": False,
+                    "upcoming_marker_found": False,
+                    "todo_marker_found": False,
+                    "sso_entry_candidate_count": 0,
+                    "sso_entry_available": False,
+                },
+            },
+        }
+        MoodleNavigationResult.model_validate(payload)
+        payload["credentials_entered"] = True
+        with self.assertRaises(ValidationError):
+            MoodleNavigationResult.model_validate(payload)
 
     def test_portal_navigation_returns_diagnostics_without_course_data(self):
         bind_hku_tab = AsyncMock(
@@ -50,13 +90,18 @@ class MoodleDashboardIntegrationTests(unittest.TestCase):
                 "source_page_kind": "portal_home",
                 "target_origin": "https://moodle.hku.hk",
                 "target_page_kind": "dashboard",
-                "steps": ["portal_to_moodle"],
+                "portal_session_reused": True,
+                "moodle_session_reused": False,
+                "sso_interactions_performed": True,
+                "credentials_entered": False,
+                "mfa_interactions_performed": False,
+                "steps": ["portal_to_moodle", "moodle_portal_sso_started"],
                 "snapshot": {
                     "origin": "https://moodle.hku.hk",
                     "logged_in": True,
                     "page_kind": "dashboard",
                     "diagnostics": {
-                        "parser_version": "0.3.5",
+                        "parser_version": "0.4.1",
                         "dashboard_marker_found": True,
                         "login_marker_found": False,
                         "user_menu_found": True,
@@ -84,6 +129,11 @@ class MoodleDashboardIntegrationTests(unittest.TestCase):
         self.assertTrue(result["navigation_interactions_performed"])
         self.assertEqual(result["domain_writes_performed"], 0)
         self.assertEqual(result["moodle_writes_performed"], 0)
+        self.assertTrue(result["portal_session_reused"])
+        self.assertFalse(result["moodle_session_reused"])
+        self.assertTrue(result["sso_interactions_performed"])
+        self.assertFalse(result["credentials_entered"])
+        self.assertFalse(result["mfa_interactions_performed"])
         self.assertFalse(result["course_data_read"])
         self.assertFalse(result["assignment_data_read"])
         self.assertEqual(result["dashboard"]["page_kind"], "dashboard")
@@ -148,7 +198,7 @@ class MoodleDashboardIntegrationTests(unittest.TestCase):
                     "logged_in": True,
                     "page_kind": "dashboard",
                     "diagnostics": {
-                        "parser_version": "0.3.5",
+                        "parser_version": "0.4.1",
                         "dashboard_marker_found": True,
                         "login_marker_found": False,
                         "user_menu_found": True,
@@ -213,7 +263,7 @@ class MoodleDashboardIntegrationTests(unittest.TestCase):
                     }
                 ],
                 "diagnostics": {
-                    "parser_version": "0.3.5",
+                    "parser_version": "0.4.1",
                     "dashboard_marker_found": True,
                     "login_marker_found": False,
                     "user_menu_found": True,
@@ -321,7 +371,7 @@ class MoodleDashboardIntegrationTests(unittest.TestCase):
                     },
                 ],
                 "diagnostics": {
-                    "parser_version": "0.3.5",
+                    "parser_version": "0.4.1",
                     "dashboard_marker_found": True,
                     "login_marker_found": False,
                     "user_menu_found": True,
@@ -411,7 +461,7 @@ class MoodleDashboardIntegrationTests(unittest.TestCase):
                 "assignment_count": 0,
                 "assignments": [],
                 "diagnostics": {
-                    "parser_version": "0.3.5",
+                    "parser_version": "0.4.1",
                     "dashboard_marker_found": True,
                     "login_marker_found": False,
                     "user_menu_found": True,

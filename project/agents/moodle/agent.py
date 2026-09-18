@@ -41,8 +41,32 @@ def _supported_parser(value: object, minimum: tuple[int, int, int]) -> bool:
 
 def _navigation_performed(steps: list[str]) -> bool:
     return any(
-        step in {"portal_to_moodle", "moodle_fixed_route_to_dashboard"}
+        step in {
+            "portal_to_moodle",
+            "moodle_portal_sso_started",
+            "moodle_fixed_route_to_dashboard",
+        }
         for step in steps
+    )
+
+
+def _navigation_security(navigation: dict) -> dict:
+    return {
+        "portal_session_reused": bool(navigation.get("portal_session_reused")),
+        "moodle_session_reused": bool(navigation.get("moodle_session_reused")),
+        "sso_interactions_performed": bool(
+            navigation.get("sso_interactions_performed")
+        ),
+        "credentials_entered": False,
+        "mfa_interactions_performed": False,
+    }
+
+
+def _systems_contacted(navigation: dict) -> list[str]:
+    return (
+        ["moodle"]
+        if navigation.get("source_origin") == "https://moodle.hku.hk"
+        else ["portal", "moodle"]
     )
 
 
@@ -80,7 +104,7 @@ class MoodleDashboardInspectCapability(BaseCapability):
             if exc.code in {"COMMAND_NOT_ALLOWED", "PAGE_SCRIPT_UNAVAILABLE"}:
                 raise CapabilityError(
                     "EXTENSION_UPDATE_REQUIRED",
-                    "Reload HKU AGENTS Browser Bridge 0.12.3 and refresh HKU Portal and Moodle.",
+                    "Reload HKU AGENTS Browser Bridge 0.13.1 and refresh HKU Portal and Moodle.",
                 ) from exc
             raise CapabilityError(exc.code, str(exc)) from exc
         snapshot = navigation["snapshot"]
@@ -91,18 +115,17 @@ class MoodleDashboardInspectCapability(BaseCapability):
                 "The verified Moodle Dashboard is not ready for inspection.",
                 {"page_kind": snapshot.get("page_kind"), "diagnostics": diagnostics},
             )
-        if not _supported_parser(diagnostics.get("parser_version"), (0, 3, 2)):
+        if not _supported_parser(diagnostics.get("parser_version"), (0, 4, 1)):
             raise CapabilityError(
                 "EXTENSION_UPDATE_REQUIRED",
-                "Reload HKU AGENTS Browser Bridge 0.12.3 before Moodle inspection.",
+                "Reload HKU AGENTS Browser Bridge 0.13.1 before Moodle inspection.",
             )
         steps = navigation.get("steps", [])
         return {
             "read_only": True,
-            "systems_contacted": ["portal", "moodle"]
-            if binding.get("origin") != "https://moodle.hku.hk"
-            else ["moodle"],
+            "systems_contacted": _systems_contacted(navigation),
             "navigation_interactions_performed": _navigation_performed(steps),
+            **_navigation_security(navigation),
             "data_reads_performed": 1,
             "domain_writes_performed": 0,
             "moodle_writes_performed": 0,
@@ -175,15 +198,15 @@ class MoodleCourseListCapability(BaseCapability):
             if exc.code in {"COMMAND_NOT_ALLOWED", "PAGE_SCRIPT_UNAVAILABLE"}:
                 raise CapabilityError(
                     "EXTENSION_UPDATE_REQUIRED",
-                    "Reload HKU AGENTS Browser Bridge 0.12.3 and refresh HKU Portal and Moodle.",
+                    "Reload HKU AGENTS Browser Bridge 0.13.1 and refresh HKU Portal and Moodle.",
                 ) from exc
             raise CapabilityError(exc.code, str(exc)) from exc
 
         diagnostics = snapshot.get("diagnostics") or {}
-        if not _supported_parser(diagnostics.get("parser_version"), (0, 3, 2)):
+        if not _supported_parser(diagnostics.get("parser_version"), (0, 4, 1)):
             raise CapabilityError(
                 "EXTENSION_UPDATE_REQUIRED",
-                "Reload HKU AGENTS Browser Bridge 0.12.3 before listing Moodle courses.",
+                "Reload HKU AGENTS Browser Bridge 0.13.1 before listing Moodle courses.",
             )
         unparsed = int(diagnostics.get("unparsed_course_candidate_count", 0))
         if unparsed:
@@ -213,10 +236,9 @@ class MoodleCourseListCapability(BaseCapability):
             )
         return {
             "read_only": True,
-            "systems_contacted": ["portal", "moodle"]
-            if binding.get("origin") != "https://moodle.hku.hk"
-            else ["moodle"],
+            "systems_contacted": _systems_contacted(navigation),
             "navigation_interactions_performed": _navigation_performed(steps),
+            **_navigation_security(navigation),
             "data_reads_performed": 1,
             "domain_writes_performed": 0,
             "moodle_writes_performed": 0,
@@ -290,15 +312,15 @@ class MoodleUpcomingAssignmentsCapability(BaseCapability):
             if exc.code in {"COMMAND_NOT_ALLOWED", "PAGE_SCRIPT_UNAVAILABLE"}:
                 raise CapabilityError(
                     "EXTENSION_UPDATE_REQUIRED",
-                    "Reload HKU AGENTS Browser Bridge 0.12.3 and refresh HKU Portal and Moodle.",
+                    "Reload HKU AGENTS Browser Bridge 0.13.1 and refresh HKU Portal and Moodle.",
                 ) from exc
             raise CapabilityError(exc.code, str(exc)) from exc
 
         diagnostics = snapshot.get("diagnostics") or {}
-        if not _supported_parser(diagnostics.get("parser_version"), (0, 3, 5)):
+        if not _supported_parser(diagnostics.get("parser_version"), (0, 4, 1)):
             raise CapabilityError(
                 "EXTENSION_UPDATE_REQUIRED",
-                "Reload HKU AGENTS Browser Bridge 0.12.3 before reading Moodle assignments.",
+                "Reload HKU AGENTS Browser Bridge 0.13.1 before reading Moodle assignments.",
             )
         if int(diagnostics.get("unparsed_assignment_candidate_count", 0)):
             raise CapabilityError(
@@ -355,10 +377,9 @@ class MoodleUpcomingAssignmentsCapability(BaseCapability):
         steps = navigation.get("steps", [])
         return {
             "read_only": True,
-            "systems_contacted": ["portal", "moodle"]
-            if binding.get("origin") != "https://moodle.hku.hk"
-            else ["moodle"],
+            "systems_contacted": _systems_contacted(navigation),
             "navigation_interactions_performed": _navigation_performed(steps),
+            **_navigation_security(navigation),
             "data_reads_performed": 1,
             "domain_writes_performed": 0,
             "moodle_writes_performed": 0,

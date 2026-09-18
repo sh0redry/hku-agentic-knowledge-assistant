@@ -180,6 +180,8 @@ class MoodleParserDiagnostics(StrictMessage):
     timeline_marker_found: bool
     upcoming_marker_found: bool
     todo_marker_found: bool
+    sso_entry_candidate_count: int = Field(default=0, ge=0, le=20)
+    sso_entry_available: bool = False
 
 
 class MoodleDashboardSnapshot(BrowserTabState):
@@ -296,13 +298,19 @@ class MoodleNavigationResult(StrictMessage):
     source_page_kind: str = Field(min_length=1, max_length=40)
     target_origin: Literal["https://moodle.hku.hk"]
     target_page_kind: Literal["dashboard"]
+    portal_session_reused: bool = False
+    moodle_session_reused: bool = False
+    sso_interactions_performed: bool = False
+    credentials_entered: Literal[False] = False
+    mfa_interactions_performed: Literal[False] = False
     steps: list[Literal[
         "portal_to_moodle",
+        "moodle_portal_sso_started",
         "moodle_tab_reused",
         "moodle_dashboard_tab_reused",
         "moodle_fixed_route_to_dashboard",
         "target_already_open",
-    ]] = Field(min_length=1, max_length=2)
+    ]] = Field(min_length=1, max_length=4)
     snapshot: MoodleDashboardSnapshot
 
 

@@ -574,6 +574,7 @@ async function waitForWeeklyTimetableSnapshot(deadline, preferredTabId = null) {
 async function waitForMoodleDashboardSnapshot(deadline, preferredTabId = null) {
   let lastError = null;
   const dashboardNavigationTabIds = new Set();
+  const ssoNavigationTabIds = new Set();
   while (Date.now() < deadline) {
     const tabs = await queryMoodleTabs();
     tabs.sort((left, right) =>
@@ -590,14 +591,25 @@ async function waitForMoodleDashboardSnapshot(deadline, preferredTabId = null) {
           void sendHeartbeat();
           return {
             snapshot,
-            dashboardNavigationPerformed: dashboardNavigationTabIds.has(tab.id)
+            dashboardNavigationPerformed: dashboardNavigationTabIds.has(tab.id),
+            ssoInteractionPerformed: ssoNavigationTabIds.size > 0
           };
         }
         if (snapshot.logged_in === false) {
-          throw commandError(
-            "MOODLE_LOGIN_REQUIRED",
-            "Complete the HKU Portal User login and any MFA in the Moodle tab."
-          );
+          if (snapshot.page_kind === "login" && !ssoNavigationTabIds.has(tab.id)) {
+            await sendTabCommand(tab.id, "moodle.start_portal_sso");
+            ssoNavigationTabIds.add(tab.id);
+            lastError = commandError(
+              "MOODLE_SSO_IN_PROGRESS",
+              "The verified HKU Portal User SSO flow has started."
+            );
+          } else {
+            lastError = commandError(
+              "SSO_MANUAL_ACTION_REQUIRED",
+              "Complete any password, MFA, CAPTCHA, consent, or recovery prompt in Chrome."
+            );
+          }
+          continue;
         }
         if (
           snapshot.logged_in === true &&
@@ -617,11 +629,23 @@ async function waitForMoodleDashboardSnapshot(deadline, preferredTabId = null) {
           );
         }
       } catch (error) {
-        if (error.code === "MOODLE_LOGIN_REQUIRED") throw error;
-        lastError = error;
+        if (["MOODLE_SSO_ENTRY_NOT_FOUND", "MOODLE_SSO_ENTRY_AMBIGUOUS"].includes(error.code)) {
+          lastError = commandError(
+            "SSO_MANUAL_ACTION_REQUIRED",
+            "Use the HKU Portal User login control in Moodle, then complete any required authentication prompt."
+          );
+        } else {
+          lastError = error;
+        }
       }
     }
     await delay(300);
+  }
+  if (ssoNavigationTabIds.size > 0 && lastError?.code === "MOODLE_SSO_IN_PROGRESS") {
+    throw commandError(
+      "SSO_MANUAL_ACTION_REQUIRED",
+      "The HKU SSO flow did not return to Moodle; complete any visible authentication prompt in Chrome."
+    );
   }
   throw commandError(
     lastError?.code || "MOODLE_NAVIGATION_TIMEOUT",
@@ -800,7 +824,9 @@ async function openWeeklyTimetable() {
 
 async function openMoodleDashboard() {
   const deadline = Date.now() + NAVIGATION_DEADLINE_MS;
-  const source = await inspectBoundHkuTab();
+  let source = await inspectBoundHkuTab();
+  let portalTabId = PORTAL_ORIGINS.has(source.origin) ? boundTabId : null;
+  let portalSessionReused = source.logged_in === true && PORTAL_ORIGINS.has(source.origin);
   if (
     source.origin === MOODLE_ORIGIN &&
     source.logged_in === true &&
@@ -814,6 +840,11 @@ async function openMoodleDashboard() {
       source_page_kind: source.page_kind,
       target_origin: MOODLE_ORIGIN,
       target_page_kind: "dashboard",
+      portal_session_reused: false,
+      moodle_session_reused: true,
+      sso_interactions_performed: false,
+      credentials_entered: false,
+      mfa_interactions_performed: false,
       steps: ["target_already_open"],
       snapshot: source
     };
@@ -834,21 +865,28 @@ async function openMoodleDashboard() {
       source_page_kind: source.page_kind,
       target_origin: MOODLE_ORIGIN,
       target_page_kind: "dashboard",
+      portal_session_reused: false,
+      moodle_session_reused: true,
+      sso_interactions_performed: outcome.ssoInteractionPerformed,
+      credentials_entered: false,
+      mfa_interactions_performed: false,
       steps: ["moodle_fixed_route_to_dashboard"],
       snapshot: outcome.snapshot
     };
   }
-  if (source.origin === MOODLE_ORIGIN && source.logged_in === false) {
-    throw commandError(
-      "MOODLE_LOGIN_REQUIRED",
-      "Complete the HKU Portal User login and any MFA in the Moodle tab."
-    );
-  }
   if (!PORTAL_ORIGINS.has(source.origin) || source.page_kind !== "portal_home") {
-    throw commandError(
-      "PORTAL_LOGIN_REQUIRED",
-      "Open and authenticate HKU Portal before inspecting Moodle Dashboard."
-    );
+    const portalTab = await findAuthenticatedPortalTab();
+    if (!portalTab) {
+      throw commandError(
+        source.origin === MOODLE_ORIGIN ? "MOODLE_LOGIN_REQUIRED" : "PORTAL_LOGIN_REQUIRED",
+        "Open HKU Portal and complete login/MFA before continuing to Moodle."
+      );
+    }
+    source = await sendTabCommand(portalTab.id, "hku.inspect_portal");
+    portalTabId = portalTab.id;
+    portalSessionReused = true;
+    boundTabId = portalTab.id;
+    lastSnapshot = source;
   }
   const existing = await findAuthenticatedMoodleSnapshot(true);
   if (existing) {
@@ -864,6 +902,11 @@ async function openMoodleDashboard() {
         source_page_kind: source.page_kind,
         target_origin: MOODLE_ORIGIN,
         target_page_kind: "dashboard",
+        portal_session_reused: portalSessionReused,
+        moodle_session_reused: true,
+        sso_interactions_performed: outcome.ssoInteractionPerformed,
+        credentials_entered: false,
+        mfa_interactions_performed: false,
         steps: ["moodle_tab_reused", "moodle_fixed_route_to_dashboard"],
         snapshot: outcome.snapshot
       };
@@ -876,14 +919,22 @@ async function openMoodleDashboard() {
       source_page_kind: source.page_kind,
       target_origin: MOODLE_ORIGIN,
       target_page_kind: "dashboard",
+      portal_session_reused: portalSessionReused,
+      moodle_session_reused: true,
+      sso_interactions_performed: false,
+      credentials_entered: false,
+      mfa_interactions_performed: false,
       steps: ["moodle_dashboard_tab_reused"],
       snapshot: existing
     };
   }
-  const portalTabId = boundTabId;
-  await sendTabCommand(portalTabId, "hku.open_moodle");
+  const portalNavigation = await sendTabCommand(portalTabId, "hku.open_moodle");
   const outcome = await waitForMoodleDashboardSnapshot(deadline, portalTabId);
   const steps = ["portal_to_moodle"];
+  const ssoInteractionsPerformed = Boolean(
+    portalNavigation.portal_sso_entry_clicked || outcome.ssoInteractionPerformed
+  );
+  if (ssoInteractionsPerformed) steps.push("moodle_portal_sso_started");
   if (outcome.dashboardNavigationPerformed) steps.push("moodle_fixed_route_to_dashboard");
   return {
     read_only: true,
@@ -893,6 +944,11 @@ async function openMoodleDashboard() {
     source_page_kind: source.page_kind,
     target_origin: MOODLE_ORIGIN,
     target_page_kind: "dashboard",
+    portal_session_reused: portalSessionReused,
+    moodle_session_reused: false,
+    sso_interactions_performed: ssoInteractionsPerformed,
+    credentials_entered: false,
+    mfa_interactions_performed: false,
     steps,
     snapshot: outcome.snapshot
   };

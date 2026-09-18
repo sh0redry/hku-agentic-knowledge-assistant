@@ -1032,7 +1032,7 @@ class SafetyFrameworkTests(unittest.TestCase):
                 "http://127.0.0.1/*",
             ],
         )
-        self.assertEqual(manifest["version"], "0.12.3")
+        self.assertEqual(manifest["version"], "0.13.1")
 
         node = shutil.which("node")
         if node is None:

@@ -27,7 +27,11 @@ structured Timeline, Upcoming, and HKU To-do rows for a bounded future window an
 does not persist private rows. It does not open activity pages or read grades,
 participants, messages, submissions, or submission status. The local HKU AGENTS app and Chrome extension own deterministic Portal
 navigation and must be running separately. Login, password entry, CAPTCHA, and
-MFA always remain manual.
+MFA always remain manual. After Portal authentication, Browser Bridge `0.13.1`
+may continue through exact allow-listed Portal/Moodle SSO controls automatically;
+it never reads or submits credentials and stops for any human authentication
+challenge. Moodle tool results report session reuse and SSO navigation separately
+from credential and MFA interaction.
 
 The daily briefing never refreshes a source and never interacts with the browser.
 Run timetable synchronization, Moodle upcoming assignments, and Portal notice
@@ -69,7 +73,7 @@ From the repository root, with the `dsh` CLI installed:
 cd integrations/deepseek_harness
 npm run build
 npm pack
-dsh plugin --profile web add ./dsh-hku-agents-0.11.0.tgz
+dsh plugin --profile web add ./dsh-hku-agents-0.12.0.tgz
 dsh --profile web --dump-config
 dsh --profile web
 ```

@@ -38,9 +38,11 @@ forms.
    authentication, then verifies the cart page before returning.
 9. To test the Phase C slice, return to the authenticated Portal tab, bind it,
    and run **Open and inspect Moodle Dashboard** from the GUI's **Moodle** tab.
-   Complete any Moodle login or MFA step yourself, then retry the inspection.
-   If SSO lands on the authenticated Moodle home page, the bridge follows only
-   the fixed `https://moodle.hku.hk/my/` Dashboard route before inspecting it.
+   The bridge reuses the authenticated Portal tab, prefers its verified Moodle
+   SSO entry, and may activate the exact HKU Portal User SSO control on Moodle's
+   login page. Password, MFA, CAPTCHA, consent, and recovery prompts remain manual.
+   If SSO lands on the authenticated Moodle home page, the bridge follows only the
+   fixed `https://moodle.hku.hk/my/` Dashboard route before inspecting it.
 10. To test Portal News, keep the authenticated Portal home page open and use
     **Read visible Portal notices**. The bridge reads structured visible cards,
     performs no navigation, and never opens a notice detail page.
@@ -75,7 +77,13 @@ does not grant HKU AGENTS a read or write capability for that page.
   course values are rejected. A term must match an exact SIS term label.
 - The Portal entry click is restricted to a uniquely resolved, allow-listed SIS
   or Moodle destination; unrelated Portal controls cannot be clicked. If both
-  `Moodle` and `My eLearning` are present, the exact `Moodle` entry is preferred.
+  `Moodle` and `My eLearning` are present, the exact `Moodle` entry is preferred;
+  a Portal-owned Moodle SSO destination outranks a direct Moodle URL.
+- On the verified Moodle login page, only an exact allow-listed HKU Portal User
+  SSO control may be activated. The bridge never reads, fills, or submits a
+  credential field and never interacts with MFA, CAPTCHA, consent, or recovery.
+- Moodle navigation rediscovers an authenticated Portal tab from the multi-system
+  registry instead of assuming that the last globally bound tab is still Portal.
 - Navigation stops when login is incomplete, the target is missing or ambiguous,
   an origin differs, or the verified destination does not become ready in time.
 - PeopleSoft `errorPg=err` tabs are classified as SSO failures and are never
@@ -93,7 +101,10 @@ does not grant HKU AGENTS a read or write capability for that page.
 - Weekly parser `0.2.1` recognizes absolutely positioned course cards from their
   SUN-SAT column geometry. It derives Sem 1/2 only from unambiguous displayed-week
   months and reports June-August as undetermined.
-- Moodle parser `0.3.5` recognizes login and authenticated Dashboard state. Its
+- Moodle parser `0.4.1` recognizes login and authenticated Dashboard state. Its
+  login diagnostics expose only the count and availability of verified HKU Portal
+  SSO controls. SSO results distinguish Portal/Moodle session reuse and SSO
+  navigation from credential or MFA interaction, both of which remain false.
   diagnostic command releases only boolean markers and aggregate counts; its
   separately named course command releases Moodle course ID, name, normalized
   code/section/academic year when present, and conservative state. Its assignment

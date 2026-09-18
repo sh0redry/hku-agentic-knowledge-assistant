@@ -217,14 +217,19 @@ remains discovery-only. Neither system exposes a domain write.
 After manual Portal login/MFA, keep the Portal tab active and use the GUI
 **Moodle** tab or call `POST /api/v1/integration/moodle/dashboard/inspect` with
 an empty JSON object. The browser bridge selects only a validated Portal Moodle
-entry or reuses an already authenticated `https://moodle.hku.hk` Dashboard.
+entry or reuses an already authenticated `https://moodle.hku.hk` Dashboard. If
+Moodle presents its verified HKU Portal User SSO control, the bridge may activate
+that navigation control automatically. It never reads or submits credentials and
+stops for any password, MFA, CAPTCHA, consent, or recovery prompt.
 The result explicitly reports `navigation_interactions_performed`,
 `data_reads_performed`, `moodle_writes_performed`, `course_data_read`, and
 `assignment_data_read`. For this first Phase C task, the last three privacy/write
 indicators are respectively `0`, `false`, and `false`.
 
-Moodle login and MFA remain manual. Unknown origins, ambiguous Portal entries,
-login pages, and unverified Dashboard states fail closed.
+Portal login and all authentication challenges remain manual. Unknown origins,
+ambiguous SSO controls, and unverified Dashboard states fail closed. Results
+separately report Portal/Moodle session reuse, SSO navigation, credential entry,
+MFA interaction, and Moodle writes.
 
 `POST /api/v1/integration/moodle/courses/list` takes an empty object and reads
 only course cards currently exposed in the authenticated Dashboard DOM. Its

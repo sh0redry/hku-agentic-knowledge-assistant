@@ -125,7 +125,10 @@ in process memory and excluded from SQLite task history. Browser navigation is
 reported separately from Moodle writes, which remain fixed at zero. Full HTML
 remains unavailable. The explicit upcoming-assignment action reads bounded
 Timeline, Upcoming, and HKU To-do deadline rows; it does not open activities or
-read submission status.
+read submission status. Browser Bridge `0.13.1` can rediscover the authenticated
+Portal tab and continue through an exact allow-listed HKU Portal User SSO control
+when Moodle presents one. Passwords, MFA, CAPTCHA, consent, and recovery remain
+manual and are never read or operated by HKU AGENTS.
 
 Phase D now includes a first cache-only `briefing.today` slice. It combines the
 current process-memory weekly timetable, Moodle deadline, and Portal News caches

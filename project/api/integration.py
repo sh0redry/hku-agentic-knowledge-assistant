@@ -221,10 +221,12 @@ def create_integration_router(expected_token: str) -> APIRouter:
             }
             error_code = task_error.get("code", "TASK_FAILED")
             recovery = (
-                "Reload the unpacked HKU AGENTS Browser Bridge 0.12.3, then refresh HKU Portal and Moodle."
+                "Reload the unpacked HKU AGENTS Browser Bridge 0.13.1, then refresh HKU Portal and Moodle."
                 if error_code == "EXTENSION_UPDATE_REQUIRED"
-                else "Complete the HKU Portal User login and any MFA in Moodle, then retry."
+                else "Open HKU Portal and complete login/MFA, then retry the Moodle tool."
                 if error_code == "MOODLE_LOGIN_REQUIRED"
+                else "Complete the visible password, MFA, CAPTCHA, consent, or recovery prompt in Chrome, then retry."
+                if error_code == "SSO_MANUAL_ACTION_REQUIRED"
                 else "Keep the authenticated Moodle Dashboard open and report the count-only parser diagnostics."
                 if error_code == "MOODLE_COURSE_PARSE_INCOMPLETE"
                 else "Keep the authenticated Moodle Dashboard open and report the assignment parser diagnostics."
@@ -337,7 +339,7 @@ def create_integration_router(expected_token: str) -> APIRouter:
             }
             error_code = task_error.get("code", "TASK_FAILED")
             recovery = (
-                "Reload HKU AGENTS Browser Bridge 0.12.3 and refresh HKU Portal."
+                "Reload HKU AGENTS Browser Bridge 0.13.1 and refresh HKU Portal."
                 if error_code == "EXTENSION_UPDATE_REQUIRED"
                 else "Keep the authenticated HKU Portal home page open and report the count-only parser diagnostics."
                 if error_code == "PORTAL_NOTICE_PARSE_INCOMPLETE"

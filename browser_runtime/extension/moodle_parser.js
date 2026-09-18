@@ -2,6 +2,17 @@
   "use strict";
 
   const MOODLE_ORIGIN = "https://moodle.hku.hk";
+  const PORTAL_ORIGINS = new Set([
+    "https://hkuportal.hku.hk",
+    "https://studentportal.hku.hk"
+  ]);
+  const PORTAL_SSO_LABELS = new Set([
+    "hku portal user",
+    "hku portal user login",
+    "log in with hku portal",
+    "login with hku portal",
+    "hku portal login"
+  ]);
 
   function normalizeText(value) {
     return String(value || "").replace(/\s+/g, " ").trim();
@@ -861,6 +872,99 @@
     };
   }
 
+  function portalSsoControlLabels(element) {
+    return [
+      element?.getAttribute?.("aria-label"),
+      element?.getAttribute?.("title"),
+      element?.getAttribute?.("value"),
+      element?.textContent
+    ]
+      .map(value => normalizeText(value).toLowerCase())
+      .filter(Boolean);
+  }
+
+  function approvedPortalSsoDestination(element, locationObject) {
+    const raw = element?.getAttribute?.("href") ||
+      element?.getAttribute?.("formaction");
+    if (!raw || /^javascript:/i.test(raw)) return null;
+    try {
+      const base = locationObject.href || `${locationObject.origin}${pathOf(locationObject)}`;
+      const destination = new URL(raw, base);
+      if (destination.protocol !== "https:") return null;
+      const path = destination.pathname.toLowerCase();
+      if (PORTAL_ORIGINS.has(destination.origin)) {
+        return /sso|cas|moodle|login/.test(path) ? destination : null;
+      }
+      if (destination.origin !== MOODLE_ORIGIN) return null;
+      if (path.startsWith("/auth/")) return destination;
+      if (path === "/login/index.php") {
+        const marker = `${destination.searchParams.get("auth") || ""} ` +
+          `${destination.searchParams.get("provider") || ""} ` +
+          `${destination.searchParams.get("wantsurl") || ""}`;
+        return /cas|saml|oidc|portal|sso/i.test(marker) ? destination : null;
+      }
+      return null;
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  function portalSsoCandidates(documentObject, locationObject) {
+    const candidates = [];
+    const controls = documentObject.querySelectorAll(
+      "a, button, input[type='submit'], input[type='button'], [role='button'], [role='link']"
+    );
+    for (const element of controls) {
+      const labels = portalSsoControlLabels(element);
+      const label = labels.find(value => PORTAL_SSO_LABELS.has(value));
+      if (!label) continue;
+      const destination = approvedPortalSsoDestination(element, locationObject);
+      const tag = String(element?.tagName || "").toLowerCase();
+      const exactLoginControl = ["a", "button", "input"].includes(tag) ||
+        ["button", "link"].includes(String(element?.getAttribute?.("role") || "").toLowerCase());
+      if (!destination && !exactLoginControl) continue;
+      candidates.push({
+        element,
+        key: destination?.href || `inline:${tag}:${label}`
+      });
+    }
+    return candidates;
+  }
+
+  function startPortalSso(documentObject, locationObject, scheduler) {
+    const snapshot = inspect(documentObject, locationObject);
+    if (snapshot.page_kind !== "login" || snapshot.logged_in !== false) {
+      const error = new Error("The verified Moodle login page is required before starting SSO.");
+      error.code = "WRONG_MOODLE_PAGE";
+      throw error;
+    }
+    const candidates = portalSsoCandidates(documentObject, locationObject);
+    const unique = new Map();
+    for (const candidate of candidates) {
+      if (!unique.has(candidate.key)) unique.set(candidate.key, candidate);
+    }
+    if (unique.size === 0) {
+      const error = new Error("The verified HKU Portal User SSO control was not found.");
+      error.code = "MOODLE_SSO_ENTRY_NOT_FOUND";
+      throw error;
+    }
+    if (unique.size > 1) {
+      const error = new Error("Multiple different HKU Portal SSO controls were found; navigation stopped safely.");
+      error.code = "MOODLE_SSO_ENTRY_AMBIGUOUS";
+      throw error;
+    }
+    const candidate = [...unique.values()][0];
+    const defer = scheduler || ((callback) => setTimeout(callback, 50));
+    defer(() => candidate.element.click());
+    return {
+      navigation_started: true,
+      sso_interaction_performed: true,
+      credentials_entered: false,
+      mfa_interactions_performed: false,
+      moodle_write_requests_sent: 0
+    };
+  }
+
   function inspect(documentObject, locationObject) {
     if (!locationObject || locationObject.origin !== MOODLE_ORIGIN) {
       const error = new Error("The active page is not the allowed HKU Moodle origin.");
@@ -895,6 +999,9 @@
               ? "home"
               : "unknown";
     const authenticated = ["dashboard", "course", "home"].includes(pageKind);
+    const ssoCandidates = loginMarker
+      ? portalSsoCandidates(documentObject, locationObject)
+      : [];
     return {
       bound: true,
       origin: MOODLE_ORIGIN,
@@ -906,14 +1013,16 @@
       schedule_course_count: 0,
       available_terms: [],
       diagnostics: {
-        parser_version: "0.3.5",
+        parser_version: "0.4.1",
         dashboard_marker_found: dashboardMarker,
         login_marker_found: loginMarker,
         user_menu_found: userMenuMarker,
         course_link_candidate_count: courseCandidateNodes(documentObject).length,
         timeline_marker_found: /\btimeline\b/.test(lower),
         upcoming_marker_found: /upcoming events|upcoming/.test(lower),
-        todo_marker_found: /\bto\s*-?\s*do\b|\btodo\b|action events/.test(lower)
+        todo_marker_found: /\bto\s*-?\s*do\b|\btodo\b|action events/.test(lower),
+        sso_entry_candidate_count: ssoCandidates.length,
+        sso_entry_available: ssoCandidates.length > 0
       }
     };
   }
@@ -944,7 +1053,8 @@
     parseCourses,
     parseUpcomingAssignments,
     parseMoodleDisplayDate,
-    courseIdentity
+    courseIdentity,
+    startPortalSso
   };
   root.HKUMoodleParser = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;

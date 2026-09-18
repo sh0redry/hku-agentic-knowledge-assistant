@@ -49,11 +49,12 @@ const moodleEntry = link(
   "Moodle",
   "https://hkuportal.hku.hk/ssoAccess.html?service=moodle"
 );
+const directMoodleEntry = link("Moodle", "https://moodle.hku.hk/");
 const eLearningEntry = link(
   "My eLearning",
   "https://hkuportal.hku.hk/ssoAccess.html?service=elearning"
 );
-const portalDocument = documentWith([sisEntry, moodleEntry, eLearningEntry]);
+const portalDocument = documentWith([sisEntry, directMoodleEntry, moodleEntry, eLearningEntry]);
 const portalSnapshot = navigation.inspectPortal(portalDocument, portalLocation);
 assert.equal(portalSnapshot.page_kind, "portal_home");
 assert.equal(portalSnapshot.logged_in, true);
@@ -193,10 +194,28 @@ const moodleNavigation = navigation.openMoodleFromPortal(
 assert.equal(moodleNavigation.navigation_only, true);
 assert.equal(moodleNavigation.moodle_write_requests_sent, 0);
 assert.equal(moodleNavigation.target_origin, "https://moodle.hku.hk");
+assert.equal(moodleNavigation.portal_sso_entry_clicked, true);
 assert.equal(moodleEntry.clicked, 0);
 queuedMoodleNavigation();
 assert.equal(moodleEntry.clicked, 1);
+assert.equal(directMoodleEntry.clicked, 0);
 assert.equal(eLearningEntry.clicked, 0);
+
+let queuedPortalOwnedMoodleNavigation = null;
+const directOnlyMoodle = link("Moodle", "https://moodle.hku.hk/");
+const portalOwnedElearning = link(
+  "My eLearning",
+  "https://hkuportal.hku.hk/ssoAccess.html?service=elearning"
+);
+const portalOwnedNavigation = navigation.openMoodleFromPortal(
+  documentWith([directOnlyMoodle, portalOwnedElearning]),
+  portalLocation,
+  action => { queuedPortalOwnedMoodleNavigation = action; }
+);
+assert.equal(portalOwnedNavigation.portal_sso_entry_clicked, true);
+queuedPortalOwnedMoodleNavigation();
+assert.equal(directOnlyMoodle.clicked, 0);
+assert.equal(portalOwnedElearning.clicked, 1);
 
 const externalMoodleEntry = link("Moodle", "https://evil.example/collect");
 assert.throws(

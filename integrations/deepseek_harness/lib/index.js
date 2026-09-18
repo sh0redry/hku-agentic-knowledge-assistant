@@ -221,7 +221,7 @@ export function apply(ctx, config) {
     }));
     ctx.tools.register(defineTool({
         name: 'hku_moodle_inspect_dashboard',
-        description: 'Open Moodle through an authenticated HKU Portal tab and verify only login state and Dashboard diagnostics. It does not read course names, assignments, grades, messages, or submissions, and performs no Moodle write.',
+        description: 'After the user manually authenticates HKU Portal, continue through only verified HKU/Moodle SSO controls and inspect Dashboard login state. The tool may perform restricted SSO navigation but never reads, fills, or submits credentials and never operates MFA, CAPTCHA, consent, or recovery. Inspect portal_session_reused, moodle_session_reused, sso_interactions_performed, credentials_entered, and mfa_interactions_performed. It reads no course names or assignments and performs no Moodle write.',
         parameters: {},
         output: envelopeOutput,
         timeoutMs: config.timeoutMs,
@@ -231,7 +231,7 @@ export function apply(ctx, config) {
     }));
     ctx.tools.register(defineTool({
         name: 'hku_moodle_list_courses',
-        description: 'Open the authenticated HKU Moodle Dashboard and list only visible course membership identifiers and names. Private course rows remain process-local and are not persisted in task history. It does not read assignments, grades, participants, messages, or submissions, and performs no Moodle write.',
+        description: 'After manual HKU Portal authentication, continue through verified SSO controls when needed, then list only visible Moodle course membership identifiers and names. Restricted SSO navigation is distinct from credential/MFA interaction, which always remains false. Private course rows remain process-local. It does not read assignments, grades, participants, messages, or submissions and performs no Moodle write.',
         parameters: {},
         output: envelopeOutput,
         timeoutMs: config.timeoutMs,
@@ -241,7 +241,7 @@ export function apply(ctx, config) {
     }));
     ctx.tools.register(defineTool({
         name: 'hku_moodle_upcoming_assignments',
-        description: 'Read assignment and activity deadlines currently visible in the authenticated Moodle Dashboard for a bounded 1-90 day future window. Private titles and dates remain process-local and are not persisted in task history. It does not open activity pages or read grades, participants, submissions, or submission status, and performs no Moodle write.',
+        description: 'After manual HKU Portal authentication, continue through verified SSO controls when needed and read Dashboard deadlines for a bounded 1-90 day future window. Restricted SSO navigation may occur, but credential entry and MFA interaction never do. Private titles and dates remain process-local. It does not open activity pages or read grades, participants, submissions, or submission status and performs no Moodle write.',
         parameters: {
             days_ahead: {
                 type: 'number',
