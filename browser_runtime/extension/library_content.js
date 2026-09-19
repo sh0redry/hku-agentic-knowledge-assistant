@@ -1,11 +1,13 @@
 (function () {
   "use strict";
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    if (!["library.research.read_results", "library.spaces.read_availability"].includes(message?.command)) return false;
+    if (!["library.research.read_results", "library.research.read_item", "library.research.read_access_options", "library.spaces.read_availability"].includes(message?.command)) return false;
     try {
       const data = message.command === "library.research.read_results"
         ? self.HKULibraryParser.parseResearch(document, location, message.payload?.limit)
-        : self.HKULibraryParser.parseSpaceAvailability(document, location);
+        : message.command.startsWith("library.research.read_")
+          ? self.HKULibraryParser.parseResearchDetail(document, location)
+          : self.HKULibraryParser.parseSpaceAvailability(document, location);
       sendResponse({ ok: true, data });
     } catch (error) {
       sendResponse({ ok: false, error: { code: String(error.code || "LIBRARY_INSPECTION_FAILED"), message: String(error.message || error) } });

@@ -53,13 +53,49 @@ class LibraryIntegrationTests(unittest.TestCase):
                     "detail_url": "https://julac-hku.primo.exlibrisgroup.com/discovery/fulldisplay?docid=alma991234&vid=852JULAC_HKU%3AHKU&lang=en",
                 }],
                 "diagnostics": {
-                    "parser_version": "0.1.2",
+                    "parser_version": "0.2.2",
                     "results_marker_found": True,
                     "empty_results_marker_found": False,
                     "result_candidate_count": 1 + incomplete,
                     "parsed_result_count": 1,
                     "incomplete_result_candidate_count": incomplete,
                     "unsafe_result_url_candidate_count": 0,
+                },
+            },
+        }
+
+    def research_item_navigation(self) -> dict:
+        return {
+            "read_only": True,
+            "navigation_only": True,
+            "library_write_requests_sent": 0,
+            "navigation_interactions_performed": True,
+            "licensed_full_text_opened": 0,
+            "target_origin": "https://julac-hku.primo.exlibrisgroup.com",
+            "target_page_kind": "catalog_item",
+            "steps": ["library_fixed_route_to_research_item"],
+            "snapshot": {
+                "origin": "https://julac-hku.primo.exlibrisgroup.com",
+                "logged_in": None,
+                "page_kind": "catalog_item",
+                "record_id": "alma991234",
+                "title": "Artificial intelligence",
+                "resource_type": "book",
+                "metadata": [{"label": "Publication", "value": "Hong Kong, 2026"}],
+                "access_options": [
+                    {"kind": "online", "availability": "available", "label": "Online access"},
+                    {"kind": "physical", "availability": "available", "label": "Available at Main Library"},
+                ],
+                "detail_url": "https://julac-hku.primo.exlibrisgroup.com/discovery/fulldisplay?docid=alma991234&vid=852JULAC_HKU%3AHKU&lang=en",
+                "diagnostics": {
+                    "parser_version": "0.2.2",
+                    "detail_marker_found": True,
+                    "record_id_found": True,
+                    "title_found": True,
+                    "metadata_field_count": 1,
+                    "access_option_candidate_count": 2,
+                    "parsed_access_option_count": 2,
+                    "unsafe_access_link_candidate_count": 1,
                 },
             },
         }
@@ -106,6 +142,47 @@ class LibraryIntegrationTests(unittest.TestCase):
         self.assertEqual(response["error"]["code"], "LIBRARY_LOGIN_REQUIRED")
         self.assertIn("manual", response["error"]["recovery"].lower())
 
+    def test_research_item_returns_bibliography_without_persisting_details(self):
+        connector = self.container.connectors["sis_browser"]
+        connector.read_library_research_item = AsyncMock(
+            return_value=self.research_item_navigation()
+        )
+        response = self.client.post(
+            "/api/v1/integration/library/research/item",
+            headers=self.headers,
+            json={"record_id": "alma991234"},
+        ).json()
+        self.assertTrue(response["ok"])
+        self.assertEqual(response["result"]["licensed_full_text_opened"], 0)
+        self.assertEqual(response["result"]["metadata"][0]["label"], "Publication")
+        stored = self.container.store.get_task(response["task"]["id"])
+        self.assertFalse(stored.result["private_item_details_persisted"])
+        self.assertNotIn("Hong Kong, 2026", str(stored.result))
+
+    def test_research_access_options_suppress_external_links(self):
+        connector = self.container.connectors["sis_browser"]
+        connector.read_library_research_access_options = AsyncMock(
+            return_value=self.research_item_navigation()
+        )
+        response = self.client.post(
+            "/api/v1/integration/library/research/access-options",
+            headers=self.headers,
+            json={"record_id": "alma991234"},
+        ).json()
+        self.assertTrue(response["ok"])
+        self.assertEqual(response["result"]["access_option_count"], 2)
+        self.assertEqual(response["result"]["external_access_links_returned"], 0)
+        self.assertNotIn("url", response["result"]["access_options"][0])
+
+    def test_research_record_id_rejects_urls_and_query_parameters(self):
+        response = self.client.post(
+            "/api/v1/integration/library/research/item",
+            headers=self.headers,
+            json={"record_id": "https://example.test/?token=secret"},
+        ).json()
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["error"]["code"], "INVALID_REQUEST")
+
     def test_space_availability_has_zero_booking_writes(self):
         connector = self.container.connectors["sis_browser"]
         connector.search_library_space_availability = AsyncMock(return_value={
@@ -126,7 +203,7 @@ class LibraryIntegrationTests(unittest.TestCase):
                 "available_slot_count": 1,
                 "available_slots": [{"floor": "4/F", "room": "Study Room A", "start_time": "09:00", "end_time": "10:30", "status": "available"}],
                 "diagnostics": {
-                    "parser_version": "0.1.2",
+                    "parser_version": "0.2.2",
                     "availability_marker_found": True,
                     "availability_legend_found": True,
                     "booked_legend_found": True,

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "HKU AGENTS Multi-System Browser Bridge",
-  "version": "0.14.2",
+  "version": "0.15.2",
   "description": "Restricted local navigation and read-only multi-system discovery bridge for HKU Portal services.",
   "minimum_chrome_version": "116",
   "permissions": ["storage"],

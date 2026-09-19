@@ -39,6 +39,8 @@ class BrowserCommandName(str, Enum):
     LIST_MOODLE_COURSES = "moodle.list_courses"
     LIST_MOODLE_UPCOMING_ASSIGNMENTS = "moodle.list_upcoming_assignments"
     SEARCH_LIBRARY_RESEARCH = "library.research.search"
+    READ_LIBRARY_RESEARCH_ITEM = "library.research.item"
+    READ_LIBRARY_RESEARCH_ACCESS_OPTIONS = "library.research.access_options"
     SEARCH_LIBRARY_SPACE_AVAILABILITY = "library.spaces.search_availability"
 
 

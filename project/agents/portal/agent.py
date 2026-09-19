@@ -72,7 +72,7 @@ class PortalNoticeListCapability(BaseCapability):
             if exc.code in {"COMMAND_NOT_ALLOWED", "PAGE_SCRIPT_UNAVAILABLE"}:
                 raise CapabilityError(
                     "EXTENSION_UPDATE_REQUIRED",
-                    "Reload HKU AGENTS Browser Bridge 0.14.2 and refresh HKU Portal.",
+                    "Reload HKU AGENTS Browser Bridge 0.15.2 and refresh HKU Portal.",
                 ) from exc
             raise CapabilityError(exc.code, str(exc)) from exc
 
@@ -80,7 +80,7 @@ class PortalNoticeListCapability(BaseCapability):
         if not _supported_parser(diagnostics.get("parser_version"), (0, 1, 3)):
             raise CapabilityError(
                 "EXTENSION_UPDATE_REQUIRED",
-                "Reload HKU AGENTS Browser Bridge 0.14.2 before reading Portal notices.",
+                "Reload HKU AGENTS Browser Bridge 0.15.2 before reading Portal notices.",
             )
         if int(diagnostics.get("unparsed_notice_candidate_count", 0)):
             raise CapabilityError(

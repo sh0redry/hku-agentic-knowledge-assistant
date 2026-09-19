@@ -40,6 +40,8 @@ const ALLOWED_COMMANDS = new Set([
   "moodle.list_courses",
   "moodle.list_upcoming_assignments",
   "library.research.search",
+  "library.research.item",
+  "library.research.access_options",
   "library.spaces.search_availability"
 ]);
 const NAVIGATION_DEADLINE_MS = 30000;
@@ -235,6 +237,18 @@ function libraryResearchUrl(payload) {
   return url.toString();
 }
 
+function libraryResearchDetailUrl(payload) {
+  const recordId = String(payload?.record_id || "").trim();
+  if (!/^[A-Za-z0-9_.:-]{3,120}$/.test(recordId)) {
+    throw commandError("INVALID_INPUT", "Library record_id must be a stable Find@HKUL identifier.");
+  }
+  const url = new URL("https://julac-hku.primo.exlibrisgroup.com/discovery/fulldisplay");
+  url.searchParams.set("docid", recordId);
+  url.searchParams.set("vid", "852JULAC_HKU:HKU");
+  url.searchParams.set("lang", "en");
+  return url.toString();
+}
+
 const SPACE_ROUTES = Object.freeze({
   single_study_room: "https://booking.lib.hku.hk/FView.aspx?ftype=31&lib=3",
   studio_editing_room: "https://booking.lib.hku.hk/FView.aspx?ftype=34&lib=3",
@@ -251,11 +265,17 @@ async function waitForLibraryRead(tabId, command, payload, deadline) {
       const ready = command === "library.research.read_results"
         ? diagnostics.results_marker_found === true &&
           (diagnostics.result_candidate_count > 0 || diagnostics.empty_results_marker_found === true)
-        : diagnostics.availability_marker_found === true;
+        : command === "library.research.read_item"
+          ? diagnostics.detail_marker_found === true && diagnostics.metadata_field_count > 0
+          : command === "library.research.read_access_options"
+            ? diagnostics.detail_marker_found === true && diagnostics.parsed_access_option_count > 0
+          : diagnostics.availability_marker_found === true;
       if (ready) {
         const signature = command === "library.research.read_results"
           ? `${diagnostics.result_candidate_count}|${diagnostics.parsed_result_count}|${diagnostics.incomplete_result_candidate_count}`
-          : `${snapshot.date || ""}|${diagnostics.slot_candidate_count}|${diagnostics.parsed_available_slot_count}`;
+          : command === "library.research.read_item" || command === "library.research.read_access_options"
+            ? `${snapshot.record_id || ""}|${snapshot.title || ""}|${diagnostics.metadata_field_count}|${diagnostics.parsed_access_option_count}`
+            : `${snapshot.date || ""}|${diagnostics.slot_candidate_count}|${diagnostics.parsed_available_slot_count}`;
         if (signature === previousReadySignature) return snapshot;
         previousReadySignature = signature;
       } else {
@@ -267,7 +287,11 @@ async function waitForLibraryRead(tabId, command, payload, deadline) {
     }
     await delay(400);
   }
-  const code = command === "library.research.read_results" ? "LIBRARY_SEARCH_NOT_READY" : "LIBRARY_SPACE_PAGE_NOT_READY";
+  const code = command === "library.research.read_results"
+    ? "LIBRARY_SEARCH_NOT_READY"
+    : command === "library.research.read_item" || command === "library.research.read_access_options"
+      ? "LIBRARY_ITEM_NOT_READY"
+      : "LIBRARY_SPACE_PAGE_NOT_READY";
   throw commandError(code, lastError?.message || "The HKUL page did not become ready before the deadline.");
 }
 
@@ -283,6 +307,27 @@ async function searchLibraryResearch(payload) {
     target_origin: "https://julac-hku.primo.exlibrisgroup.com",
     target_page_kind: "catalog_results",
     steps: ["library_fixed_route_to_research_results"],
+    snapshot
+  };
+}
+
+async function readLibraryResearchDetail(payload, mode) {
+  const url = libraryResearchDetailUrl(payload);
+  const tab = await chrome.tabs.create({ url, active: false });
+  const readCommand = mode === "access_options" ? "library.research.read_access_options" : "library.research.read_item";
+  const snapshot = await waitForLibraryRead(tab.id, readCommand, {}, Date.now() + NAVIGATION_DEADLINE_MS);
+  if (snapshot.record_id !== String(payload.record_id)) {
+    throw commandError("LIBRARY_RECORD_MISMATCH", "Find@HKUL opened a different record than requested.");
+  }
+  return {
+    read_only: true,
+    navigation_only: true,
+    library_write_requests_sent: 0,
+    navigation_interactions_performed: true,
+    licensed_full_text_opened: 0,
+    target_origin: "https://julac-hku.primo.exlibrisgroup.com",
+    target_page_kind: "catalog_item",
+    steps: ["library_fixed_route_to_research_item"],
     snapshot
   };
 }
@@ -1164,6 +1209,8 @@ async function executeCommand(command, payload = {}) {
     return readSettledMoodleAssignments();
   }
   if (command === "library.research.search") return searchLibraryResearch(payload);
+  if (command === "library.research.item") return readLibraryResearchDetail(payload, "item");
+  if (command === "library.research.access_options") return readLibraryResearchDetail(payload, "access_options");
   if (command === "library.spaces.search_availability") return searchLibrarySpaceAvailability(payload);
   return inspectBoundSisTab(command);
 }

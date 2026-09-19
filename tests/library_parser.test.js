@@ -86,6 +86,94 @@ assert.throws(
   error => error.code === "WRONG_LIBRARY_PAGE"
 );
 
+const detailTitleNode = { innerText: "Artificial intelligence", textContent: "Artificial intelligence" };
+const detailCells = [cell("Publication"), cell("Amsterdam : North-Holland, 1970-")];
+const detailRow = { querySelectorAll() { return detailCells; } };
+const operationalRows = [
+  { querySelectorAll() { return [cell("QR"), cell("READING LIST EXPORT BIBTEX CITATION")]; } },
+  { querySelectorAll() { return [cell("Elsevier SD Complete Freedom Collection 2024"), cell("Available from 01/01/1995. SHOW LICENSE")]; } },
+  { querySelectorAll() { return [cell("To request, please"), cell("Sign in")]; } },
+  { querySelectorAll() { return [cell("Main Library"), cell("Available, Main Serials; S 001.5 A79 I61")]; } },
+  { querySelectorAll() { return [cell("Summary holdings:"), cell("v.6 (1975)-v.150 (2003)")]; } },
+  { querySelectorAll() { return [cell("Item in place (0 requests)"), cell("Loanable v.72 1995")]; } }
+];
+const onlineAccess = {
+  innerText: "Online access, opens in a new window",
+  textContent: "Online access, opens in a new window",
+  getAttribute(name) { return name === "href" ? "https://proxy.example/licensed" : null; }
+};
+const physicalAccess = {
+  innerText: "Available at Main Library Main Serials",
+  textContent: "Available at Main Library Main Serials",
+  getAttribute() { return null; }
+};
+const detailDocument = {
+  body: { innerText: "JOURNAL\nArtificial intelligence\nDetails\nOnline access\nAvailability" },
+  querySelectorAll(selector) {
+    if (selector === "[data-field-selector='title']") return [detailTitleNode];
+    if (selector === "table tr") return [detailRow, ...operationalRows];
+    if (selector === "a") return [onlineAccess, physicalAccess];
+    return [];
+  }
+};
+const detail = parser.parseResearchDetail(detailDocument, {
+  origin: "https://julac-hku.primo.exlibrisgroup.com",
+  pathname: "/discovery/fulldisplay",
+  href: "https://julac-hku.primo.exlibrisgroup.com/discovery/fulldisplay?docid=alma991234&vid=852JULAC_HKU:HKU&lang=en"
+});
+assert.equal(detail.record_id, "alma991234");
+assert.equal(detail.title, "Artificial intelligence");
+assert.equal(detail.metadata[0].label, "Publication");
+assert.equal(detail.metadata.length, 1);
+assert.equal(detail.access_options.length, 2);
+assert.equal(detail.access_options[0].kind, "online");
+assert.equal(detail.access_options[0].label, "Online access");
+assert.equal(detail.diagnostics.unsafe_access_link_candidate_count, 1);
+assert.equal(Object.hasOwn(detail.access_options[0], "url"), false);
+
+const loadingDetail = parser.parseResearchDetail({
+  body: { innerText: "Full display page\nDetails\nLoading" },
+  querySelectorAll(selector) {
+    if (selector === "h1") return [{ innerText: "Full display page" }];
+    return [];
+  }
+}, {
+  origin: "https://julac-hku.primo.exlibrisgroup.com",
+  pathname: "/discovery/fulldisplay",
+  href: "https://julac-hku.primo.exlibrisgroup.com/discovery/fulldisplay?docid=alma991234"
+});
+assert.equal(loadingDetail.title, null);
+assert.equal(loadingDetail.diagnostics.detail_marker_found, false);
+assert.equal(loadingDetail.diagnostics.metadata_field_count, 0);
+
+const noisyAccessNodes = [
+  { innerText: "VIEW ONLINE", getAttribute() { return null; } },
+  { innerText: "Artificial intelligence. Available at Main Library Main Serials (S 001.5 A79 I61)", getAttribute() { return null; } },
+  { innerText: "Artificial intelligence. Online access", getAttribute() { return null; } },
+  { innerText: "Artificial intelligence. Available at Main Library Main Serials (S 001.5 A79 I61) Artificial intelligence. Online access View Journal Contents", getAttribute() { return null; } },
+  { innerText: "Main Library", getAttribute() { return null; } },
+  { innerText: "TOP SEND TO SEARCH INSIDE VIEW ONLINE GET IT REQUEST FROM OTHER INSTITUTIONS DETAILS LINKS VIRTUAL BROWSE", getAttribute() { return null; } }
+];
+const noisyDetailDocument = {
+  body: { innerText: "JOURNAL\nArtificial intelligence.\nDetails\nAvailability\nOnline access" },
+  querySelectorAll(selector) {
+    if (selector === "[data-field-selector='title']") return [{ innerText: "Artificial intelligence." }];
+    if (selector === "table tr") return [detailRow];
+    if (selector === "a") return noisyAccessNodes;
+    return [];
+  }
+};
+const noisyDetail = parser.parseResearchDetail(noisyDetailDocument, {
+  origin: "https://julac-hku.primo.exlibrisgroup.com",
+  pathname: "/discovery/fulldisplay",
+  href: "https://julac-hku.primo.exlibrisgroup.com/discovery/fulldisplay?docid=alma991234"
+});
+assert.deepEqual(noisyDetail.access_options.map((option) => option.label), [
+  "VIEW ONLINE",
+  "Available at Main Library Main Serials (S 001.5 A79 I61)",
+  "Online access"
+]);
+
 function cell(text, backgroundColor = "") {
   return {
     textContent: text,

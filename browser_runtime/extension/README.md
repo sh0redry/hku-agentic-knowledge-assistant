@@ -122,11 +122,14 @@ routes and never grant a generic capability over My Library or Book a Space.
   year is inferred and exposed as `display_text_hong_kong_inferred_year` rather
   than being presented as a machine-supplied timestamp.
   Private rows stay process-local and are excluded from SQLite task history.
-- Library parser `0.1.2` waits for stable Primo result rendering and releases only stable record identity, visible
+- Library parser `0.2.2` waits for stable Primo result/detail rendering and releases only stable record identity, visible
   bibliographic metadata, sanitized detail links, and visible available space
   slots. Legacy Book a Space matrices are read from verified time headers,
   room rows, and the page's Available/Booked colour legend. Search terms and
   result rows are excluded from SQLite task history.
+  Full-display reads accept only a stable record ID, return bounded visible
+  bibliographic fields and access labels, and suppress every proxy, SSO, and
+  licensed-content destination. They never activate an access link.
   HKUL credentials remain manual; slot selection, booking forms, and booking
   submission are absent. Tab discovery strips query strings and fragments
   before reporting state.

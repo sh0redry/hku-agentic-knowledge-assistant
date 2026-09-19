@@ -447,6 +447,66 @@ class LibraryResearchNavigationResult(StrictMessage):
     snapshot: LibraryResearchSnapshot
 
 
+class LibraryResearchMetadataField(StrictMessage):
+    label: str = Field(min_length=1, max_length=120)
+    value: str = Field(min_length=1, max_length=1000)
+
+
+class LibraryResearchAccessOption(StrictMessage):
+    kind: Literal["online", "physical", "unknown"]
+    availability: Literal["available", "unavailable", "unknown"]
+    label: str = Field(min_length=1, max_length=500)
+
+
+class LibraryResearchItemDiagnostics(StrictMessage):
+    parser_version: str = Field(pattern=r"^\d+\.\d+\.\d+$", max_length=20)
+    detail_marker_found: bool
+    record_id_found: bool
+    title_found: bool
+    metadata_field_count: int = Field(ge=0, le=20)
+    access_option_candidate_count: int = Field(ge=0, le=1000)
+    parsed_access_option_count: int = Field(ge=0, le=30)
+    unsafe_access_link_candidate_count: int = Field(ge=0, le=1000)
+
+
+class LibraryResearchItemSnapshot(StrictMessage):
+    origin: Literal["https://julac-hku.primo.exlibrisgroup.com"]
+    logged_in: bool | None = None
+    page_kind: Literal["catalog_item"]
+    record_id: str = Field(min_length=3, max_length=120, pattern=r"^[A-Za-z0-9_.:-]+$")
+    title: str = Field(min_length=1, max_length=500)
+    resource_type: str = Field(min_length=1, max_length=40, pattern=r"^[a-z][a-z0-9_]*$")
+    metadata: list[LibraryResearchMetadataField] = Field(default_factory=list, max_length=20)
+    access_options: list[LibraryResearchAccessOption] = Field(default_factory=list, max_length=30)
+    detail_url: str = Field(min_length=20, max_length=1000)
+    diagnostics: LibraryResearchItemDiagnostics
+
+    @field_validator("detail_url")
+    @classmethod
+    def validate_detail_url(cls, value: str) -> str:
+        return LibraryResearchResult.validate_detail_url(value)
+
+    @model_validator(mode="after")
+    def validate_detail_counts(self):
+        if self.diagnostics.metadata_field_count != len(self.metadata):
+            raise ValueError("Library item metadata count does not match the structured fields.")
+        if self.diagnostics.parsed_access_option_count != len(self.access_options):
+            raise ValueError("Library access-option count does not match the structured rows.")
+        return self
+
+
+class LibraryResearchItemNavigationResult(StrictMessage):
+    read_only: Literal[True]
+    navigation_only: Literal[True]
+    library_write_requests_sent: Literal[0]
+    navigation_interactions_performed: bool
+    licensed_full_text_opened: Literal[0]
+    target_origin: Literal["https://julac-hku.primo.exlibrisgroup.com"]
+    target_page_kind: Literal["catalog_item"]
+    steps: list[Literal["library_fixed_route_to_research_item"]] = Field(min_length=1, max_length=1)
+    snapshot: LibraryResearchItemSnapshot
+
+
 class LibrarySpaceSlot(StrictMessage):
     floor: str | None = Field(default=None, max_length=80)
     room: str | None = Field(default=None, max_length=200)

@@ -406,4 +406,36 @@ export function apply(ctx: Context, config: Config): void {
       },
     }),
   )
+
+  ctx.tools.register(
+    defineTool({
+      name: 'hku_library_research_item',
+      description:
+        'Open the fixed Find@HKUL full-display route for one stable record ID and read visible bibliographic fields. This never opens licensed full text, signs in, saves, requests, or returns authentication links.',
+      parameters: {
+        record_id: { type: 'string', required: true, description: 'Stable record_id returned by hku_library_research_search.' },
+      },
+      output: envelopeOutput,
+      timeoutMs: config.timeoutMs,
+      async execute(args, execution) {
+        return client.readLibraryResearchItem(args, execution.signal)
+      },
+    }),
+  )
+
+  ctx.tools.register(
+    defineTool({
+      name: 'hku_library_research_access_options',
+      description:
+        'Read visible online or physical availability labels for one Find@HKUL record. It suppresses proxy, SSO, and full-text URLs and performs no Library write or full-text navigation.',
+      parameters: {
+        record_id: { type: 'string', required: true, description: 'Stable record_id returned by hku_library_research_search.' },
+      },
+      output: envelopeOutput,
+      timeoutMs: config.timeoutMs,
+      async execute(args, execution) {
+        return client.readLibraryResearchAccessOptions(args, execution.signal)
+      },
+    }),
+  )
 }

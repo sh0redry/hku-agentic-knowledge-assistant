@@ -107,6 +107,12 @@ export declare class HKUAgentsClient {
         scope?: 'hku' | 'everything';
         limit?: number;
     }, signal?: AbortSignal): Promise<IntegrationEnvelope>;
+    readLibraryResearchItem(input: {
+        record_id: string;
+    }, signal?: AbortSignal): Promise<IntegrationEnvelope>;
+    readLibraryResearchAccessOptions(input: {
+        record_id: string;
+    }, signal?: AbortSignal): Promise<IntegrationEnvelope>;
     searchLibrarySpaceAvailability(input: {
         facility_type: 'single_study_room' | 'studio_editing_room' | 'study_table';
     }, signal?: AbortSignal): Promise<IntegrationEnvelope>;

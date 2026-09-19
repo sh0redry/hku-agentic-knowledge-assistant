@@ -159,6 +159,16 @@ class HKUAgentsAPIClient:
             json={"query": query, "field": field, "scope": scope, "limit": int(limit)},
         )
 
+    def library_research_item(self, record_id: str) -> dict:
+        return self._integration_request(
+            "POST", "/library/research/item", json={"record_id": record_id}
+        )
+
+    def library_research_access_options(self, record_id: str) -> dict:
+        return self._integration_request(
+            "POST", "/library/research/access-options", json={"record_id": record_id}
+        )
+
     def library_space_availability(self, facility_type: str) -> dict:
         return self._integration_request(
             "POST",

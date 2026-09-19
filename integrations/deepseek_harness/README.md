@@ -1,6 +1,6 @@
 # HKU AGENTS for DeepSeek Harness
 
-This package contributes seventeen restricted HKU tools to DeepSeek Harness:
+This package contributes nineteen restricted HKU tools to DeepSeek Harness:
 
 - `hku_sis_status`
 - `hku_sis_navigate_and_preflight` (preferred one-step read-only check)
@@ -19,6 +19,8 @@ This package contributes seventeen restricted HKU tools to DeepSeek Harness:
 - `hku_daily_briefing` (cache-only timetable, Moodle deadline, and Portal notice composition)
 - `hku_library_research_search` (bounded public Find@HKUL bibliographic search)
 - `hku_library_space_availability` (authenticated visible slots; no booking)
+- `hku_library_research_item` (one fixed record; no full-text navigation)
+- `hku_library_research_access_options` (visible access labels; external links suppressed)
 
 It is a thin adapter over the authenticated HKU AGENTS Integration API. It does
 not parse HTML, hold browser cookies, choose URLs or selectors, or perform SIS
@@ -29,7 +31,7 @@ structured Timeline, Upcoming, and HKU To-do rows for a bounded future window an
 does not persist private rows. It does not open activity pages or read grades,
 participants, messages, submissions, or submission status. The local HKU AGENTS app and Chrome extension own deterministic Portal
 navigation and must be running separately. Login, password entry, CAPTCHA, and
-MFA always remain manual. After Portal authentication, Browser Bridge `0.14.2`
+MFA always remain manual. After Portal authentication, Browser Bridge `0.15.2`
 may continue through exact allow-listed Portal/Moodle SSO controls automatically;
 it never reads or submits credentials and stops for any human authentication
 challenge. Moodle tool results report session reuse and SSO navigation separately
@@ -75,7 +77,7 @@ From the repository root, with the `dsh` CLI installed:
 cd integrations/deepseek_harness
 npm run build
 npm pack
-dsh plugin --profile web add ./dsh-hku-agents-0.13.0.tgz
+dsh plugin --profile web add ./dsh-hku-agents-0.14.0.tgz
 dsh --profile web --dump-config
 dsh --profile web
 ```

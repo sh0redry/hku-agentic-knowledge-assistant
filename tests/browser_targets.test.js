@@ -60,6 +60,12 @@ assert.equal(
   ).page_kind,
   "account"
 );
+assert.equal(
+  targets.classifyUrl(
+    "https://julac-hku.primo.exlibrisgroup.com/discovery/fulldisplay?docid=alma991234&ticket=secret"
+  ).page_kind,
+  "catalog_item"
+);
 
 const registry = targets.buildRegistry(
   [

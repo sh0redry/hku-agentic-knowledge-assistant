@@ -77,11 +77,12 @@
       const account = path.startsWith("/discovery/account");
       const favorites = path.startsWith("/discovery/favorites");
       const search = path.startsWith("/discovery/search");
+      const item = path === "/discovery/fulldisplay";
       return {
         system: "library",
         ...location,
         logged_in: account || favorites ? true : null,
-        page_kind: account ? "account" : favorites ? "favorites" : search ? "catalog" : "library_page"
+        page_kind: account ? "account" : favorites ? "favorites" : search ? "catalog" : item ? "catalog_item" : "library_page"
       };
     }
     if (location.origin === "https://lib.hku.hk") {

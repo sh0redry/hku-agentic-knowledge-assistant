@@ -4,7 +4,7 @@
   const PRIMO_ORIGIN = "https://julac-hku.primo.exlibrisgroup.com";
   const LIBRARY_ORIGIN = "https://lib.hku.hk";
   const BOOKING_ORIGIN = "https://booking.lib.hku.hk";
-  const VERSION = "0.1.2";
+  const VERSION = "0.2.2";
 
   function clean(value) {
     return String(value || "").replace(/\s+/g, " ").trim();
@@ -35,12 +35,15 @@
   }
 
   function textLines(node) {
-    return String(node?.innerText || node?.textContent || "").split(/\n+/).map(clean).filter(Boolean);
+    return String(node?.innerText || node?.textContent || "")
+      .split(/\n+/)
+      .map((value) => clean(value).replace(/^,?\s*opens in a new window\s*$/i, ""))
+      .filter(Boolean);
   }
 
   function usableTitle(value) {
     const title = clean(value);
-    if (!title || /^(?:view|open|show|details?|full display|view full display(?: details?)?)$/i.test(title)) return null;
+    if (!title || /^(?:view|open|show|details?|full display(?: page)?|view full display(?: details?)?|find@hkul|loading(?:\.\.\.)?)$/i.test(title)) return null;
     return title;
   }
 
@@ -134,6 +137,155 @@
         missing_result_record_id_candidate_count: missingRecordId,
         missing_result_title_candidate_count: missingTitle,
         missing_result_detail_url_candidate_count: missingDetailUrl
+      }
+    };
+  }
+
+  function detailRecordId(locationObject) {
+    try {
+      const url = new URL(locationObject?.href || `${locationObject?.origin || ""}${locationObject?.pathname || ""}${locationObject?.search || ""}`);
+      const value = url.searchParams.get("docid") || "";
+      return /^[A-Za-z0-9_.:-]{3,120}$/.test(value) ? value : null;
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  function uniqueNodes(documentObject, selectors) {
+    const nodes = [];
+    const seen = new Set();
+    for (const selector of selectors) {
+      for (const node of documentObject.querySelectorAll?.(selector) || []) {
+        if (!seen.has(node)) { seen.add(node); nodes.push(node); }
+      }
+    }
+    return nodes;
+  }
+
+  function detailTitle(documentObject) {
+    const selectors = [
+      "[data-field-selector='title']", "[class*='item-title']", "[class*='item_title']",
+      "prm-full-view h1", "prm-full-view h2", "main h1", "main h2", "h1", "h2"
+    ];
+    for (const node of uniqueNodes(documentObject, selectors)) {
+      const title = usableTitle(node.innerText || node.textContent);
+      if (title && !/^(?:find@hkul|full display(?: page)?|details|send to|links)$/i.test(title)) return title.slice(0, 500);
+    }
+    const lines = textLines(documentObject.body);
+    return titleFromLines(lines)?.slice(0, 500) || null;
+  }
+
+  function detailMetadata(documentObject, title) {
+    const rows = uniqueNodes(documentObject, [
+      "table tr", "dl", "[class*='details-item']", "[class*='full-view-section'] [layout='row']"
+    ]);
+    const metadata = [];
+    for (const row of rows) {
+      const cells = [...(row.querySelectorAll?.("th, td, dt, dd, [class*='label'], [class*='value']") || [])]
+        .map((cell) => clean(cell.innerText || cell.textContent)).filter(Boolean);
+      let label = cells[0] || null;
+      let value = cells.slice(1).join(" ") || null;
+      if ((!label || !value) && cells.length === 0) {
+        const lines = textLines(row);
+        label = lines[0] || null;
+        value = lines.slice(1).join(" ") || null;
+      }
+      if (!label || !value || label === value || value === title) continue;
+      if (/^(?:qr|online access|availability|send to|actions?|sign in|to request,? please|locate|summary holdings:?|item in place\b.*|main library\b.*)$/i.test(label)) continue;
+      if (/^(?:sign in|locate direct(?: \(beta\))?)$/i.test(value) ||
+          /^available from\b/i.test(value) || /\bshow license\b/i.test(value)) continue;
+      const key = `${label.toLowerCase()}|${value.toLowerCase()}`;
+      if (!metadata.some((item) => item._key === key)) {
+        metadata.push({ _key: key, label: label.slice(0, 120), value: value.slice(0, 1000) });
+      }
+      if (metadata.length >= 20) break;
+    }
+    for (const item of metadata) delete item._key;
+    return metadata;
+  }
+
+  function accessKind(label) {
+    if (/\b(?:online access|available online|full text|view online|electronic resource)\b/i.test(label)) return "online";
+    if (/\b(?:available at|main library|storage|call number|location|loan desk|special collections)\b/i.test(label)) return "physical";
+    return "unknown";
+  }
+
+  function accessState(label) {
+    if (/\b(?:no online access|unavailable|not available|checked out)\b/i.test(label)) return "unavailable";
+    if (/\b(?:online access|available at|available online|full text available|view online)\b/i.test(label)) return "available";
+    return "unknown";
+  }
+
+  function detailAccessOptions(documentObject, title) {
+    const nodes = uniqueNodes(documentObject, [
+      "a", "button", "[class*='availability']", "[class*='locations']", "[class*='getit']", "[class*='service']"
+    ]);
+    const options = [];
+    let unsafeLinkCandidates = 0;
+    for (const node of nodes) {
+      let label = clean(node.innerText || node.textContent || node.getAttribute?.("aria-label"));
+      if (!label || !/\b(?:online access|available online|full text|view online|available at|main library|storage|call number|location|checked out|no online access)\b/i.test(label)) continue;
+      if (/\bSEND TO\b.*\bSEARCH INSIDE\b.*\bGET IT\b/i.test(label)) continue;
+      const hasOnline = /\b(?:online access|available online|full text|view online)\b/i.test(label);
+      const hasPhysical = /\b(?:available at|main library|storage|call number|location)\b/i.test(label);
+      if (hasOnline && hasPhysical) continue;
+      if (title && label.toLowerCase().startsWith(title.toLowerCase())) {
+        label = clean(label.slice(title.length));
+      }
+      if (!label) continue;
+      const href = clean(node.getAttribute?.("href"));
+      if (href && !safeDetailUrl(href)) unsafeLinkCandidates += 1;
+      const kind = accessKind(label);
+      const state = accessState(label);
+      const normalized = label.replace(/,?\s*opens in a new window\s*$/i, "").trim().slice(0, 500);
+      const key = `${kind}|${state}|${normalized.toLowerCase()}`;
+      if (!options.some((option) => option._key === key)) {
+        options.push({ _key: key, kind, availability: state, label: normalized });
+      }
+      if (options.length >= 30) break;
+    }
+    const specificPhysicalLabels = options
+      .filter((option) => option.kind === "physical" && option.availability !== "unknown")
+      .map((option) => option.label.toLowerCase());
+    const filtered = options.filter((option) => !(
+      option.kind === "physical" && option.availability === "unknown" &&
+      specificPhysicalLabels.some((label) => label.includes(option.label.toLowerCase()))
+    ));
+    for (const option of filtered) delete option._key;
+    return { options: filtered, unsafeLinkCandidates };
+  }
+
+  function parseResearchDetail(documentObject, locationObject) {
+    if (locationObject?.origin !== PRIMO_ORIGIN || String(locationObject?.pathname || "").toLowerCase() !== "/discovery/fulldisplay") {
+      const error = new Error("Open a fixed Find@HKUL full-display page before reading item details.");
+      error.code = "LIBRARY_ITEM_NOT_READY";
+      throw error;
+    }
+    const recordId = detailRecordId(locationObject);
+    const title = detailTitle(documentObject);
+    const bodyText = clean(documentObject.body?.innerText || documentObject.body?.textContent);
+    const detailMarkerFound = Boolean(recordId && title && /\b(?:details|availability|online access|send to|full display)\b/i.test(bodyText));
+    const metadata = title ? detailMetadata(documentObject, title) : [];
+    const access = detailAccessOptions(documentObject, title);
+    return {
+      origin: PRIMO_ORIGIN,
+      logged_in: null,
+      page_kind: "catalog_item",
+      record_id: recordId,
+      title,
+      resource_type: (textLines(documentObject.body).find((line) => /^(?:book|journal|article|audio cd|video|newspaper article|book chapter|multiple versions)$/i.test(line)) || "unknown").toLowerCase().replace(/\s+/g, "_"),
+      metadata,
+      access_options: access.options,
+      detail_url: recordId ? safeDetailUrl(`/discovery/fulldisplay?docid=${encodeURIComponent(recordId)}`) : null,
+      diagnostics: {
+        parser_version: VERSION,
+        detail_marker_found: detailMarkerFound,
+        record_id_found: Boolean(recordId),
+        title_found: Boolean(title),
+        metadata_field_count: metadata.length,
+        access_option_candidate_count: access.options.length,
+        parsed_access_option_count: access.options.length,
+        unsafe_access_link_candidate_count: access.unsafeLinkCandidates
       }
     };
   }
@@ -296,6 +448,6 @@
     };
   }
 
-  root.HKULibraryParser = { parseResearch, parseSpaceAvailability, safeDetailUrl };
+  root.HKULibraryParser = { parseResearch, parseResearchDetail, parseSpaceAvailability, safeDetailUrl };
   if (typeof module !== "undefined" && module.exports) module.exports = root.HKULibraryParser;
 })(typeof self !== "undefined" ? self : this);

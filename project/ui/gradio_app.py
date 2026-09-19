@@ -340,6 +340,22 @@ def create_gradio_ui(container):
         except Exception as exc:
             return _pretty({"ok": False, "read_only": True, "message": str(exc)})
 
+    async def library_item_handler(record_id):
+        try:
+            return _pretty(await asyncio.to_thread(
+                api_client.library_research_item, record_id.strip()
+            ))
+        except Exception as exc:
+            return _pretty({"ok": False, "read_only": True, "message": str(exc)})
+
+    async def library_access_handler(record_id):
+        try:
+            return _pretty(await asyncio.to_thread(
+                api_client.library_research_access_options, record_id.strip()
+            ))
+        except Exception as exc:
+            return _pretty({"ok": False, "read_only": True, "message": str(exc)})
+
     async def library_space_handler(facility_type):
         try:
             return _pretty(await asyncio.to_thread(
@@ -858,6 +874,31 @@ def create_gradio_ui(container):
             library_search_button.click(
                 library_research_handler,
                 inputs=[library_query, library_field, library_scope, library_limit],
+                outputs=library_output,
+                show_progress="minimal",
+                queue=False,
+            )
+            gr.Markdown(
+                "### Item details and access options\n"
+                "Paste a stable `record_id` returned by the search above. Access checks "
+                "return labels only; proxy, SSO, and licensed full-text URLs are suppressed."
+            )
+            library_record_id = gr.Textbox(
+                value="alma991000375969703414", label="Find@HKUL record ID"
+            )
+            with gr.Row():
+                library_item_button = gr.Button("Read item details")
+                library_access_button = gr.Button("Read access options")
+            library_item_button.click(
+                library_item_handler,
+                inputs=library_record_id,
+                outputs=library_output,
+                show_progress="minimal",
+                queue=False,
+            )
+            library_access_button.click(
+                library_access_handler,
+                inputs=library_record_id,
                 outputs=library_output,
                 show_progress="minimal",
                 queue=False,

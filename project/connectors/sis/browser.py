@@ -6,6 +6,7 @@ from browser_bridge.models import (
     MoodleCourseListSnapshot,
     MoodleNavigationResult,
     LibraryResearchNavigationResult,
+    LibraryResearchItemNavigationResult,
     LibrarySpaceNavigationResult,
     PortalPageSnapshot,
     PortalNoticeListSnapshot,
@@ -86,6 +87,16 @@ class BrowserSISConnector(BaseConnector):
     async def search_library_research(self, payload: dict) -> dict:
         data = await self._command(BrowserCommandName.SEARCH_LIBRARY_RESEARCH, payload)
         return LibraryResearchNavigationResult.model_validate(data).model_dump(mode="json")
+
+    async def read_library_research_item(self, payload: dict) -> dict:
+        data = await self._command(BrowserCommandName.READ_LIBRARY_RESEARCH_ITEM, payload)
+        return LibraryResearchItemNavigationResult.model_validate(data).model_dump(mode="json")
+
+    async def read_library_research_access_options(self, payload: dict) -> dict:
+        data = await self._command(
+            BrowserCommandName.READ_LIBRARY_RESEARCH_ACCESS_OPTIONS, payload
+        )
+        return LibraryResearchItemNavigationResult.model_validate(data).model_dump(mode="json")
 
     async def search_library_space_availability(self, payload: dict) -> dict:
         data = await self._command(

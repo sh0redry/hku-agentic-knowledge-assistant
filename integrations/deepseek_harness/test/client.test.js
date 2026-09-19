@@ -116,7 +116,7 @@ test('client preserves stable API errors without leaking the token', async () =>
   }
 })
 
-test('plugin registers exactly seventeen restricted HKU tools and forwards preflight input', async () => {
+test('plugin registers exactly nineteen restricted HKU tools and forwards preflight input', async () => {
   const previous = process.env.INTEGRATION_API_TOKEN
   process.env.INTEGRATION_API_TOKEN = TOKEN
   let receivedBody
@@ -155,6 +155,8 @@ test('plugin registers exactly seventeen restricted HKU tools and forwards prefl
             'hku_daily_briefing',
             'hku_library_research_search',
             'hku_library_space_availability',
+            'hku_library_research_item',
+            'hku_library_research_access_options',
           ],
         )
 
@@ -180,7 +182,7 @@ test('plugin registers exactly seventeen restricted HKU tools and forwards prefl
   }
 })
 
-test('Library tools forward only bounded structured search and facility inputs', async () => {
+test('Library tools forward only bounded structured search, record, and facility inputs', async () => {
   const previous = process.env.INTEGRATION_API_TOKEN
   process.env.INTEGRATION_API_TOKEN = TOKEN
   const requests = []
@@ -207,6 +209,14 @@ test('Library tools forward only bounded structured search and facility inputs',
           { facility_type: 'single_study_room' },
           { signal: new AbortController().signal },
         )
+        await tools.find(tool => tool.name === 'hku_library_research_item').execute(
+          { record_id: 'alma991234' },
+          { signal: new AbortController().signal },
+        )
+        await tools.find(tool => tool.name === 'hku_library_research_access_options').execute(
+          { record_id: 'alma991234' },
+          { signal: new AbortController().signal },
+        )
         assert.deepEqual(requests, [
           {
             url: '/api/v1/integration/library/research/search',
@@ -215,6 +225,14 @@ test('Library tools forward only bounded structured search and facility inputs',
           {
             url: '/api/v1/integration/library/spaces/search-availability',
             body: { facility_type: 'single_study_room' },
+          },
+          {
+            url: '/api/v1/integration/library/research/item',
+            body: { record_id: 'alma991234' },
+          },
+          {
+            url: '/api/v1/integration/library/research/access-options',
+            body: { record_id: 'alma991234' },
           },
         ])
       },

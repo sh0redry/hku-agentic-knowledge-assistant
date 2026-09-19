@@ -36,11 +36,17 @@ class LibrarySpaceAvailabilityRequest(BaseModel):
     ]
 
 
+class LibraryResearchRecordRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    record_id: str = Field(min_length=3, max_length=120, pattern=r"^[A-Za-z0-9_.:-]+$")
+
+
 def _translate_browser_error(exc: BrowserBridgeError) -> CapabilityError:
     if exc.code in {"COMMAND_NOT_ALLOWED", "PAGE_SCRIPT_UNAVAILABLE"}:
         return CapabilityError(
             "EXTENSION_UPDATE_REQUIRED",
-            "Reload HKU AGENTS Browser Bridge 0.14.2 before using HKUL tools.",
+            "Reload HKU AGENTS Browser Bridge 0.15.2 before using HKUL tools.",
         )
     return CapabilityError(exc.code, str(exc))
 
@@ -95,8 +101,8 @@ class LibraryResearchSearchCapability(BaseCapability):
             raise _translate_browser_error(exc) from exc
         snapshot = navigation["snapshot"]
         diagnostics = snapshot["diagnostics"]
-        if diagnostics["parser_version"] != "0.1.2":
-            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.14.2.")
+        if diagnostics["parser_version"] != "0.2.2":
+            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.15.2.")
         if diagnostics["incomplete_result_candidate_count"] or diagnostics["unsafe_result_url_candidate_count"]:
             raise CapabilityError(
                 "LIBRARY_RESEARCH_PARSE_INCOMPLETE",
@@ -118,6 +124,149 @@ class LibraryResearchSearchCapability(BaseCapability):
             "result_count": snapshot["result_count"],
             "results": snapshot["results"],
             "diagnostics": diagnostics,
+            "navigation": {key: value for key, value in navigation.items() if key != "snapshot"},
+        }
+
+
+class LibraryResearchItemCapability(BaseCapability):
+    input_model = LibraryResearchRecordRequest
+    manifest = CapabilityManifest(
+        id="library.research.item",
+        version=1,
+        agent="library",
+        title="Read a Find@HKUL item",
+        description=(
+            "Open the fixed Find@HKUL full-display route for one stable record ID and "
+            "read visible bibliographic fields. It never opens licensed full text, signs "
+            "in, saves, requests, or exports authentication links."
+        ),
+        mode=CapabilityMode.READ,
+        risk=RiskLevel.MEDIUM,
+        confirmation=ConfirmationMode.NONE,
+        required_connections=["sis_browser"],
+        availability="local_browser_public_read_only",
+        input_schema="LibraryResearchRecordRequest",
+        output_schema="LibraryResearchItemResult",
+        timeout_seconds=35,
+    )
+
+    def __init__(self, connector: BrowserSISConnector):
+        self.connector = connector
+
+    def persisted_result(self, result: dict) -> dict:
+        return {
+            "read_only": True,
+            "library_writes_performed": 0,
+            "record_id": result.get("record_id"),
+            "metadata_field_count": len(result.get("metadata", [])),
+            "private_item_details_persisted": False,
+        }
+
+    async def execute(self, validated_input: LibraryResearchRecordRequest, context: ExecutionContext) -> dict:
+        try:
+            navigation = await self.connector.read_library_research_item(
+                validated_input.model_dump(mode="json")
+            )
+        except BrowserBridgeError as exc:
+            raise _translate_browser_error(exc) from exc
+        snapshot = navigation["snapshot"]
+        diagnostics = snapshot["diagnostics"]
+        if diagnostics["parser_version"] != "0.2.2":
+            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.15.2.")
+        if not diagnostics["detail_marker_found"] or not diagnostics["record_id_found"] or not diagnostics["title_found"]:
+            raise CapabilityError(
+                "LIBRARY_ITEM_PARSE_INCOMPLETE",
+                "The requested Find@HKUL item could not be parsed safely.",
+                {"diagnostics": diagnostics},
+            )
+        return {
+            "read_only": True,
+            "systems_contacted": ["find_hkul"],
+            "navigation_interactions_performed": navigation["navigation_interactions_performed"],
+            "data_reads_performed": 1,
+            "domain_writes_performed": 0,
+            "library_writes_performed": 0,
+            "account_data_read": False,
+            "licensed_full_text_opened": 0,
+            "record_id": snapshot["record_id"],
+            "title": snapshot["title"],
+            "resource_type": snapshot["resource_type"],
+            "metadata": snapshot["metadata"],
+            "detail_url": snapshot["detail_url"],
+            "diagnostics": diagnostics,
+            "navigation": {key: value for key, value in navigation.items() if key != "snapshot"},
+        }
+
+
+class LibraryResearchAccessOptionsCapability(BaseCapability):
+    input_model = LibraryResearchRecordRequest
+    manifest = CapabilityManifest(
+        id="library.research.access_options",
+        version=1,
+        agent="library",
+        title="Read Find@HKUL access options",
+        description=(
+            "Read visible online/physical availability labels for one stable Find@HKUL "
+            "record ID. It suppresses proxy and authentication URLs and never opens full text."
+        ),
+        mode=CapabilityMode.READ,
+        risk=RiskLevel.MEDIUM,
+        confirmation=ConfirmationMode.NONE,
+        required_connections=["sis_browser"],
+        availability="local_browser_public_read_only",
+        input_schema="LibraryResearchRecordRequest",
+        output_schema="LibraryResearchAccessOptionsResult",
+        timeout_seconds=35,
+    )
+
+    def __init__(self, connector: BrowserSISConnector):
+        self.connector = connector
+
+    def persisted_result(self, result: dict) -> dict:
+        return {
+            "read_only": True,
+            "library_writes_performed": 0,
+            "record_id": result.get("record_id"),
+            "access_option_count": result.get("access_option_count", 0),
+            "private_access_details_persisted": False,
+        }
+
+    async def execute(self, validated_input: LibraryResearchRecordRequest, context: ExecutionContext) -> dict:
+        try:
+            navigation = await self.connector.read_library_research_access_options(
+                validated_input.model_dump(mode="json")
+            )
+        except BrowserBridgeError as exc:
+            raise _translate_browser_error(exc) from exc
+        snapshot = navigation["snapshot"]
+        diagnostics = snapshot["diagnostics"]
+        if diagnostics["parser_version"] != "0.2.2":
+            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.15.2.")
+        if not diagnostics["detail_marker_found"] or not diagnostics["record_id_found"] or not diagnostics["title_found"]:
+            raise CapabilityError(
+                "LIBRARY_ACCESS_PARSE_INCOMPLETE",
+                "The requested Find@HKUL access options could not be parsed safely.",
+                {"diagnostics": diagnostics},
+            )
+        options = snapshot["access_options"]
+        return {
+            "read_only": True,
+            "systems_contacted": ["find_hkul"],
+            "navigation_interactions_performed": navigation["navigation_interactions_performed"],
+            "data_reads_performed": 1,
+            "domain_writes_performed": 0,
+            "library_writes_performed": 0,
+            "account_data_read": False,
+            "licensed_full_text_opened": 0,
+            "external_access_links_returned": 0,
+            "record_id": snapshot["record_id"],
+            "title": snapshot["title"],
+            "access_option_count": len(options),
+            "access_options": options,
+            "diagnostics": diagnostics,
+            "warnings": [] if options else [
+                "No access-option labels were exposed in the current full-display DOM; this does not prove the item is unavailable."
+            ],
             "navigation": {key: value for key, value in navigation.items() if key != "snapshot"},
         }
 
@@ -165,8 +314,8 @@ class LibrarySpaceAvailabilityCapability(BaseCapability):
             raise _translate_browser_error(exc) from exc
         snapshot = navigation["snapshot"]
         diagnostics = snapshot["diagnostics"]
-        if diagnostics["parser_version"] != "0.1.2":
-            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.14.2.")
+        if diagnostics["parser_version"] != "0.2.2":
+            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.15.2.")
         if diagnostics["incomplete_available_slot_candidate_count"]:
             raise CapabilityError(
                 "LIBRARY_SPACE_PARSE_INCOMPLETE",

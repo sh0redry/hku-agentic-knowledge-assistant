@@ -267,6 +267,20 @@ export class HKUAgentsClient {
     return this.request('POST', '/api/v1/integration/library/research/search', input, signal)
   }
 
+  readLibraryResearchItem(
+    input: { record_id: string },
+    signal?: AbortSignal,
+  ): Promise<IntegrationEnvelope> {
+    return this.request('POST', '/api/v1/integration/library/research/item', input, signal)
+  }
+
+  readLibraryResearchAccessOptions(
+    input: { record_id: string },
+    signal?: AbortSignal,
+  ): Promise<IntegrationEnvelope> {
+    return this.request('POST', '/api/v1/integration/library/research/access-options', input, signal)
+  }
+
   searchLibrarySpaceAvailability(
     input: { facility_type: 'single_study_room' | 'studio_editing_room' | 'study_table' },
     signal?: AbortSignal,

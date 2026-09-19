@@ -129,6 +129,12 @@ export class HKUAgentsClient {
     searchLibraryResearch(input, signal) {
         return this.request('POST', '/api/v1/integration/library/research/search', input, signal);
     }
+    readLibraryResearchItem(input, signal) {
+        return this.request('POST', '/api/v1/integration/library/research/item', input, signal);
+    }
+    readLibraryResearchAccessOptions(input, signal) {
+        return this.request('POST', '/api/v1/integration/library/research/access-options', input, signal);
+    }
     searchLibrarySpaceAvailability(input, signal) {
         return this.request('POST', '/api/v1/integration/library/spaces/search-availability', input, signal);
     }

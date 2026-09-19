@@ -171,6 +171,8 @@ class PlatformAPITests(unittest.TestCase):
                 "briefing.today",
                 "portal.notices.list",
                 "library.research.search",
+                "library.research.item",
+                "library.research.access_options",
                 "library.spaces.search_availability",
             },
         )
@@ -1038,7 +1040,7 @@ class SafetyFrameworkTests(unittest.TestCase):
                 "http://127.0.0.1/*",
             ],
         )
-        self.assertEqual(manifest["version"], "0.14.2")
+        self.assertEqual(manifest["version"], "0.15.2")
 
         node = shutil.which("node")
         if node is None:
