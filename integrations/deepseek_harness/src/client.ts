@@ -260,6 +260,20 @@ export class HKUAgentsClient {
     return this.request('POST', '/api/v1/integration/portal/notices/list', {}, signal)
   }
 
+  searchLibraryResearch(
+    input: { query: string; field?: 'any' | 'title' | 'author' | 'subject'; scope?: 'hku' | 'everything'; limit?: number },
+    signal?: AbortSignal,
+  ): Promise<IntegrationEnvelope> {
+    return this.request('POST', '/api/v1/integration/library/research/search', input, signal)
+  }
+
+  searchLibrarySpaceAvailability(
+    input: { facility_type: 'single_study_room' | 'studio_editing_room' | 'study_table' },
+    signal?: AbortSignal,
+  ): Promise<IntegrationEnvelope> {
+    return this.request('POST', '/api/v1/integration/library/spaces/search-availability', input, signal)
+  }
+
   dailyBriefing(
     input: {
       term_label?: string

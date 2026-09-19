@@ -7,8 +7,9 @@ single active binding. The extension can follow three fixed navigation targets:
 the Portal SIS sign-on entry, the exact SIS `Enrollment Add Classes` component
 route, and a validated Portal Moodle entry. Moodle has a diagnostic parser plus
 separately scoped visible-course-membership and upcoming-assignment commands in Phase C.
-Portal News has a separate read-only structured parser in Phase D; Library
-remains discovery-only. The diagnostic command returns markers and aggregate
+Portal News has a separate read-only structured parser in Phase D. Library Phase E1
+adds bounded Find@HKUL result reading and authenticated Book a Space availability
+reading; it cannot open licensed content, select a slot, or submit a booking. The diagnostic command returns markers and aggregate
 counts only. The course command returns structured course identity. The upcoming
 assignment command returns only machine-dated Timeline/Upcoming rows and never
 opens their activity pages or reads grades, participants, messages, submissions,
@@ -46,6 +47,9 @@ forms.
 10. To test Portal News, keep the authenticated Portal home page open and use
     **Read visible Portal notices**. The bridge reads structured visible cards,
     performs no navigation, and never opens a notice detail page.
+11. To test Library Phase E1, use the GUI **Library** tab. Find@HKUL searches use
+    a fixed Primo route. Book a Space may first show HKUL Authentication; complete
+    it manually, then rerun the same availability check.
 
 When the unpacked extension receives a new ID, restart HKU AGENTS to clear the
 in-memory development pin, or set `BROWSER_EXTENSION_IDS` explicitly in
@@ -61,16 +65,15 @@ freshness. Complete authentication URLs, tickets, relay state, and tokens are
 not sent to the local service.
 
 Portal, SIS, the dedicated My Weekly Schedule application, and Moodle can be
-bound for their restricted commands. Moodle exposes only a diagnostic Dashboard
-  inspection, visible-course-list, and upcoming-assignment capabilities; opening My Library in Chrome makes it discoverable but
-does not grant HKU AGENTS a read or write capability for that page.
+bound for their restricted commands. Library commands use separately scoped fixed
+routes and never grant a generic capability over My Library or Book a Space.
 
 ## Security contract
 
 - Exact approved host permissions only: `https://studentportal.hku.hk/*`,
   `https://hkuportal.hku.hk/*`, `https://sis-main.hku.hk/*`, `https://sweb.hku.hk/*`,
   `https://moodle.hku.hk/*`, `https://julac-hku.primo.exlibrisgroup.com/*`, and
-  `https://lib.hku.hk/*`.
+  `https://lib.hku.hk/*`, and `https://booking.lib.hku.hk/*`.
 - Local companion permission only: `http://127.0.0.1/*`.
 - No `tabs`, cookies, downloads, clipboard, debugger, webRequest, or form-control permissions.
 - Named commands only; arbitrary JavaScript, selectors, URLs, coordinates, and
@@ -118,8 +121,14 @@ does not grant HKU AGENTS a read or write capability for that page.
   When Moodle omits the year, the nearest plausible Hong Kong calendar
   year is inferred and exposed as `display_text_hong_kong_inferred_year` rather
   than being presented as a machine-supplied timestamp.
-  Private rows stay process-local and are excluded from SQLite task history. Library
-  remains discovery-only. Tab discovery strips query strings and fragments
+  Private rows stay process-local and are excluded from SQLite task history.
+- Library parser `0.1.2` waits for stable Primo result rendering and releases only stable record identity, visible
+  bibliographic metadata, sanitized detail links, and visible available space
+  slots. Legacy Book a Space matrices are read from verified time headers,
+  room rows, and the page's Available/Booked colour legend. Search terms and
+  result rows are excluded from SQLite task history.
+  HKUL credentials remain manual; slot selection, booking forms, and booking
+  submission are absent. Tab discovery strips query strings and fragments
   before reporting state.
 - SIS parser `0.3.1` additionally normalizes read-only Class Schedule meetings
   and visible Examination Timetables entries. It does not create or edit calendar data.

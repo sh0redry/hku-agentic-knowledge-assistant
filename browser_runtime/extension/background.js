@@ -5,6 +5,8 @@ importScripts("connection_lifecycle.js", "browser_targets.js");
 const SIS_URL_PATTERN = "https://sis-main.hku.hk/*";
 const WEEKLY_TIMETABLE_URL_PATTERN = "https://sweb.hku.hk/*";
 const MOODLE_URL_PATTERN = "https://moodle.hku.hk/*";
+const LIBRARY_RESEARCH_URL_PATTERN = "https://julac-hku.primo.exlibrisgroup.com/*";
+const LIBRARY_BOOKING_URL_PATTERNS = ["https://booking.lib.hku.hk/*", "https://lib.hku.hk/hkulauth/*"];
 const PORTAL_URL_PATTERNS = [
   "https://hkuportal.hku.hk/*",
   "https://studentportal.hku.hk/*"
@@ -36,7 +38,9 @@ const ALLOWED_COMMANDS = new Set([
   "moodle.inspect_dashboard",
   "moodle.open_dashboard",
   "moodle.list_courses",
-  "moodle.list_upcoming_assignments"
+  "moodle.list_upcoming_assignments",
+  "library.research.search",
+  "library.spaces.search_availability"
 ]);
 const NAVIGATION_DEADLINE_MS = 30000;
 
@@ -214,6 +218,93 @@ async function queryMoodleTabs() {
 
 async function queryPortalTabs() {
   return chrome.tabs.query({ url: PORTAL_URL_PATTERNS });
+}
+
+function libraryResearchUrl(payload) {
+  const query = String(payload?.query || "").trim();
+  const fieldCodes = { any: "any", title: "title", author: "creator", subject: "sub" };
+  const field = fieldCodes[payload?.field] || "any";
+  if (query.length < 2 || query.length > 200) throw commandError("INVALID_INPUT", "Library query must contain 2 to 200 characters.");
+  const url = new URL("https://julac-hku.primo.exlibrisgroup.com/discovery/search");
+  url.searchParams.set("query", `${field},contains,${query}`);
+  url.searchParams.set("tab", "HKU");
+  url.searchParams.set("search_scope", payload?.scope === "everything" ? "MyInst_and_CI" : "MyInstitution");
+  url.searchParams.set("vid", "852JULAC_HKU:HKU");
+  url.searchParams.set("lang", "en");
+  url.searchParams.set("offset", "0");
+  return url.toString();
+}
+
+const SPACE_ROUTES = Object.freeze({
+  single_study_room: "https://booking.lib.hku.hk/FView.aspx?ftype=31&lib=3",
+  studio_editing_room: "https://booking.lib.hku.hk/FView.aspx?ftype=34&lib=3",
+  study_table: "https://booking.lib.hku.hk/table"
+});
+
+async function waitForLibraryRead(tabId, command, payload, deadline) {
+  let lastError = null;
+  let previousReadySignature = null;
+  while (Date.now() < deadline) {
+    try {
+      const snapshot = await sendTabCommand(tabId, command, payload);
+      const diagnostics = snapshot?.diagnostics || {};
+      const ready = command === "library.research.read_results"
+        ? diagnostics.results_marker_found === true &&
+          (diagnostics.result_candidate_count > 0 || diagnostics.empty_results_marker_found === true)
+        : diagnostics.availability_marker_found === true;
+      if (ready) {
+        const signature = command === "library.research.read_results"
+          ? `${diagnostics.result_candidate_count}|${diagnostics.parsed_result_count}|${diagnostics.incomplete_result_candidate_count}`
+          : `${snapshot.date || ""}|${diagnostics.slot_candidate_count}|${diagnostics.parsed_available_slot_count}`;
+        if (signature === previousReadySignature) return snapshot;
+        previousReadySignature = signature;
+      } else {
+        previousReadySignature = null;
+      }
+    } catch (error) {
+      if (error.code === "LIBRARY_LOGIN_REQUIRED") throw error;
+      lastError = error;
+    }
+    await delay(400);
+  }
+  const code = command === "library.research.read_results" ? "LIBRARY_SEARCH_NOT_READY" : "LIBRARY_SPACE_PAGE_NOT_READY";
+  throw commandError(code, lastError?.message || "The HKUL page did not become ready before the deadline.");
+}
+
+async function searchLibraryResearch(payload) {
+  const url = libraryResearchUrl(payload);
+  const tab = await chrome.tabs.create({ url, active: false });
+  const snapshot = await waitForLibraryRead(tab.id, "library.research.read_results", { limit: payload?.limit || 10 }, Date.now() + NAVIGATION_DEADLINE_MS);
+  return {
+    read_only: true,
+    navigation_only: true,
+    library_write_requests_sent: 0,
+    navigation_interactions_performed: true,
+    target_origin: "https://julac-hku.primo.exlibrisgroup.com",
+    target_page_kind: "catalog_results",
+    steps: ["library_fixed_route_to_research_results"],
+    snapshot
+  };
+}
+
+async function searchLibrarySpaceAvailability(payload) {
+  const facilityType = String(payload?.facility_type || "");
+  const url = SPACE_ROUTES[facilityType];
+  if (!url) throw commandError("INVALID_INPUT", "Unsupported HKUL space facility type.");
+  const tab = await chrome.tabs.create({ url, active: true });
+  const snapshot = await waitForLibraryRead(tab.id, "library.spaces.read_availability", {}, Date.now() + NAVIGATION_DEADLINE_MS);
+  return {
+    read_only: true,
+    navigation_only: true,
+    library_write_requests_sent: 0,
+    booking_writes_performed: 0,
+    navigation_interactions_performed: true,
+    target_origin: "https://booking.lib.hku.hk",
+    target_page_kind: "space_availability",
+    facility_type: facilityType,
+    steps: ["library_fixed_route_to_space_availability"],
+    snapshot
+  };
 }
 
 async function findAuthenticatedPortalTab() {
@@ -1072,6 +1163,8 @@ async function executeCommand(command, payload = {}) {
   if (command === "moodle.list_upcoming_assignments") {
     return readSettledMoodleAssignments();
   }
+  if (command === "library.research.search") return searchLibraryResearch(payload);
+  if (command === "library.spaces.search_availability") return searchLibrarySpaceAvailability(payload);
   return inspectBoundSisTab(command);
 }
 

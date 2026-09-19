@@ -331,6 +331,23 @@ def create_gradio_ui(container):
         except Exception as exc:
             return _pretty({"ok": False, "read_only": True, "message": str(exc)})
 
+    async def library_research_handler(query, field, scope, limit):
+        try:
+            return _pretty(await asyncio.to_thread(
+                api_client.library_research_search,
+                query.strip(), field, scope, int(limit),
+            ))
+        except Exception as exc:
+            return _pretty({"ok": False, "read_only": True, "message": str(exc)})
+
+    async def library_space_handler(facility_type):
+        try:
+            return _pretty(await asyncio.to_thread(
+                api_client.library_space_availability, facility_type
+            ))
+        except Exception as exc:
+            return _pretty({"ok": False, "read_only": True, "message": str(exc)})
+
     async def live_sis_call(action, operation):
         completed_at = lambda: datetime.now(timezone.utc).isoformat(timespec="seconds")
         try:
@@ -813,6 +830,53 @@ def create_gradio_ui(container):
             portal_notices_button.click(
                 portal_notices_handler,
                 outputs=portal_notices_output,
+                show_progress="minimal",
+                queue=False,
+            )
+
+        with gr.Tab("Library"):
+            gr.Markdown(
+                "## HKU Libraries (read-only)\n"
+                "Research search opens only the fixed Find@HKUL route and reads visible "
+                "bibliographic results. It does not open licensed full text or save/request "
+                "items. Space availability may require manual HKUL authentication; it never "
+                "selects a slot or submits a reservation."
+            )
+            library_query = gr.Textbox(value="artificial intelligence", label="Research query")
+            with gr.Row():
+                library_field = gr.Dropdown(
+                    choices=["any", "title", "author", "subject"], value="any", label="Field"
+                )
+                library_scope = gr.Dropdown(
+                    choices=["hku", "everything"], value="hku", label="Scope"
+                )
+                library_limit = gr.Number(value=10, minimum=1, maximum=20, precision=0, label="Limit")
+            library_search_button = gr.Button("Search Find@HKUL", variant="primary")
+            library_output = gr.Code(
+                value="Run a bounded public Find@HKUL search.", language="json", label="Library result"
+            )
+            library_search_button.click(
+                library_research_handler,
+                inputs=[library_query, library_field, library_scope, library_limit],
+                outputs=library_output,
+                show_progress="minimal",
+                queue=False,
+            )
+            gr.Markdown(
+                "### Book a Space availability\n"
+                "The first run can open the HKUL authentication page. Complete it manually "
+                "in Chrome, then run the same check again."
+            )
+            library_facility = gr.Dropdown(
+                choices=["single_study_room", "studio_editing_room", "study_table"],
+                value="single_study_room",
+                label="Facility type",
+            )
+            library_space_button = gr.Button("Read visible space availability")
+            library_space_button.click(
+                library_space_handler,
+                inputs=library_facility,
+                outputs=library_output,
                 show_progress="minimal",
                 queue=False,
             )

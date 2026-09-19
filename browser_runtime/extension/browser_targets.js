@@ -9,7 +9,8 @@
     "https://sweb.hku.hk/*",
     "https://moodle.hku.hk/*",
     "https://julac-hku.primo.exlibrisgroup.com/*",
-    "https://lib.hku.hk/*"
+    "https://lib.hku.hk/*",
+    "https://booking.lib.hku.hk/*"
   ];
 
   function sanitizedLocation(value) {
@@ -89,6 +90,14 @@
         ...location,
         logged_in: null,
         page_kind: path.startsWith("/hkulauth/") ? "authentication_pending" : "library_page"
+      };
+    }
+    if (location.origin === "https://booking.lib.hku.hk") {
+      return {
+        system: "library",
+        ...location,
+        logged_in: null,
+        page_kind: "space_availability"
       };
     }
     return null;

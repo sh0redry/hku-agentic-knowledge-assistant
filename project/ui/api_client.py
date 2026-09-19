@@ -152,6 +152,20 @@ class HKUAgentsAPIClient:
     def portal_notices(self) -> dict:
         return self._integration_request("POST", "/portal/notices/list", json={})
 
+    def library_research_search(self, query: str, field: str, scope: str, limit: int) -> dict:
+        return self._integration_request(
+            "POST",
+            "/library/research/search",
+            json={"query": query, "field": field, "scope": scope, "limit": int(limit)},
+        )
+
+    def library_space_availability(self, facility_type: str) -> dict:
+        return self._integration_request(
+            "POST",
+            "/library/spaces/search-availability",
+            json={"facility_type": facility_type},
+        )
+
     def daily_briefing(
         self,
         term_label: str,

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import re
+import datetime as datetime_module
 from datetime import date, datetime
 from urllib.parse import urlparse
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -94,6 +95,7 @@ class BrowserTargetState(StrictMessage):
             "library": {
                 "https://julac-hku.primo.exlibrisgroup.com",
                 "https://lib.hku.hk",
+                "https://booking.lib.hku.hk",
             },
         }
         if self.origin not in allowed_origins[self.system]:
@@ -375,6 +377,124 @@ class PortalNoticeListSnapshot(PortalPageSnapshot):
         if self.diagnostics.parsed_notice_count != len(self.notices):
             raise ValueError("Portal notice parser count does not match the structured rows.")
         return self
+
+
+class LibraryResearchResult(StrictMessage):
+    record_id: str = Field(min_length=3, max_length=120, pattern=r"^[A-Za-z0-9_.:-]+$")
+    title: str = Field(min_length=1, max_length=500)
+    resource_type: str = Field(min_length=1, max_length=40, pattern=r"^[a-z][a-z0-9_]*$")
+    metadata: list[Annotated[str, Field(min_length=1, max_length=500)]] = Field(
+        default_factory=list, max_length=4
+    )
+    availability_label: str | None = Field(default=None, max_length=500)
+    detail_url: str = Field(min_length=20, max_length=1000)
+
+    @field_validator("detail_url")
+    @classmethod
+    def validate_detail_url(cls, value: str) -> str:
+        parsed = urlparse(value)
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname != "julac-hku.primo.exlibrisgroup.com"
+            or parsed.path != "/discovery/fulldisplay"
+        ):
+            raise ValueError("Library detail URL must use the fixed Find@HKUL route.")
+        allowed = {"docid", "vid", "lang"}
+        from urllib.parse import parse_qs
+        if set(parse_qs(parsed.query)) - allowed:
+            raise ValueError("Library detail URL contains an unapproved query field.")
+        return value
+
+
+class LibraryResearchDiagnostics(StrictMessage):
+    parser_version: str = Field(pattern=r"^\d+\.\d+\.\d+$", max_length=20)
+    results_marker_found: bool
+    empty_results_marker_found: bool = False
+    result_candidate_count: int = Field(ge=0, le=1000)
+    parsed_result_count: int = Field(ge=0, le=1000)
+    incomplete_result_candidate_count: int = Field(ge=0, le=1000)
+    unsafe_result_url_candidate_count: int = Field(ge=0, le=1000)
+    missing_result_record_id_candidate_count: int = Field(default=0, ge=0, le=1000)
+    missing_result_title_candidate_count: int = Field(default=0, ge=0, le=1000)
+    missing_result_detail_url_candidate_count: int = Field(default=0, ge=0, le=1000)
+
+
+class LibraryResearchSnapshot(StrictMessage):
+    origin: Literal["https://julac-hku.primo.exlibrisgroup.com"]
+    logged_in: bool | None = None
+    page_kind: Literal["catalog_results"]
+    result_count: int = Field(ge=0, le=20)
+    results: list[LibraryResearchResult] = Field(default_factory=list, max_length=20)
+    diagnostics: LibraryResearchDiagnostics
+
+    @model_validator(mode="after")
+    def validate_result_counts(self):
+        if self.result_count != len(self.results):
+            raise ValueError("Library result count does not match the structured rows.")
+        if self.diagnostics.parsed_result_count != len(self.results):
+            raise ValueError("Library parser count does not match the structured rows.")
+        return self
+
+
+class LibraryResearchNavigationResult(StrictMessage):
+    read_only: Literal[True]
+    navigation_only: Literal[True]
+    library_write_requests_sent: Literal[0]
+    navigation_interactions_performed: bool
+    target_origin: Literal["https://julac-hku.primo.exlibrisgroup.com"]
+    target_page_kind: Literal["catalog_results"]
+    steps: list[Literal["library_fixed_route_to_research_results"]] = Field(min_length=1, max_length=1)
+    snapshot: LibraryResearchSnapshot
+
+
+class LibrarySpaceSlot(StrictMessage):
+    floor: str | None = Field(default=None, max_length=80)
+    room: str | None = Field(default=None, max_length=200)
+    start_time: str = Field(pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+    end_time: str = Field(pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+    status: Literal["available"]
+
+
+class LibrarySpaceDiagnostics(StrictMessage):
+    parser_version: str = Field(pattern=r"^\d+\.\d+\.\d+$", max_length=20)
+    availability_marker_found: bool
+    availability_legend_found: bool = False
+    booked_legend_found: bool = False
+    table_matrix_found: bool = False
+    slot_candidate_count: int = Field(ge=0, le=10000)
+    parsed_available_slot_count: int = Field(ge=0, le=1000)
+    incomplete_available_slot_candidate_count: int = Field(ge=0, le=1000)
+
+
+class LibrarySpaceSnapshot(StrictMessage):
+    origin: Literal["https://booking.lib.hku.hk"]
+    logged_in: Literal[True]
+    page_kind: Literal["space_availability"]
+    date: datetime_module.date | None = None
+    available_slot_count: int = Field(ge=0, le=200)
+    available_slots: list[LibrarySpaceSlot] = Field(default_factory=list, max_length=200)
+    diagnostics: LibrarySpaceDiagnostics
+
+    @model_validator(mode="after")
+    def validate_slot_counts(self):
+        if self.available_slot_count != len(self.available_slots):
+            raise ValueError("Library slot count does not match the structured rows.")
+        if self.diagnostics.parsed_available_slot_count != len(self.available_slots):
+            raise ValueError("Library slot parser count does not match the structured rows.")
+        return self
+
+
+class LibrarySpaceNavigationResult(StrictMessage):
+    read_only: Literal[True]
+    navigation_only: Literal[True]
+    library_write_requests_sent: Literal[0]
+    booking_writes_performed: Literal[0]
+    navigation_interactions_performed: bool
+    target_origin: Literal["https://booking.lib.hku.hk"]
+    target_page_kind: Literal["space_availability"]
+    facility_type: Literal["single_study_room", "studio_editing_room", "study_table"]
+    steps: list[Literal["library_fixed_route_to_space_availability"]] = Field(min_length=1, max_length=1)
+    snapshot: LibrarySpaceSnapshot
 
 
 class SISNavigationResult(StrictMessage):

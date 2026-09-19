@@ -126,6 +126,12 @@ export class HKUAgentsClient {
     listPortalNotices(signal) {
         return this.request('POST', '/api/v1/integration/portal/notices/list', {}, signal);
     }
+    searchLibraryResearch(input, signal) {
+        return this.request('POST', '/api/v1/integration/library/research/search', input, signal);
+    }
+    searchLibrarySpaceAvailability(input, signal) {
+        return this.request('POST', '/api/v1/integration/library/spaces/search-availability', input, signal);
+    }
     dailyBriefing(input, signal) {
         return this.request('POST', '/api/v1/integration/briefing/today', input, signal);
     }

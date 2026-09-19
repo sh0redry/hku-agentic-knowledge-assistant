@@ -38,6 +38,8 @@ class BrowserCommandName(str, Enum):
     INSPECT_MOODLE_DASHBOARD = "moodle.inspect_dashboard"
     LIST_MOODLE_COURSES = "moodle.list_courses"
     LIST_MOODLE_UPCOMING_ASSIGNMENTS = "moodle.list_upcoming_assignments"
+    SEARCH_LIBRARY_RESEARCH = "library.research.search"
+    SEARCH_LIBRARY_SPACE_AVAILABILITY = "library.spaces.search_availability"
 
 
 class BrowserCommand(BaseModel):

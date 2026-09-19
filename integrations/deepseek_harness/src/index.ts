@@ -366,4 +366,44 @@ export function apply(ctx: Context, config: Config): void {
       },
     }),
   )
+
+  ctx.tools.register(
+    defineTool({
+      name: 'hku_library_research_search',
+      description:
+        'Search Find@HKUL through a fixed public Primo route and read up to 20 visible bibliographic results. Browser navigation occurs, but the tool never signs in, opens licensed full text, saves favorites, requests an item, or performs a library write. Treat availability labels as observations that can change.',
+      parameters: {
+        query: { type: 'string', required: true, description: 'Research keywords, title, author, or subject text (2-200 characters).' },
+        field: { type: 'string', enum: ['any', 'title', 'author', 'subject'], description: 'Search field; defaults to any.' },
+        scope: { type: 'string', enum: ['hku', 'everything'], description: 'HKU holdings only or the broader discovery index; defaults to hku.' },
+        limit: { type: 'number', description: 'Maximum visible results to return, 1-20.' },
+      },
+      output: envelopeOutput,
+      timeoutMs: config.timeoutMs,
+      async execute(args, execution) {
+        return client.searchLibraryResearch(args, execution.signal)
+      },
+    }),
+  )
+
+  ctx.tools.register(
+    defineTool({
+      name: 'hku_library_space_availability',
+      description:
+        'Open one fixed HKUL Book a Space facility route and read visible available slots after the user manually completes HKUL authentication. It may navigate to the authentication or availability page, but never selects a slot, opens a booking form, enters details, or submits a reservation. Check booking_writes_performed (always 0).',
+      parameters: {
+        facility_type: {
+          type: 'string',
+          required: true,
+          enum: ['single_study_room', 'studio_editing_room', 'study_table'],
+          description: 'Supported fixed HKUL facility route.',
+        },
+      },
+      output: envelopeOutput,
+      timeoutMs: config.timeoutMs,
+      async execute(args, execution) {
+        return client.searchLibrarySpaceAvailability(args, execution.signal)
+      },
+    }),
+  )
 }

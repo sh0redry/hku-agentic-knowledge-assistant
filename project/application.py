@@ -18,6 +18,7 @@ from agents.moodle.agent import (
     MoodleUpcomingAssignmentsCapability,
 )
 from agents.portal.agent import PortalNoticeListCapability
+from agents.library.agent import LibraryResearchSearchCapability, LibrarySpaceAvailabilityCapability
 from agents.timetable.agent import (
     SISExamStatusCapability,
     SISFreeSlotsCapability,
@@ -97,6 +98,8 @@ class ApplicationContainer:
             )
         )
         self.registry.register(DailyBriefingCapability(self.daily_briefing))
+        self.registry.register(LibraryResearchSearchCapability(self.connectors["sis_browser"]))
+        self.registry.register(LibrarySpaceAvailabilityCapability(self.connectors["sis_browser"]))
 
         self.tasks = TaskManager(self.registry, self.store)
         self.actions = ActionService(self.registry, self.store, self.tasks, self.policy)

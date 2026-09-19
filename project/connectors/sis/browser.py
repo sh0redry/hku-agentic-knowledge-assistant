@@ -5,6 +5,8 @@ from browser_bridge.models import (
     MoodleAssignmentListSnapshot,
     MoodleCourseListSnapshot,
     MoodleNavigationResult,
+    LibraryResearchNavigationResult,
+    LibrarySpaceNavigationResult,
     PortalPageSnapshot,
     PortalNoticeListSnapshot,
     SISNavigationResult,
@@ -80,6 +82,16 @@ class BrowserSISConnector(BaseConnector):
     async def list_moodle_upcoming_assignments(self) -> dict:
         data = await self._command(BrowserCommandName.LIST_MOODLE_UPCOMING_ASSIGNMENTS)
         return MoodleAssignmentListSnapshot.model_validate(data).model_dump(mode="json")
+
+    async def search_library_research(self, payload: dict) -> dict:
+        data = await self._command(BrowserCommandName.SEARCH_LIBRARY_RESEARCH, payload)
+        return LibraryResearchNavigationResult.model_validate(data).model_dump(mode="json")
+
+    async def search_library_space_availability(self, payload: dict) -> dict:
+        data = await self._command(
+            BrowserCommandName.SEARCH_LIBRARY_SPACE_AVAILABILITY, payload
+        )
+        return LibrarySpaceNavigationResult.model_validate(data).model_dump(mode="json")
 
     async def bind_tab(self) -> dict:
         data = await self._command(BrowserCommandName.BIND_SIS_TAB)

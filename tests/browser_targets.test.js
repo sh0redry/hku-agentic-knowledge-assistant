@@ -35,6 +35,10 @@ assert.equal(
   "dashboard"
 );
 assert.equal(
+  targets.classifyUrl("https://booking.lib.hku.hk/FView.aspx?token=secret").page_kind,
+  "space_availability"
+);
+assert.equal(
   targets.classifyUrl("https://moodle.hku.hk/my/").logged_in,
   null
 );

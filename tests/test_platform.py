@@ -170,6 +170,8 @@ class PlatformAPITests(unittest.TestCase):
                 "moodle.assignments.upcoming",
                 "briefing.today",
                 "portal.notices.list",
+                "library.research.search",
+                "library.spaces.search_availability",
             },
         )
         connections = self.client.get("/api/v1/connections").json()["connections"]
@@ -1011,6 +1013,9 @@ class SafetyFrameworkTests(unittest.TestCase):
                 "https://sis-main.hku.hk/*",
                 "https://sweb.hku.hk/*",
                 "https://moodle.hku.hk/*",
+                "https://julac-hku.primo.exlibrisgroup.com/*",
+                "https://lib.hku.hk/*",
+                "https://booking.lib.hku.hk/*",
             },
         )
         sis_content_script = next(
@@ -1029,10 +1034,11 @@ class SafetyFrameworkTests(unittest.TestCase):
                 "https://moodle.hku.hk/*",
                 "https://julac-hku.primo.exlibrisgroup.com/*",
                 "https://lib.hku.hk/*",
+                "https://booking.lib.hku.hk/*",
                 "http://127.0.0.1/*",
             ],
         )
-        self.assertEqual(manifest["version"], "0.13.1")
+        self.assertEqual(manifest["version"], "0.14.2")
 
         node = shutil.which("node")
         if node is None:

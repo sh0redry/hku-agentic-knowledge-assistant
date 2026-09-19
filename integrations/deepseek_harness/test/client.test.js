@@ -116,7 +116,7 @@ test('client preserves stable API errors without leaking the token', async () =>
   }
 })
 
-test('plugin registers exactly fifteen restricted HKU tools and forwards preflight input', async () => {
+test('plugin registers exactly seventeen restricted HKU tools and forwards preflight input', async () => {
   const previous = process.env.INTEGRATION_API_TOKEN
   process.env.INTEGRATION_API_TOKEN = TOKEN
   let receivedBody
@@ -153,6 +153,8 @@ test('plugin registers exactly fifteen restricted HKU tools and forwards preflig
             'hku_moodle_upcoming_assignments',
             'hku_portal_list_notices',
             'hku_daily_briefing',
+            'hku_library_research_search',
+            'hku_library_space_availability',
           ],
         )
 
@@ -170,6 +172,51 @@ test('plugin registers exactly fifteen restricted HKU tools and forwards preflig
           term_label: '2026-27 Sem 2',
           expected_courses: [{ course_code: 'COMP3297', section: '2B' }],
         })
+      },
+    )
+  } finally {
+    if (previous === undefined) delete process.env.INTEGRATION_API_TOKEN
+    else process.env.INTEGRATION_API_TOKEN = previous
+  }
+})
+
+test('Library tools forward only bounded structured search and facility inputs', async () => {
+  const previous = process.env.INTEGRATION_API_TOKEN
+  process.env.INTEGRATION_API_TOKEN = TOKEN
+  const requests = []
+  try {
+    await withServer(
+      (request, response) => {
+        const chunks = []
+        request.on('data', chunk => chunks.push(chunk))
+        request.on('end', () => {
+          requests.push({ url: request.url, body: JSON.parse(Buffer.concat(chunks).toString('utf8')) })
+          response.setHeader('content-type', 'application/json')
+          response.end(JSON.stringify(envelope({ read_only: true, library_writes_performed: 0 })))
+        })
+      },
+      async baseUrl => {
+        const tools = []
+        const ctx = { tools: { register(tool) { tools.push(tool) } } }
+        apply(ctx, { baseUrl, tokenEnv: 'INTEGRATION_API_TOKEN', timeoutMs: 5000 })
+        await tools.find(tool => tool.name === 'hku_library_research_search').execute(
+          { query: 'artificial intelligence', field: 'title', scope: 'hku', limit: 5 },
+          { signal: new AbortController().signal },
+        )
+        await tools.find(tool => tool.name === 'hku_library_space_availability').execute(
+          { facility_type: 'single_study_room' },
+          { signal: new AbortController().signal },
+        )
+        assert.deepEqual(requests, [
+          {
+            url: '/api/v1/integration/library/research/search',
+            body: { query: 'artificial intelligence', field: 'title', scope: 'hku', limit: 5 },
+          },
+          {
+            url: '/api/v1/integration/library/spaces/search-availability',
+            body: { facility_type: 'single_study_room' },
+          },
+        ])
       },
     )
   } finally {

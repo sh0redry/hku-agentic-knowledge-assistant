@@ -101,6 +101,15 @@ export declare class HKUAgentsClient {
         days_ahead?: number;
     }, signal?: AbortSignal): Promise<IntegrationEnvelope>;
     listPortalNotices(signal?: AbortSignal): Promise<IntegrationEnvelope>;
+    searchLibraryResearch(input: {
+        query: string;
+        field?: 'any' | 'title' | 'author' | 'subject';
+        scope?: 'hku' | 'everything';
+        limit?: number;
+    }, signal?: AbortSignal): Promise<IntegrationEnvelope>;
+    searchLibrarySpaceAvailability(input: {
+        facility_type: 'single_study_room' | 'studio_editing_room' | 'study_table';
+    }, signal?: AbortSignal): Promise<IntegrationEnvelope>;
     dailyBriefing(input: {
         term_label?: string;
         as_of?: string;
