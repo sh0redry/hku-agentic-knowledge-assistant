@@ -176,6 +176,11 @@ class HKUAgentsAPIClient:
             json={"facility_type": facility_type},
         )
 
+    def library_list_facilities(self) -> dict:
+        return self._integration_request(
+            "POST", "/library/spaces/list-facilities", json={}
+        )
+
     def daily_briefing(
         self,
         term_label: str,

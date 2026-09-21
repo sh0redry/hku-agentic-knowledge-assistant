@@ -142,6 +142,36 @@ class LibraryIntegrationTests(unittest.TestCase):
         self.assertEqual(response["error"]["code"], "LIBRARY_LOGIN_REQUIRED")
         self.assertIn("manual", response["error"]["recovery"].lower())
 
+    def test_facility_catalog_is_local_read_only_and_policy_sourced(self):
+        response = self.client.post(
+            "/api/v1/integration/library/spaces/list-facilities",
+            headers=self.headers,
+            json={},
+        ).json()
+        self.assertTrue(response["ok"])
+        result = response["result"]
+        self.assertTrue(result["derived_locally"])
+        self.assertFalse(result["browser_interactions_performed"])
+        self.assertEqual(result["booking_writes_performed"], 0)
+        self.assertEqual(result["facility_count"], 3)
+        self.assertEqual(
+            {item["facility_type"] for item in result["facilities"]},
+            {"single_study_room", "studio_editing_room", "study_table"},
+        )
+        self.assertTrue(all(item["availability_search_supported"] for item in result["facilities"]))
+        single_room = next(
+            item for item in result["facilities"]
+            if item["facility_type"] == "single_study_room"
+        )
+        self.assertNotIn("sessions_per_day", single_room["booking_policy"])
+        self.assertEqual(
+            single_room["booking_policy"]["available_session_windows_per_weekday"], 3
+        )
+        self.assertEqual(len(result["policy_sources"]), 2)
+        stored = self.container.store.get_task(response["task"]["id"])
+        self.assertEqual(stored.result["facility_count"], 3)
+        self.assertNotIn("facilities", stored.result)
+
     def test_research_item_returns_bibliography_without_persisting_details(self):
         connector = self.container.connectors["sis_browser"]
         connector.read_library_research_item = AsyncMock(

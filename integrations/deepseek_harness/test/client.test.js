@@ -116,7 +116,7 @@ test('client preserves stable API errors without leaking the token', async () =>
   }
 })
 
-test('plugin registers exactly nineteen restricted HKU tools and forwards preflight input', async () => {
+test('plugin registers exactly twenty restricted HKU tools and forwards preflight input', async () => {
   const previous = process.env.INTEGRATION_API_TOKEN
   process.env.INTEGRATION_API_TOKEN = TOKEN
   let receivedBody
@@ -154,6 +154,7 @@ test('plugin registers exactly nineteen restricted HKU tools and forwards prefli
             'hku_portal_list_notices',
             'hku_daily_briefing',
             'hku_library_research_search',
+            'hku_library_list_facilities',
             'hku_library_space_availability',
             'hku_library_research_item',
             'hku_library_research_access_options',
@@ -205,6 +206,10 @@ test('Library tools forward only bounded structured search, record, and facility
           { query: 'artificial intelligence', field: 'title', scope: 'hku', limit: 5 },
           { signal: new AbortController().signal },
         )
+        await tools.find(tool => tool.name === 'hku_library_list_facilities').execute(
+          {},
+          { signal: new AbortController().signal },
+        )
         await tools.find(tool => tool.name === 'hku_library_space_availability').execute(
           { facility_type: 'single_study_room' },
           { signal: new AbortController().signal },
@@ -221,6 +226,10 @@ test('Library tools forward only bounded structured search, record, and facility
           {
             url: '/api/v1/integration/library/research/search',
             body: { query: 'artificial intelligence', field: 'title', scope: 'hku', limit: 5 },
+          },
+          {
+            url: '/api/v1/integration/library/spaces/list-facilities',
+            body: {},
           },
           {
             url: '/api/v1/integration/library/spaces/search-availability',

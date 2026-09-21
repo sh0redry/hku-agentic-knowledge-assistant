@@ -15,6 +15,7 @@ from agents.moodle.agent import (
 )
 from agents.portal.agent import PortalNoticeListRequest
 from agents.library.agent import (
+    LibraryFacilityListRequest,
     LibraryResearchRecordRequest,
     LibraryResearchSearchRequest,
     LibrarySpaceAvailabilityRequest,
@@ -343,6 +344,19 @@ def create_integration_router(expected_token: str) -> APIRouter:
         correlation_id: str = Depends(authorize),
     ):
         return await run_library_task(request, correlation_id, "library.spaces.search_availability", body)
+
+    @router.post("/library/spaces/list-facilities", response_model=IntegrationResponse)
+    async def list_library_facilities(
+        request: Request,
+        body: LibraryFacilityListRequest | None = None,
+        correlation_id: str = Depends(authorize),
+    ):
+        return await run_library_task(
+            request,
+            correlation_id,
+            "library.spaces.list_facilities",
+            body or LibraryFacilityListRequest(),
+        )
 
     @router.post("/library/research/item", response_model=IntegrationResponse)
     async def read_library_research_item(

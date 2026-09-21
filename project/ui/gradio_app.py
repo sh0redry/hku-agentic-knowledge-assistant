@@ -364,6 +364,12 @@ def create_gradio_ui(container):
         except Exception as exc:
             return _pretty({"ok": False, "read_only": True, "message": str(exc)})
 
+    async def library_facilities_handler():
+        try:
+            return _pretty(await asyncio.to_thread(api_client.library_list_facilities))
+        except Exception as exc:
+            return _pretty({"ok": False, "read_only": True, "message": str(exc)})
+
     async def live_sis_call(action, operation):
         completed_at = lambda: datetime.now(timezone.utc).isoformat(timespec="seconds")
         try:
@@ -905,8 +911,19 @@ def create_gradio_ui(container):
             )
             gr.Markdown(
                 "### Book a Space availability\n"
-                "The first run can open the HKUL authentication page. Complete it manually "
-                "in Chrome, then run the same check again."
+                "List the supported facilities and verified policy summary locally before "
+                "opening an authenticated availability page."
+            )
+            library_facilities_button = gr.Button("List supported facilities and policies")
+            library_facilities_button.click(
+                library_facilities_handler,
+                outputs=library_output,
+                show_progress="minimal",
+                queue=False,
+            )
+            gr.Markdown(
+                "The first availability run can open the HKUL authentication page. Complete "
+                "it manually in Chrome, then run the same check again."
             )
             library_facility = gr.Dropdown(
                 choices=["single_study_room", "studio_editing_room", "study_table"],

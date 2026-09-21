@@ -138,6 +138,9 @@ export class HKUAgentsClient {
     searchLibrarySpaceAvailability(input, signal) {
         return this.request('POST', '/api/v1/integration/library/spaces/search-availability', input, signal);
     }
+    listLibraryFacilities(signal) {
+        return this.request('POST', '/api/v1/integration/library/spaces/list-facilities', {}, signal);
+    }
     dailyBriefing(input, signal) {
         return this.request('POST', '/api/v1/integration/briefing/today', input, signal);
     }

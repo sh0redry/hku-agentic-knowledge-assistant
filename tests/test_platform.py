@@ -173,6 +173,7 @@ class PlatformAPITests(unittest.TestCase):
                 "library.research.search",
                 "library.research.item",
                 "library.research.access_options",
+                "library.spaces.list_facilities",
                 "library.spaces.search_availability",
             },
         )

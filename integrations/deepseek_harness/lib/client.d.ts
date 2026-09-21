@@ -116,6 +116,7 @@ export declare class HKUAgentsClient {
     searchLibrarySpaceAvailability(input: {
         facility_type: 'single_study_room' | 'studio_editing_room' | 'study_table';
     }, signal?: AbortSignal): Promise<IntegrationEnvelope>;
+    listLibraryFacilities(signal?: AbortSignal): Promise<IntegrationEnvelope>;
     dailyBriefing(input: {
         term_label?: string;
         as_of?: string;

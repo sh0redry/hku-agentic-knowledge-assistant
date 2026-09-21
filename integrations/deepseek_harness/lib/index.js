@@ -307,6 +307,16 @@ export function apply(ctx, config) {
         },
     }));
     ctx.tools.register(defineTool({
+        name: 'hku_library_list_facilities',
+        description: 'List the locally verified HKUL facility catalog and booking-policy summaries supported by the availability tool. This is cache-free local reference data: it performs no browser interaction, does not prove current eligibility or availability, and never selects a slot or opens/submits a booking form.',
+        parameters: {},
+        output: envelopeOutput,
+        timeoutMs: config.timeoutMs,
+        async execute(_args, execution) {
+            return client.listLibraryFacilities(execution.signal);
+        },
+    }));
+    ctx.tools.register(defineTool({
         name: 'hku_library_space_availability',
         description: 'Open one fixed HKUL Book a Space facility route and read visible available slots after the user manually completes HKUL authentication. It may navigate to the authentication or availability page, but never selects a slot, opens a booking form, enters details, or submits a reservation. Check booking_writes_performed (always 0).',
         parameters: {

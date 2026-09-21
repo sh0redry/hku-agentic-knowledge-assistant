@@ -1,6 +1,6 @@
 # HKU AGENTS for DeepSeek Harness
 
-This package contributes nineteen restricted HKU tools to DeepSeek Harness:
+This package contributes twenty restricted HKU tools to DeepSeek Harness:
 
 - `hku_sis_status`
 - `hku_sis_navigate_and_preflight` (preferred one-step read-only check)
@@ -18,6 +18,7 @@ This package contributes nineteen restricted HKU tools to DeepSeek Harness:
 - `hku_portal_list_notices` (visible Portal News cards; no detail-page navigation)
 - `hku_daily_briefing` (cache-only timetable, Moodle deadline, and Portal notice composition)
 - `hku_library_research_search` (bounded public Find@HKUL bibliographic search)
+- `hku_library_list_facilities` (local verified facility and booking-policy catalog; no browser interaction)
 - `hku_library_space_availability` (authenticated visible slots; no booking)
 - `hku_library_research_item` (one fixed record; no full-text navigation)
 - `hku_library_research_access_options` (visible access labels; external links suppressed)
@@ -77,7 +78,7 @@ From the repository root, with the `dsh` CLI installed:
 cd integrations/deepseek_harness
 npm run build
 npm pack
-dsh plugin --profile web add ./dsh-hku-agents-0.14.0.tgz
+dsh plugin --profile web add ./dsh-hku-agents-0.15.0.tgz
 dsh --profile web --dump-config
 dsh --profile web
 ```

@@ -36,6 +36,10 @@ class LibrarySpaceAvailabilityRequest(BaseModel):
     ]
 
 
+class LibraryFacilityListRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
 class LibraryResearchRecordRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -268,6 +272,127 @@ class LibraryResearchAccessOptionsCapability(BaseCapability):
                 "No access-option labels were exposed in the current full-display DOM; this does not prove the item is unavailable."
             ],
             "navigation": {key: value for key, value in navigation.items() if key != "snapshot"},
+        }
+
+
+class LibraryFacilityListCapability(BaseCapability):
+    input_model = LibraryFacilityListRequest
+    manifest = CapabilityManifest(
+        id="library.spaces.list_facilities",
+        version=1,
+        agent="library",
+        title="List supported HKUL facilities",
+        description=(
+            "Return the locally verified catalog and policy summary for HKUL facilities "
+            "supported by the availability tool. It performs no browser interaction, slot "
+            "selection, booking-form navigation, or reservation write."
+        ),
+        mode=CapabilityMode.READ,
+        risk=RiskLevel.LOW,
+        confirmation=ConfirmationMode.NONE,
+        required_connections=[],
+        availability="available",
+        input_schema="LibraryFacilityListRequest",
+        output_schema="LibraryFacilityListResult",
+        timeout_seconds=5,
+    )
+
+    FACILITIES = [
+        {
+            "facility_type": "single_study_room",
+            "name": "Single Study Rooms",
+            "location": "Main Library, 4/F",
+            "capacity": 1,
+            "equipment": [],
+            "eligibility": ["current_hku_students", "current_hku_staff", "current_hku_space_students", "current_hku_space_staff"],
+            "availability_search_supported": True,
+            "booking_policy": {
+                "session_duration_minutes": None,
+                "available_session_windows_per_weekday": 3,
+                "available_session_windows_per_weekend_or_holiday": 2,
+                "advance_booking": "one_session_in_advance",
+                "check_in_required": True,
+                "release_after_minutes": 60,
+                "session_windows": [
+                    {"day_group": "monday_to_friday", "windows": ["08:30-13:00", "13:00-18:00", "18:00-22:00"]},
+                    {"day_group": "saturday_sunday_public_holidays", "windows": ["09:00-13:00", "13:00-17:00"]},
+                ],
+                "seasonal_notes": ["The third weekday session ends at 21:00 from June through August."],
+            },
+        },
+        {
+            "facility_type": "studio_editing_room",
+            "name": "Editing Rooms & Computers (Library Innovation Centre)",
+            "location": "Main Library, Library Innovation Centre, 2/F",
+            "capacity": None,
+            "equipment": ["editing_computer"],
+            "eligibility": ["current_hku_students", "current_hku_staff"],
+            "availability_search_supported": True,
+            "booking_policy": {
+                "session_duration_minutes": 60,
+                "maximum_minutes_per_day": 180,
+                "advance_booking": "one_day_in_advance",
+                "check_in_required": True,
+                "release_after_minutes": 15,
+                "session_windows": [],
+                "seasonal_notes": [],
+            },
+        },
+        {
+            "facility_type": "study_table",
+            "name": "Study Tables",
+            "location": "Participating HKUL locations, including reservable Main Library study tables",
+            "capacity": None,
+            "equipment": [],
+            "eligibility": ["current_hku_students", "current_hku_staff", "current_hku_space_students", "current_hku_space_staff", "hku_alumni"],
+            "availability_search_supported": True,
+            "booking_policy": {
+                "session_duration_minutes": None,
+                "maximum_active_sessions": 1,
+                "advance_booking": "one_session_in_advance",
+                "check_in_required": True,
+                "release_after_minutes": 60,
+                "session_windows": [
+                    {"day_group": "monday_to_friday", "windows": ["08:30-13:00", "13:00-18:00", "18:00-22:00"]},
+                    {"day_group": "saturday_sunday_public_holidays", "windows": ["09:00-13:00", "13:00-17:00"]},
+                ],
+                "seasonal_notes": ["The third weekday session ends at 21:00 from June through August."],
+            },
+        },
+    ]
+
+    def persisted_result(self, result: dict) -> dict:
+        return {
+            "read_only": True,
+            "facility_count": result.get("facility_count", 0),
+            "policy_verified_on": result.get("policy_verified_on"),
+            "domain_writes_performed": 0,
+        }
+
+    async def execute(self, validated_input: LibraryFacilityListRequest, context: ExecutionContext) -> dict:
+        return {
+            "read_only": True,
+            "derived_locally": True,
+            "systems_contacted": [],
+            "browser_interactions_performed": False,
+            "data_reads_performed": 0,
+            "domain_writes_performed": 0,
+            "library_writes_performed": 0,
+            "booking_writes_performed": 0,
+            "slot_selection_performed": False,
+            "booking_form_opened": False,
+            "facility_count": len(self.FACILITIES),
+            "catalog_scope": "availability_search_supported_facilities",
+            "facilities": self.FACILITIES,
+            "policy_verified_on": "2026-09-19",
+            "policy_sources": [
+                {"title": "HKUL Book A Space", "url": "https://lib.hku.hk/general/e-form/book-a-space.html"},
+                {"title": "HKUL Booking Policy", "url": "https://lib.hku.hk/general/e-form/L3_booking_policy.html"},
+            ],
+            "warnings": [
+                "Facility availability and booking policies can change; re-check the cited official policy before acting.",
+                "Listing a facility does not establish current eligibility or availability and does not authorize a booking.",
+            ],
         }
 
 

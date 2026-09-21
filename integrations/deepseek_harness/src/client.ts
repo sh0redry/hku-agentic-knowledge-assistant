@@ -288,6 +288,10 @@ export class HKUAgentsClient {
     return this.request('POST', '/api/v1/integration/library/spaces/search-availability', input, signal)
   }
 
+  listLibraryFacilities(signal?: AbortSignal): Promise<IntegrationEnvelope> {
+    return this.request('POST', '/api/v1/integration/library/spaces/list-facilities', {}, signal)
+  }
+
   dailyBriefing(
     input: {
       term_label?: string
