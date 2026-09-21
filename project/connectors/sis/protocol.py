@@ -42,6 +42,7 @@ class BrowserCommandName(str, Enum):
     READ_LIBRARY_RESEARCH_ITEM = "library.research.item"
     READ_LIBRARY_RESEARCH_ACCESS_OPTIONS = "library.research.access_options"
     SEARCH_LIBRARY_SPACE_AVAILABILITY = "library.spaces.search_availability"
+    READ_LIBRARY_HOURS_AND_LOCATIONS = "library.hours_and_locations"
 
 
 class BrowserCommand(BaseModel):

@@ -229,4 +229,33 @@ assert.throws(
   error => error.code === "LIBRARY_LOGIN_REQUIRED"
 );
 
+const hoursHeader = row([cell("Library"), cell("Mon 21 Sep"), cell("Tue 22 Sep")]);
+const mainHours = row([cell("Main Library"), cell("8:30 am - 11:00 pm"), cell("Closed")]);
+const library24Hours = row([cell("Library 24"), cell("24 hours"), cell("24 hours")]);
+const hoursDocument = {
+  body: { textContent: "HKUL Opening Hours Current Hours" },
+  querySelectorAll(selector) { return selector === "table tr" ? [hoursHeader, mainHours, library24Hours] : []; }
+};
+const hours = parser.parseHoursAndLocations(hoursDocument, {
+  origin: "https://lib.hku.hk",
+  pathname: "/general/hours/"
+});
+assert.equal(hours.location_count, 2);
+assert.equal(hours.hours_available, true);
+assert.equal(hours.locations[0].periods[0].status, "open");
+assert.equal(hours.locations[0].periods[1].status, "closed");
+assert.equal(hours.locations[1].periods[0].hours_label, "24 hours");
+assert.equal(hours.diagnostics.duplicate_location_candidate_count, 0);
+
+const unavailableHours = parser.parseHoursAndLocations({
+  body: { textContent: "Opening Hours The opening hours of the selected date is not available yet." },
+  querySelectorAll(selector) { return selector === "table tr" ? [hoursHeader, row([cell("Main Library"), cell("-----"), cell("-----")])] : []; }
+}, {
+  origin: "https://lib.hku.hk",
+  pathname: "/general/hours/"
+});
+assert.equal(unavailableHours.hours_available, false);
+assert.equal(unavailableHours.diagnostics.empty_state_found, true);
+assert.equal(unavailableHours.diagnostics.placeholder_location_count, 1);
+
 console.log("HKU Library parser synthetic tests passed.");

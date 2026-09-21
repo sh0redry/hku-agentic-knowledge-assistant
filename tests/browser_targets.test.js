@@ -39,6 +39,10 @@ assert.equal(
   "space_availability"
 );
 assert.equal(
+  targets.classifyUrl("https://lib.hku.hk/general/hours/?date=secret").page_kind,
+  "library_hours"
+);
+assert.equal(
   targets.classifyUrl("https://moodle.hku.hk/my/").logged_in,
   null
 );

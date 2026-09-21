@@ -1,4 +1,4 @@
-# HKU AGENTS Multi-System Browser Bridge
+﻿# HKU AGENTS Multi-System Browser Bridge
 
 This unpacked Manifest V3 extension discovers approved HKU Portal, SIS, Moodle,
 and Library tabs and reports a sanitized per-system connection registry to the
@@ -133,6 +133,9 @@ routes and never grant a generic capability over My Library or Book a Space.
   HKUL credentials remain manual; slot selection, booking forms, and booking
   submission are absent. Tab discovery strips query strings and fragments
   before reporting state.
+- The separate HKUL hours parser `0.1.1` reads only the official public
+  `/general/hours/` table. It distinguishes explicit `Closed` cells from the
+  site's "not available yet" state and never converts unpublished hours into closures.
 - SIS parser `0.3.1` additionally normalizes read-only Class Schedule meetings
   and visible Examination Timetables entries. It does not create or edit calendar data.
 - Verified functional SIS pages take precedence over stale hidden sign-in text

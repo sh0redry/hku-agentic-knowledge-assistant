@@ -292,6 +292,10 @@ export class HKUAgentsClient {
     return this.request('POST', '/api/v1/integration/library/spaces/list-facilities', {}, signal)
   }
 
+  libraryHoursAndLocations(signal?: AbortSignal): Promise<IntegrationEnvelope> {
+    return this.request('POST', '/api/v1/integration/library/hours-and-locations', {}, signal)
+  }
+
   dailyBriefing(
     input: {
       term_label?: string

@@ -100,6 +100,43 @@ class LibraryIntegrationTests(unittest.TestCase):
             },
         }
 
+    def hours_navigation(self, *, available: bool = True) -> dict:
+        locations = [{
+            "name": "Main Library",
+            "periods": [
+                {"period_label": "Mon 21 Sep", "hours_label": "8:30 am - 11:00 pm", "status": "open"},
+                {"period_label": "Tue 22 Sep", "hours_label": "Closed", "status": "closed"},
+            ],
+        }] if available else []
+        return {
+            "read_only": True,
+            "navigation_only": True,
+            "library_write_requests_sent": 0,
+            "navigation_interactions_performed": True,
+            "target_origin": "https://lib.hku.hk",
+            "target_page_kind": "library_hours",
+            "steps": ["library_fixed_route_to_hours"],
+            "snapshot": {
+                "origin": "https://lib.hku.hk",
+                "logged_in": None,
+                "page_kind": "library_hours",
+                "hours_available": available,
+                "location_count": len(locations),
+                "locations": locations,
+                "source_url": "https://lib.hku.hk/general/hours/",
+                "diagnostics": {
+                    "parser_version": "0.1.1",
+                    "hours_marker_found": True,
+                    "empty_state_found": not available,
+                    "row_count": 2,
+                    "location_candidate_count": len(locations),
+                    "parsed_location_count": len(locations),
+                    "duplicate_location_candidate_count": 0,
+                    "placeholder_location_count": 1 if not available else 0,
+                },
+            },
+        }
+
     def test_research_search_returns_rows_without_persisting_query_or_titles(self):
         connector = self.container.connectors["sis_browser"]
         connector.search_library_research = AsyncMock(return_value=self.research_navigation())
@@ -171,6 +208,39 @@ class LibraryIntegrationTests(unittest.TestCase):
         stored = self.container.store.get_task(response["task"]["id"])
         self.assertEqual(stored.result["facility_count"], 3)
         self.assertNotIn("facilities", stored.result)
+
+    def test_hours_and_locations_reads_public_page_without_persisting_rows(self):
+        connector = self.container.connectors["sis_browser"]
+        connector.read_library_hours_and_locations = AsyncMock(
+            return_value=self.hours_navigation()
+        )
+        response = self.client.post(
+            "/api/v1/integration/library/hours-and-locations",
+            headers=self.headers,
+            json={},
+        ).json()
+        self.assertTrue(response["ok"])
+        self.assertEqual(response["result"]["library_writes_performed"], 0)
+        self.assertTrue(response["result"]["hours_available"])
+        self.assertEqual(response["result"]["locations"][0]["periods"][1]["status"], "closed")
+        stored = self.container.store.get_task(response["task"]["id"])
+        self.assertFalse(stored.result["location_hours_persisted"])
+        self.assertNotIn("locations", stored.result)
+
+    def test_hours_explicit_unavailable_state_is_not_reported_as_closed(self):
+        connector = self.container.connectors["sis_browser"]
+        connector.read_library_hours_and_locations = AsyncMock(
+            return_value=self.hours_navigation(available=False)
+        )
+        response = self.client.post(
+            "/api/v1/integration/library/hours-and-locations",
+            headers=self.headers,
+            json={},
+        ).json()
+        self.assertTrue(response["ok"])
+        self.assertFalse(response["result"]["hours_available"])
+        self.assertEqual(response["result"]["location_count"], 0)
+        self.assertIn("does not mean", response["result"]["warnings"][0])
 
     def test_research_item_returns_bibliography_without_persisting_details(self):
         connector = self.container.connectors["sis_browser"]

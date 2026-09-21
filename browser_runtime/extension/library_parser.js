@@ -5,6 +5,7 @@
   const LIBRARY_ORIGIN = "https://lib.hku.hk";
   const BOOKING_ORIGIN = "https://booking.lib.hku.hk";
   const VERSION = "0.2.2";
+  const HOURS_VERSION = "0.1.1";
 
   function clean(value) {
     return String(value || "").replace(/\s+/g, " ").trim();
@@ -349,6 +350,80 @@
     return null;
   }
 
+  function libraryHoursStatus(value) {
+    const label = clean(value);
+    if (/\bclosed\b/i.test(label)) return "closed";
+    if (/\b24\s*hours?\b/i.test(label) ||
+        /\b(?:[01]?\d|2[0-3])(?::[0-5]\d)?\s*(?:am|pm)?\s*(?:-|\u2013|\u2014|to)\s*(?:[01]?\d|2[0-3])(?::[0-5]\d)?\s*(?:am|pm)?\b/i.test(label)) return "open";
+    return null;
+  }
+
+  function parseHoursAndLocations(documentObject, locationObject) {
+    const path = String(locationObject?.pathname || "").toLowerCase();
+    if (locationObject?.origin !== LIBRARY_ORIGIN || !path.startsWith("/general/hours")) {
+      const error = new Error("Open the official HKUL opening-hours page first.");
+      error.code = "WRONG_LIBRARY_HOURS_PAGE";
+      throw error;
+    }
+    const bodyText = clean(documentObject.body?.innerText || documentObject.body?.textContent);
+    const hoursMarkerFound = /\bopening hours\b/i.test(bodyText);
+    const emptyStateFound = /opening hours of the selected date is not available yet/i.test(bodyText);
+    const rows = [...(documentObject.querySelectorAll?.("table tr") || [])];
+    const locations = [];
+    let headers = [];
+    let candidates = 0;
+    let placeholders = 0;
+    for (const row of rows) {
+      const cells = cellsOf(row).map((cell) => clean(cell.innerText || cell.textContent));
+      if (!cells.length) continue;
+      if (/^library$/i.test(cells[0])) {
+        headers = cells.slice(1).map((value) => value.slice(0, 120));
+        continue;
+      }
+      const name = cells[0];
+      if (!name || /^(?:date|day|hours?|service counters?|[-\u2013\u2014]+)$/i.test(name)) continue;
+      const periods = [];
+      cells.slice(1).forEach((hoursLabel, index) => {
+        const status = libraryHoursStatus(hoursLabel);
+        if (!status) return;
+        periods.push({
+          period_label: (headers[index] || `period_${index + 1}`).slice(0, 120),
+          hours_label: hoursLabel.slice(0, 200),
+          status
+        });
+      });
+      if (!periods.length) {
+        if (cells.slice(1).some((value) => /^[-\u2013\u2014]+$/.test(value))) placeholders += 1;
+        continue;
+      }
+      candidates += 1;
+      const key = `${name.toLowerCase()}|${periods.map((period) => `${period.period_label}:${period.hours_label}`).join("|")}`;
+      if (!locations.some((item) => item._key === key)) {
+        locations.push({ _key: key, name: name.slice(0, 200), periods });
+      }
+    }
+    for (const location of locations) delete location._key;
+    return {
+      origin: LIBRARY_ORIGIN,
+      logged_in: null,
+      page_kind: "library_hours",
+      hours_available: locations.length > 0,
+      location_count: locations.length,
+      locations,
+      source_url: "https://lib.hku.hk/general/hours/",
+      diagnostics: {
+        parser_version: HOURS_VERSION,
+        hours_marker_found: hoursMarkerFound,
+        empty_state_found: emptyStateFound,
+        row_count: rows.length,
+        location_candidate_count: candidates,
+        parsed_location_count: locations.length,
+        duplicate_location_candidate_count: Math.max(0, candidates - locations.length),
+        placeholder_location_count: placeholders
+      }
+    };
+  }
+
   function parseSpaceAvailability(documentObject, locationObject) {
     if (locationObject?.origin === LIBRARY_ORIGIN && String(locationObject?.pathname || "").toLowerCase().startsWith("/hkulauth/")) {
       const error = new Error("Complete HKUL authentication in Chrome before reading space availability.");
@@ -448,6 +523,6 @@
     };
   }
 
-  root.HKULibraryParser = { parseResearch, parseResearchDetail, parseSpaceAvailability, safeDetailUrl };
+  root.HKULibraryParser = { parseResearch, parseResearchDetail, parseSpaceAvailability, parseHoursAndLocations, safeDetailUrl };
   if (typeof module !== "undefined" && module.exports) module.exports = root.HKULibraryParser;
 })(typeof self !== "undefined" ? self : this);

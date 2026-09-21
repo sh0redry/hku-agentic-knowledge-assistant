@@ -402,6 +402,20 @@ export function apply(ctx: Context, config: Config): void {
 
   ctx.tools.register(
     defineTool({
+      name: 'hku_library_hours_and_locations',
+      description:
+        'Open the official public HKUL current-hours page and read its visible location and time-period rows (for example, the live Today view). Browser navigation and page reading occur, but no account data is accessed and no library write is performed. An explicit unavailable state means hours are not published yet, not that every location is closed.',
+      parameters: {},
+      output: envelopeOutput,
+      timeoutMs: config.timeoutMs,
+      async execute(_args, execution) {
+        return client.libraryHoursAndLocations(execution.signal)
+      },
+    }),
+  )
+
+  ctx.tools.register(
+    defineTool({
       name: 'hku_library_space_availability',
       description:
         'Open one fixed HKUL Book a Space facility route and read visible available slots after the user manually completes HKUL authentication. It may navigate to the authentication or availability page, but never selects a slot, opens a booking form, enters details, or submits a reservation. Check booking_writes_performed (always 0).',

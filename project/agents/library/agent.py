@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from typing import Literal
 
@@ -40,6 +40,10 @@ class LibraryFacilityListRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class LibraryHoursAndLocationsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
 class LibraryResearchRecordRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -50,7 +54,7 @@ def _translate_browser_error(exc: BrowserBridgeError) -> CapabilityError:
     if exc.code in {"COMMAND_NOT_ALLOWED", "PAGE_SCRIPT_UNAVAILABLE"}:
         return CapabilityError(
             "EXTENSION_UPDATE_REQUIRED",
-            "Reload HKU AGENTS Browser Bridge 0.15.2 before using HKUL tools.",
+            "Reload HKU AGENTS Browser Bridge 0.16.1 before using HKUL tools.",
         )
     return CapabilityError(exc.code, str(exc))
 
@@ -106,7 +110,7 @@ class LibraryResearchSearchCapability(BaseCapability):
         snapshot = navigation["snapshot"]
         diagnostics = snapshot["diagnostics"]
         if diagnostics["parser_version"] != "0.2.2":
-            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.15.2.")
+            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.16.1.")
         if diagnostics["incomplete_result_candidate_count"] or diagnostics["unsafe_result_url_candidate_count"]:
             raise CapabilityError(
                 "LIBRARY_RESEARCH_PARSE_INCOMPLETE",
@@ -176,7 +180,7 @@ class LibraryResearchItemCapability(BaseCapability):
         snapshot = navigation["snapshot"]
         diagnostics = snapshot["diagnostics"]
         if diagnostics["parser_version"] != "0.2.2":
-            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.15.2.")
+            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.16.1.")
         if not diagnostics["detail_marker_found"] or not diagnostics["record_id_found"] or not diagnostics["title_found"]:
             raise CapabilityError(
                 "LIBRARY_ITEM_PARSE_INCOMPLETE",
@@ -245,7 +249,7 @@ class LibraryResearchAccessOptionsCapability(BaseCapability):
         snapshot = navigation["snapshot"]
         diagnostics = snapshot["diagnostics"]
         if diagnostics["parser_version"] != "0.2.2":
-            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.15.2.")
+            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.16.1.")
         if not diagnostics["detail_marker_found"] or not diagnostics["record_id_found"] or not diagnostics["title_found"]:
             raise CapabilityError(
                 "LIBRARY_ACCESS_PARSE_INCOMPLETE",
@@ -396,6 +400,83 @@ class LibraryFacilityListCapability(BaseCapability):
         }
 
 
+class LibraryHoursAndLocationsCapability(BaseCapability):
+    input_model = LibraryHoursAndLocationsRequest
+    manifest = CapabilityManifest(
+        id="library.hours_and_locations",
+        version=1,
+        agent="library",
+        title="Read HKUL hours and locations",
+        description=(
+            "Open the official HKUL current-hours page and read the visible location and "
+            "time-period rows. An explicit unavailable state is reported as unavailable, "
+            "not interpreted as closure. This performs no account access or library write."
+        ),
+        mode=CapabilityMode.READ,
+        risk=RiskLevel.MEDIUM,
+        confirmation=ConfirmationMode.NONE,
+        required_connections=["sis_browser"],
+        availability="local_browser_public_read_only",
+        input_schema="LibraryHoursAndLocationsRequest",
+        output_schema="LibraryHoursAndLocationsResult",
+        timeout_seconds=35,
+    )
+
+    def __init__(self, connector: BrowserSISConnector):
+        self.connector = connector
+
+    def persisted_result(self, result: dict) -> dict:
+        return {
+            "read_only": True,
+            "library_writes_performed": 0,
+            "hours_available": result.get("hours_available", False),
+            "location_count": result.get("location_count", 0),
+            "location_hours_persisted": False,
+        }
+
+    async def execute(self, validated_input: LibraryHoursAndLocationsRequest, context: ExecutionContext) -> dict:
+        try:
+            navigation = await self.connector.read_library_hours_and_locations()
+        except BrowserBridgeError as exc:
+            raise _translate_browser_error(exc) from exc
+        snapshot = navigation["snapshot"]
+        diagnostics = snapshot["diagnostics"]
+        if diagnostics["parser_version"] != "0.1.1":
+            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.16.1.")
+        if not diagnostics["hours_marker_found"]:
+            raise CapabilityError("LIBRARY_HOURS_NOT_READY", "The official HKUL opening-hours view is not ready.")
+        if not snapshot["hours_available"] and not diagnostics["empty_state_found"]:
+            raise CapabilityError(
+                "LIBRARY_HOURS_PARSE_INCOMPLETE",
+                "The HKUL page exposed neither verified hours nor its explicit unavailable state.",
+                {"diagnostics": diagnostics},
+            )
+        warnings = []
+        if diagnostics["empty_state_found"]:
+            warnings.append(
+                "HKUL explicitly reports that opening hours for the selected date are not available yet; this does not mean the libraries are closed."
+            )
+        if diagnostics["placeholder_location_count"]:
+            warnings.append(
+                "One or more placeholder rows contained no open/closed hours and were not returned as locations."
+            )
+        return {
+            "read_only": True,
+            "systems_contacted": ["hkul_public"],
+            "navigation_interactions_performed": navigation["navigation_interactions_performed"],
+            "data_reads_performed": 1,
+            "domain_writes_performed": 0,
+            "library_writes_performed": 0,
+            "account_data_read": False,
+            "hours_available": snapshot["hours_available"],
+            "location_count": snapshot["location_count"],
+            "locations": snapshot["locations"],
+            "source_url": snapshot["source_url"],
+            "diagnostics": diagnostics,
+            "warnings": warnings,
+            "navigation": {key: value for key, value in navigation.items() if key != "snapshot"},
+        }
+
 class LibrarySpaceAvailabilityCapability(BaseCapability):
     input_model = LibrarySpaceAvailabilityRequest
     manifest = CapabilityManifest(
@@ -440,7 +521,7 @@ class LibrarySpaceAvailabilityCapability(BaseCapability):
         snapshot = navigation["snapshot"]
         diagnostics = snapshot["diagnostics"]
         if diagnostics["parser_version"] != "0.2.2":
-            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.15.2.")
+            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.16.1.")
         if diagnostics["incomplete_available_slot_candidate_count"]:
             raise CapabilityError(
                 "LIBRARY_SPACE_PARSE_INCOMPLETE",

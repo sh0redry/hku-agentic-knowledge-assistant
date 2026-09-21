@@ -141,6 +141,9 @@ export class HKUAgentsClient {
     listLibraryFacilities(signal) {
         return this.request('POST', '/api/v1/integration/library/spaces/list-facilities', {}, signal);
     }
+    libraryHoursAndLocations(signal) {
+        return this.request('POST', '/api/v1/integration/library/hours-and-locations', {}, signal);
+    }
     dailyBriefing(input, signal) {
         return this.request('POST', '/api/v1/integration/briefing/today', input, signal);
     }

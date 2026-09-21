@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import hmac
 from typing import Any
@@ -16,6 +16,7 @@ from agents.moodle.agent import (
 from agents.portal.agent import PortalNoticeListRequest
 from agents.library.agent import (
     LibraryFacilityListRequest,
+    LibraryHoursAndLocationsRequest,
     LibraryResearchRecordRequest,
     LibraryResearchSearchRequest,
     LibrarySpaceAvailabilityRequest,
@@ -227,7 +228,7 @@ def create_integration_router(expected_token: str) -> APIRouter:
             }
             error_code = task_error.get("code", "TASK_FAILED")
             recovery = (
-                "Reload the unpacked HKU AGENTS Browser Bridge 0.15.2, then refresh HKU Portal and Moodle."
+                "Reload the unpacked HKU AGENTS Browser Bridge 0.16.1, then refresh HKU Portal and Moodle."
                 if error_code == "EXTENSION_UPDATE_REQUIRED"
                 else "Open HKU Portal and complete login/MFA, then retry the Moodle tool."
                 if error_code == "MOODLE_LOGIN_REQUIRED"
@@ -301,7 +302,7 @@ def create_integration_router(expected_token: str) -> APIRouter:
             task_error = record.error or {"code": "TASK_FAILED", "message": "The read-only HKUL task did not complete."}
             error_code = task_error.get("code", "TASK_FAILED")
             recovery = (
-                "Reload HKU AGENTS Browser Bridge 0.15.2, then retry."
+                "Reload HKU AGENTS Browser Bridge 0.16.1, then retry."
                 if error_code == "EXTENSION_UPDATE_REQUIRED"
                 else "Complete HKUL authentication in the visible Chrome tab, then retry; credentials and MFA remain manual."
                 if error_code == "LIBRARY_LOGIN_REQUIRED"
@@ -312,6 +313,8 @@ def create_integration_router(expected_token: str) -> APIRouter:
                     "LIBRARY_ITEM_NOT_READY",
                     "LIBRARY_ITEM_PARSE_INCOMPLETE",
                     "LIBRARY_ACCESS_PARSE_INCOMPLETE",
+                    "LIBRARY_HOURS_NOT_READY",
+                    "LIBRARY_HOURS_PARSE_INCOMPLETE",
                 }
                 else "Open the Browser Bridge popup, restore the local connection, and retry."
                 if error_code in {
@@ -356,6 +359,19 @@ def create_integration_router(expected_token: str) -> APIRouter:
             correlation_id,
             "library.spaces.list_facilities",
             body or LibraryFacilityListRequest(),
+        )
+
+    @router.post("/library/hours-and-locations", response_model=IntegrationResponse)
+    async def read_library_hours_and_locations(
+        request: Request,
+        body: LibraryHoursAndLocationsRequest | None = None,
+        correlation_id: str = Depends(authorize),
+    ):
+        return await run_library_task(
+            request,
+            correlation_id,
+            "library.hours_and_locations",
+            body or LibraryHoursAndLocationsRequest(),
         )
 
     @router.post("/library/research/item", response_model=IntegrationResponse)
@@ -428,7 +444,7 @@ def create_integration_router(expected_token: str) -> APIRouter:
             }
             error_code = task_error.get("code", "TASK_FAILED")
             recovery = (
-                "Reload HKU AGENTS Browser Bridge 0.15.2 and refresh HKU Portal."
+                "Reload HKU AGENTS Browser Bridge 0.16.1 and refresh HKU Portal."
                 if error_code == "EXTENSION_UPDATE_REQUIRED"
                 else "Keep the authenticated HKU Portal home page open and report the count-only parser diagnostics."
                 if error_code == "PORTAL_NOTICE_PARSE_INCOMPLETE"

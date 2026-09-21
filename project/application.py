@@ -20,6 +20,7 @@ from agents.moodle.agent import (
 from agents.portal.agent import PortalNoticeListCapability
 from agents.library.agent import (
     LibraryFacilityListCapability,
+    LibraryHoursAndLocationsCapability,
     LibraryResearchAccessOptionsCapability,
     LibraryResearchItemCapability,
     LibraryResearchSearchCapability,
@@ -108,6 +109,7 @@ class ApplicationContainer:
         self.registry.register(LibraryResearchItemCapability(self.connectors["sis_browser"]))
         self.registry.register(LibraryResearchAccessOptionsCapability(self.connectors["sis_browser"]))
         self.registry.register(LibraryFacilityListCapability())
+        self.registry.register(LibraryHoursAndLocationsCapability(self.connectors["sis_browser"]))
         self.registry.register(LibrarySpaceAvailabilityCapability(self.connectors["sis_browser"]))
 
         self.tasks = TaskManager(self.registry, self.store)

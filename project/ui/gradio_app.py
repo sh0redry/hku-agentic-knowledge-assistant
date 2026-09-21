@@ -370,6 +370,12 @@ def create_gradio_ui(container):
         except Exception as exc:
             return _pretty({"ok": False, "read_only": True, "message": str(exc)})
 
+    async def library_hours_handler():
+        try:
+            return _pretty(await asyncio.to_thread(api_client.library_hours_and_locations))
+        except Exception as exc:
+            return _pretty({"ok": False, "read_only": True, "message": str(exc)})
+
     async def live_sis_call(action, operation):
         completed_at = lambda: datetime.now(timezone.utc).isoformat(timespec="seconds")
         try:
@@ -905,6 +911,18 @@ def create_gradio_ui(container):
             library_access_button.click(
                 library_access_handler,
                 inputs=library_record_id,
+                outputs=library_output,
+                show_progress="minimal",
+                queue=False,
+            )
+            gr.Markdown(
+                "### HKUL opening hours and locations\n"
+                "Open the official current-hours page and read its visible time-period rows. "
+                "An unavailable future date is reported as unknown, not as closed."
+            )
+            library_hours_button = gr.Button("Read current opening hours")
+            library_hours_button.click(
+                library_hours_handler,
                 outputs=library_output,
                 show_progress="minimal",
                 queue=False,

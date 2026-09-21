@@ -7,6 +7,7 @@ from browser_bridge.models import (
     MoodleNavigationResult,
     LibraryResearchNavigationResult,
     LibraryResearchItemNavigationResult,
+    LibraryHoursNavigationResult,
     LibrarySpaceNavigationResult,
     PortalPageSnapshot,
     PortalNoticeListSnapshot,
@@ -103,6 +104,10 @@ class BrowserSISConnector(BaseConnector):
             BrowserCommandName.SEARCH_LIBRARY_SPACE_AVAILABILITY, payload
         )
         return LibrarySpaceNavigationResult.model_validate(data).model_dump(mode="json")
+
+    async def read_library_hours_and_locations(self) -> dict:
+        data = await self._command(BrowserCommandName.READ_LIBRARY_HOURS_AND_LOCATIONS)
+        return LibraryHoursNavigationResult.model_validate(data).model_dump(mode="json")
 
     async def bind_tab(self) -> dict:
         data = await self._command(BrowserCommandName.BIND_SIS_TAB)

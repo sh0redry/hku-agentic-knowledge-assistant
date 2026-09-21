@@ -175,6 +175,7 @@ class PlatformAPITests(unittest.TestCase):
                 "library.research.access_options",
                 "library.spaces.list_facilities",
                 "library.spaces.search_availability",
+                "library.hours_and_locations",
             },
         )
         connections = self.client.get("/api/v1/connections").json()["connections"]
@@ -1041,7 +1042,7 @@ class SafetyFrameworkTests(unittest.TestCase):
                 "http://127.0.0.1/*",
             ],
         )
-        self.assertEqual(manifest["version"], "0.15.2")
+        self.assertEqual(manifest["version"], "0.16.1")
 
         node = shutil.which("node")
         if node is None:

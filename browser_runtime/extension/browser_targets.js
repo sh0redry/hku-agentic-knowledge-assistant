@@ -90,7 +90,7 @@
         system: "library",
         ...location,
         logged_in: null,
-        page_kind: path.startsWith("/hkulauth/") ? "authentication_pending" : "library_page"
+        page_kind: path.startsWith("/hkulauth/") ? "authentication_pending" : path.startsWith("/general/hours") ? "library_hours" : "library_page"
       };
     }
     if (location.origin === "https://booking.lib.hku.hk") {

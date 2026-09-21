@@ -42,6 +42,7 @@ const ALLOWED_COMMANDS = new Set([
   "library.research.search",
   "library.research.item",
   "library.research.access_options",
+  "library.hours_and_locations",
   "library.spaces.search_availability"
 ]);
 const NAVIGATION_DEADLINE_MS = 30000;
@@ -269,13 +270,18 @@ async function waitForLibraryRead(tabId, command, payload, deadline) {
           ? diagnostics.detail_marker_found === true && diagnostics.metadata_field_count > 0
           : command === "library.research.read_access_options"
             ? diagnostics.detail_marker_found === true && diagnostics.parsed_access_option_count > 0
+          : command === "library.hours.read"
+            ? diagnostics.hours_marker_found === true &&
+              (diagnostics.parsed_location_count > 0 || diagnostics.empty_state_found === true)
           : diagnostics.availability_marker_found === true;
       if (ready) {
         const signature = command === "library.research.read_results"
           ? `${diagnostics.result_candidate_count}|${diagnostics.parsed_result_count}|${diagnostics.incomplete_result_candidate_count}`
           : command === "library.research.read_item" || command === "library.research.read_access_options"
             ? `${snapshot.record_id || ""}|${snapshot.title || ""}|${diagnostics.metadata_field_count}|${diagnostics.parsed_access_option_count}`
-            : `${snapshot.date || ""}|${diagnostics.slot_candidate_count}|${diagnostics.parsed_available_slot_count}`;
+            : command === "library.hours.read"
+              ? `${snapshot.hours_available}|${diagnostics.row_count}|${diagnostics.parsed_location_count}|${diagnostics.empty_state_found}`
+              : `${snapshot.date || ""}|${diagnostics.slot_candidate_count}|${diagnostics.parsed_available_slot_count}`;
         if (signature === previousReadySignature) return snapshot;
         previousReadySignature = signature;
       } else {
@@ -291,7 +297,9 @@ async function waitForLibraryRead(tabId, command, payload, deadline) {
     ? "LIBRARY_SEARCH_NOT_READY"
     : command === "library.research.read_item" || command === "library.research.read_access_options"
       ? "LIBRARY_ITEM_NOT_READY"
-      : "LIBRARY_SPACE_PAGE_NOT_READY";
+      : command === "library.hours.read"
+        ? "LIBRARY_HOURS_NOT_READY"
+        : "LIBRARY_SPACE_PAGE_NOT_READY";
   throw commandError(code, lastError?.message || "The HKUL page did not become ready before the deadline.");
 }
 
@@ -348,6 +356,21 @@ async function searchLibrarySpaceAvailability(payload) {
     target_page_kind: "space_availability",
     facility_type: facilityType,
     steps: ["library_fixed_route_to_space_availability"],
+    snapshot
+  };
+}
+
+async function readLibraryHoursAndLocations() {
+  const tab = await chrome.tabs.create({ url: "https://lib.hku.hk/general/hours/", active: true });
+  const snapshot = await waitForLibraryRead(tab.id, "library.hours.read", {}, Date.now() + NAVIGATION_DEADLINE_MS);
+  return {
+    read_only: true,
+    navigation_only: true,
+    library_write_requests_sent: 0,
+    navigation_interactions_performed: true,
+    target_origin: "https://lib.hku.hk",
+    target_page_kind: "library_hours",
+    steps: ["library_fixed_route_to_hours"],
     snapshot
   };
 }
@@ -1212,6 +1235,7 @@ async function executeCommand(command, payload = {}) {
   if (command === "library.research.item") return readLibraryResearchDetail(payload, "item");
   if (command === "library.research.access_options") return readLibraryResearchDetail(payload, "access_options");
   if (command === "library.spaces.search_availability") return searchLibrarySpaceAvailability(payload);
+  if (command === "library.hours_and_locations") return readLibraryHoursAndLocations();
   return inspectBoundSisTab(command);
 }
 

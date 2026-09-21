@@ -447,6 +447,60 @@ class LibraryResearchNavigationResult(StrictMessage):
     snapshot: LibraryResearchSnapshot
 
 
+class LibraryHoursPeriod(StrictMessage):
+    period_label: str = Field(min_length=1, max_length=120)
+    hours_label: str = Field(min_length=1, max_length=200)
+    status: Literal["open", "closed"]
+
+
+class LibraryHoursLocation(StrictMessage):
+    name: str = Field(min_length=1, max_length=200)
+    periods: list[LibraryHoursPeriod] = Field(min_length=1, max_length=14)
+
+
+class LibraryHoursDiagnostics(StrictMessage):
+    parser_version: str = Field(pattern=r"^\d+\.\d+\.\d+$", max_length=20)
+    hours_marker_found: bool
+    empty_state_found: bool
+    row_count: int = Field(ge=0, le=1000)
+    location_candidate_count: int = Field(ge=0, le=200)
+    parsed_location_count: int = Field(ge=0, le=200)
+    duplicate_location_candidate_count: int = Field(ge=0, le=200)
+    placeholder_location_count: int = Field(ge=0, le=200)
+
+
+class LibraryHoursSnapshot(StrictMessage):
+    origin: Literal["https://lib.hku.hk"]
+    logged_in: bool | None = None
+    page_kind: Literal["library_hours"]
+    hours_available: bool
+    location_count: int = Field(ge=0, le=200)
+    locations: list[LibraryHoursLocation] = Field(default_factory=list, max_length=200)
+    source_url: Literal["https://lib.hku.hk/general/hours/"]
+    diagnostics: LibraryHoursDiagnostics
+
+    @model_validator(mode="after")
+    def validate_hours_counts(self):
+        if self.location_count != len(self.locations):
+            raise ValueError("Library hours count does not match the structured rows.")
+        if self.diagnostics.parsed_location_count != len(self.locations):
+            raise ValueError("Library hours parser count does not match the structured rows.")
+        if self.hours_available != bool(self.locations):
+            raise ValueError("Library hours availability does not match the structured rows.")
+        return self
+
+
+class LibraryHoursNavigationResult(StrictMessage):
+    read_only: Literal[True]
+    navigation_only: Literal[True]
+    library_write_requests_sent: Literal[0]
+    navigation_interactions_performed: bool
+    target_origin: Literal["https://lib.hku.hk"]
+    target_page_kind: Literal["library_hours"]
+    steps: list[Literal["library_fixed_route_to_hours"]] = Field(min_length=1, max_length=1)
+    snapshot: LibraryHoursSnapshot
+
+
 class LibraryResearchMetadataField(StrictMessage):
     label: str = Field(min_length=1, max_length=120)
     value: str = Field(min_length=1, max_length=1000)
