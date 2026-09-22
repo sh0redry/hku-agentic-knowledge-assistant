@@ -251,10 +251,12 @@ function libraryResearchDetailUrl(payload) {
 }
 
 const SPACE_ROUTES = Object.freeze({
-  single_study_room: "https://booking.lib.hku.hk/FView.aspx?ftype=31&lib=3",
-  studio_editing_room: "https://booking.lib.hku.hk/FView.aspx?ftype=34&lib=3",
-  study_table: "https://booking.lib.hku.hk/table"
+  single_study_room: { location: "Main Library", booking_facility_type: "Single Study Room (3 sessions)" },
+  studio_editing_room: { location: "Main Library", booking_facility_type: "Studio and Editing Rooms" },
+  study_table: { location: "Main Library", booking_facility_type: "Study Table" },
+  study_room: { location: "Chi Wah Learning Commons", booking_facility_type: "Study Room" }
 });
+const SPACE_AVAILABILITY_URL = "https://booking.lib.hku.hk/Secure/FacilityStatusDate.aspx";
 
 async function waitForLibraryRead(tabId, command, payload, deadline) {
   let lastError = null;
@@ -273,7 +275,9 @@ async function waitForLibraryRead(tabId, command, payload, deadline) {
           : command === "library.hours.read"
             ? diagnostics.hours_marker_found === true &&
               (diagnostics.parsed_location_count > 0 || diagnostics.empty_state_found === true)
-          : diagnostics.availability_marker_found === true;
+          : diagnostics.availability_marker_found === true &&
+            diagnostics.selected_filters_found === true &&
+            diagnostics.table_matrix_found === true;
       if (ready) {
         const signature = command === "library.research.read_results"
           ? `${diagnostics.result_candidate_count}|${diagnostics.parsed_result_count}|${diagnostics.incomplete_result_candidate_count}`
@@ -281,7 +285,7 @@ async function waitForLibraryRead(tabId, command, payload, deadline) {
             ? `${snapshot.record_id || ""}|${snapshot.title || ""}|${diagnostics.metadata_field_count}|${diagnostics.parsed_access_option_count}`
             : command === "library.hours.read"
               ? `${snapshot.hours_available}|${diagnostics.row_count}|${diagnostics.parsed_location_count}|${diagnostics.empty_state_found}`
-              : `${snapshot.date || ""}|${diagnostics.slot_candidate_count}|${diagnostics.parsed_available_slot_count}`;
+              : `${snapshot.location || ""}|${snapshot.booking_facility_type || ""}|${snapshot.date || ""}|${snapshot.page_number || 1}|${diagnostics.slot_candidate_count}|${diagnostics.parsed_available_slot_count}`;
         if (signature === previousReadySignature) return snapshot;
         previousReadySignature = signature;
       } else {
@@ -342,10 +346,45 @@ async function readLibraryResearchDetail(payload, mode) {
 
 async function searchLibrarySpaceAvailability(payload) {
   const facilityType = String(payload?.facility_type || "");
-  const url = SPACE_ROUTES[facilityType];
-  if (!url) throw commandError("INVALID_INPUT", "Unsupported HKUL space facility type.");
-  const tab = await chrome.tabs.create({ url, active: true });
-  const snapshot = await waitForLibraryRead(tab.id, "library.spaces.read_availability", {}, Date.now() + NAVIGATION_DEADLINE_MS);
+  const target = SPACE_ROUTES[facilityType];
+  const date = String(payload?.date || "");
+  if (!target || !/^20\d{2}-[01]\d-[0-3]\d$/.test(date)) {
+    throw commandError("INVALID_INPUT", "Supported facility_type and exact YYYY-MM-DD date are required.");
+  }
+  const tab = await chrome.tabs.create({ url: SPACE_AVAILABILITY_URL, active: true });
+  const deadline = Date.now() + NAVIGATION_DEADLINE_MS;
+  const filterPayload = { ...target, date };
+  let searchSubmitted = false;
+  let configured = false;
+  let lastConfigurationError = null;
+  while (Date.now() < deadline) {
+    try {
+      const state = await sendTabCommand(
+        tab.id,
+        "library.spaces.configure_availability",
+        { ...filterPayload, submit_search: !searchSubmitted }
+      );
+      if (state.availability_search_submitted) searchSubmitted = true;
+      if (!state.navigation_started) {
+        configured = true;
+        break;
+      }
+    } catch (error) {
+      lastConfigurationError = error;
+      if (["INVALID_INPUT", "WRONG_LIBRARY_SPACE_PAGE", "LIBRARY_SPACE_FILTER_AMBIGUOUS", "LIBRARY_SPACE_SEARCH_AMBIGUOUS"].includes(error.code)) throw error;
+    }
+    await delay(500);
+  }
+  if (!configured) {
+    throw commandError(
+      lastConfigurationError?.code || "LIBRARY_SPACE_FILTERS_NOT_READY",
+      lastConfigurationError?.message || "The exact HKUL booking filters did not become ready before the deadline."
+    );
+  }
+  const snapshot = await waitForLibraryRead(tab.id, "library.spaces.read_availability", {}, deadline);
+  if (snapshot.location !== target.location || snapshot.booking_facility_type !== target.booking_facility_type || snapshot.date !== date) {
+    throw commandError("LIBRARY_SPACE_FILTER_MISMATCH", "The live booking filters do not match the exact requested target.");
+  }
   return {
     read_only: true,
     navigation_only: true,
@@ -355,7 +394,11 @@ async function searchLibrarySpaceAvailability(payload) {
     target_origin: "https://booking.lib.hku.hk",
     target_page_kind: "space_availability",
     facility_type: facilityType,
-    steps: ["library_fixed_route_to_space_availability"],
+    location: target.location,
+    booking_facility_type: target.booking_facility_type,
+    date,
+    availability_search_submitted: searchSubmitted,
+    steps: ["library_fixed_route_to_space_availability", "library_set_exact_availability_filters"],
     snapshot
   };
 }

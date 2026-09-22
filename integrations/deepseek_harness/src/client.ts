@@ -282,10 +282,83 @@ export class HKUAgentsClient {
   }
 
   searchLibrarySpaceAvailability(
-    input: { facility_type: 'single_study_room' | 'studio_editing_room' | 'study_table' },
+    input: {
+      facility_type: 'single_study_room' | 'studio_editing_room' | 'study_table' | 'study_room'
+      date: string
+    },
     signal?: AbortSignal,
   ): Promise<IntegrationEnvelope> {
-    return this.request('POST', '/api/v1/integration/library/spaces/search-availability', input, signal)
+    const date = typeof input.date === 'string' ? input.date.trim() : ''
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      throw new HKUAgentsAPIError(
+        'INVALID_LIBRARY_AVAILABILITY_DATE',
+        'An exact HKU booking date is required in YYYY-MM-DD format.',
+      )
+    }
+    return this.request('POST', '/api/v1/integration/library/spaces/search-availability', { ...input, date }, signal)
+  }
+
+  previewLibrarySpaceBooking(
+    input: {
+      facility_type: 'single_study_room' | 'studio_editing_room' | 'study_table' | 'study_room'
+      date: string
+      floor?: string
+      room: string
+      start_time: string
+      end_time: string
+      eligibility_category:
+        | 'current_hku_students'
+        | 'current_hku_staff'
+        | 'current_hku_space_students'
+        | 'current_hku_space_staff'
+        | 'hku_alumni'
+    },
+    signal?: AbortSignal,
+  ): Promise<IntegrationEnvelope> {
+    const date = typeof input.date === 'string' ? input.date.trim() : ''
+    const room = typeof input.room === 'string' ? input.room.trim() : ''
+    const startTime = typeof input.start_time === 'string' ? input.start_time.trim() : ''
+    const endTime = typeof input.end_time === 'string' ? input.end_time.trim() : ''
+    const recovery =
+      'Run hku_library_space_availability first and copy one exact returned date, room, start_time, and end_time.'
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      throw new HKUAgentsAPIError(
+        'INVALID_BOOKING_PREVIEW_DATE',
+        'Booking preview date is required in YYYY-MM-DD format and must come from the live availability result.',
+        { recovery },
+      )
+    }
+    if (!room) {
+      throw new HKUAgentsAPIError(
+        'INVALID_BOOKING_PREVIEW_ROOM',
+        'Booking preview room is required and must exactly match a live availability result.',
+        { recovery },
+      )
+    }
+    const timePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/
+    if (!timePattern.test(startTime) || !timePattern.test(endTime) || endTime <= startTime) {
+      throw new HKUAgentsAPIError(
+        'INVALID_BOOKING_PREVIEW_TIME',
+        'Booking preview requires an exact valid start_time and later end_time in HH:MM format.',
+        { recovery },
+      )
+    }
+
+    const normalizedInput = {
+      ...input,
+      date,
+      room,
+      start_time: startTime,
+      end_time: endTime,
+      ...(input.floor === undefined ? {} : { floor: input.floor.trim() }),
+    }
+    return this.request(
+      'POST',
+      '/api/v1/integration/library/spaces/booking-preview',
+      normalizedInput,
+      signal,
+    )
   }
 
   listLibraryFacilities(signal?: AbortSignal): Promise<IntegrationEnvelope> {

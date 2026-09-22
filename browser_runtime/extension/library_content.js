@@ -1,7 +1,7 @@
 (function () {
   "use strict";
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    if (!["library.research.read_results", "library.research.read_item", "library.research.read_access_options", "library.spaces.read_availability", "library.hours.read"].includes(message?.command)) return false;
+    if (!["library.research.read_results", "library.research.read_item", "library.research.read_access_options", "library.spaces.configure_availability", "library.spaces.read_availability", "library.hours.read"].includes(message?.command)) return false;
     try {
       const data = message.command === "library.research.read_results"
         ? self.HKULibraryParser.parseResearch(document, location, message.payload?.limit)
@@ -9,6 +9,8 @@
           ? self.HKULibraryParser.parseResearchDetail(document, location)
           : message.command === "library.hours.read"
             ? self.HKULibraryParser.parseHoursAndLocations(document, location)
+            : message.command === "library.spaces.configure_availability"
+              ? self.HKULibraryParser.configureSpaceAvailability(document, location, message.payload)
             : self.HKULibraryParser.parseSpaceAvailability(document, location);
       sendResponse({ ok: true, data });
     } catch (error) {

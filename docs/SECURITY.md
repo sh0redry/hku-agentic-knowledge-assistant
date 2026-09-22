@@ -66,6 +66,16 @@ System-specific counters prevent ambiguous claims:
 - `library_writes_performed`
 - `booking_writes_performed`
 
+`library.spaces.booking_preview` also remains read-only. Its digest proves only
+which freshly observed slot and policy data were shown; it records no policy
+acceptance, grants no write authority, selects no slot, and cannot be submitted
+to the booking system.
+
+`library.spaces.search_availability` may change the Location, Facility Type,
+and Date filters and press the non-writing `Search` control. These are reported
+as navigation interactions, not booking writes. The bridge has no command for
+the green `Select` cells, session checkboxes, booking `Submit`, or cancellation.
+
 ## Fail-closed parsing
 
 Parsers expose count-only diagnostics for candidates, parsed rows, duplicates,

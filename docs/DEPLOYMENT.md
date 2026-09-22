@@ -98,7 +98,7 @@ npm install
 npm test
 npm pack
 $env:INTEGRATION_API_TOKEN = "the-integration-token"
-npx.cmd --yes @deepseek-ai/dsh@0.1.2-rc.1 plugin --profile web add .\dsh-hku-agents-0.16.1.tgz
+npx.cmd --yes @deepseek-ai/dsh@0.1.2-rc.1 plugin --profile web add .\dsh-hku-agents-0.18.0.tgz
 npx.cmd --yes @deepseek-ai/dsh@0.1.2-rc.1 --profile web --dump-config
 npx.cmd --yes @deepseek-ai/dsh@0.1.2-rc.1 --profile web
 ```

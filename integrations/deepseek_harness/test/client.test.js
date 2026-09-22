@@ -116,7 +116,7 @@ test('client preserves stable API errors without leaking the token', async () =>
   }
 })
 
-test('plugin registers exactly twenty-one restricted HKU tools and forwards preflight input', async () => {
+test('plugin registers exactly twenty-two restricted HKU tools and forwards preflight input', async () => {
   const previous = process.env.INTEGRATION_API_TOKEN
   process.env.INTEGRATION_API_TOKEN = TOKEN
   let receivedBody
@@ -157,6 +157,7 @@ test('plugin registers exactly twenty-one restricted HKU tools and forwards pref
             'hku_library_list_facilities',
             'hku_library_hours_and_locations',
             'hku_library_space_availability',
+            'hku_library_space_booking_preview',
             'hku_library_research_item',
             'hku_library_research_access_options',
           ],
@@ -216,7 +217,19 @@ test('Library tools forward only bounded structured search, record, and facility
           { signal: new AbortController().signal },
         )
         await tools.find(tool => tool.name === 'hku_library_space_availability').execute(
-          { facility_type: 'single_study_room' },
+          { facility_type: 'single_study_room', date: '2026-09-20' },
+          { signal: new AbortController().signal },
+        )
+        await tools.find(tool => tool.name === 'hku_library_space_booking_preview').execute(
+          {
+            facility_type: 'single_study_room',
+            date: '2026-09-20',
+            floor: '4/F',
+            room: 'Study Room A',
+            start_time: '09:00',
+            end_time: '10:30',
+            eligibility_category: 'current_hku_students',
+          },
           { signal: new AbortController().signal },
         )
         await tools.find(tool => tool.name === 'hku_library_research_item').execute(
@@ -242,7 +255,19 @@ test('Library tools forward only bounded structured search, record, and facility
           },
           {
             url: '/api/v1/integration/library/spaces/search-availability',
-            body: { facility_type: 'single_study_room' },
+            body: { facility_type: 'single_study_room', date: '2026-09-20' },
+          },
+          {
+            url: '/api/v1/integration/library/spaces/booking-preview',
+            body: {
+              facility_type: 'single_study_room',
+              date: '2026-09-20',
+              floor: '4/F',
+              room: 'Study Room A',
+              start_time: '09:00',
+              end_time: '10:30',
+              eligibility_category: 'current_hku_students',
+            },
           },
           {
             url: '/api/v1/integration/library/research/item',
@@ -259,6 +284,28 @@ test('Library tools forward only bounded structured search, record, and facility
     if (previous === undefined) delete process.env.INTEGRATION_API_TOKEN
     else process.env.INTEGRATION_API_TOKEN = previous
   }
+})
+
+test('booking preview rejects an empty date before contacting the local API', () => {
+  const client = new HKUAgentsClient({
+    baseUrl: 'http://127.0.0.1:9',
+    tokenEnv: 'INTEGRATION_API_TOKEN',
+    timeoutMs: 5000,
+  })
+  assert.throws(
+    () => client.previewLibrarySpaceBooking({
+      facility_type: 'single_study_room',
+      date: '',
+      room: 'Study Room A',
+      start_time: '09:00',
+      end_time: '10:30',
+      eligibility_category: 'current_hku_students',
+    }),
+    error =>
+      error instanceof HKUAgentsAPIError &&
+      error.code === 'INVALID_BOOKING_PREVIEW_DATE' &&
+      error.recovery?.includes('hku_library_space_availability'),
+  )
 })
 
 test('timetable sync tool forwards only the exact term to the Phase B endpoint', async () => {

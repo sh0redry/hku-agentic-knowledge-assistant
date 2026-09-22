@@ -356,10 +356,27 @@ def create_gradio_ui(container):
         except Exception as exc:
             return _pretty({"ok": False, "read_only": True, "message": str(exc)})
 
-    async def library_space_handler(facility_type):
+    async def library_space_handler(facility_type, date):
         try:
             return _pretty(await asyncio.to_thread(
-                api_client.library_space_availability, facility_type
+                api_client.library_space_availability, facility_type, date
+            ))
+        except Exception as exc:
+            return _pretty({"ok": False, "read_only": True, "message": str(exc)})
+
+    async def library_booking_preview_handler(
+        facility_type, date, floor, room, start_time, end_time, eligibility_category
+    ):
+        try:
+            return _pretty(await asyncio.to_thread(
+                api_client.library_space_booking_preview,
+                facility_type,
+                date,
+                floor,
+                room,
+                start_time,
+                end_time,
+                eligibility_category,
             ))
         except Exception as exc:
             return _pretty({"ok": False, "read_only": True, "message": str(exc)})
@@ -944,14 +961,59 @@ def create_gradio_ui(container):
                 "it manually in Chrome, then run the same check again."
             )
             library_facility = gr.Dropdown(
-                choices=["single_study_room", "studio_editing_room", "study_table"],
+                choices=["single_study_room", "studio_editing_room", "study_table", "study_room"],
                 value="single_study_room",
                 label="Facility type",
             )
+            library_availability_date = gr.Textbox(value="", label="Exact availability date (YYYY-MM-DD)")
             library_space_button = gr.Button("Read visible space availability")
             library_space_button.click(
                 library_space_handler,
-                inputs=library_facility,
+                inputs=[library_facility, library_availability_date],
+                outputs=library_output,
+                show_progress="minimal",
+                queue=False,
+            )
+            gr.Markdown(
+                "### Exact booking preview (Phase F1, read-only)\n"
+                "Copy one exact slot from the availability result. The preview re-reads the "
+                "live page, checks the displayed date and published eligibility category, "
+                "and expires quickly. Date is intentionally not defaulted: copy the returned "
+                "`date` value exactly. It does not click a slot or authorize a reservation."
+            )
+            with gr.Row():
+                library_preview_date = gr.Textbox(value="", label="Date (YYYY-MM-DD)")
+                library_preview_floor = gr.Textbox(value="4/F", label="Floor (optional)")
+                library_preview_room = gr.Textbox(
+                    value="Single Study Room (3 sessions) Room 424",
+                    label="Exact room",
+                )
+            with gr.Row():
+                library_preview_start = gr.Textbox(value="13:00", label="Start (HH:MM)")
+                library_preview_end = gr.Textbox(value="17:00", label="End (HH:MM)")
+                library_preview_eligibility = gr.Dropdown(
+                    choices=[
+                        "current_hku_students",
+                        "current_hku_staff",
+                        "current_hku_space_students",
+                        "current_hku_space_staff",
+                        "hku_alumni",
+                    ],
+                    value="current_hku_students",
+                    label="Self-declared eligibility category",
+                )
+            library_preview_button = gr.Button("Create read-only booking preview")
+            library_preview_button.click(
+                library_booking_preview_handler,
+                inputs=[
+                    library_facility,
+                    library_preview_date,
+                    library_preview_floor,
+                    library_preview_room,
+                    library_preview_start,
+                    library_preview_end,
+                    library_preview_eligibility,
+                ],
                 outputs=library_output,
                 show_progress="minimal",
                 queue=False,

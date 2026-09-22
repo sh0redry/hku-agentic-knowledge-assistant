@@ -20,6 +20,7 @@ from agents.library.agent import (
     LibraryResearchRecordRequest,
     LibraryResearchSearchRequest,
     LibrarySpaceAvailabilityRequest,
+    LibrarySpaceBookingPreviewRequest,
 )
 from api.schemas import IntegrationResponse, IntegrationTaskSummary
 from browser_bridge.service import BrowserBridgeError
@@ -228,7 +229,7 @@ def create_integration_router(expected_token: str) -> APIRouter:
             }
             error_code = task_error.get("code", "TASK_FAILED")
             recovery = (
-                "Reload the unpacked HKU AGENTS Browser Bridge 0.16.1, then refresh HKU Portal and Moodle."
+                "Reload the unpacked HKU AGENTS Browser Bridge 0.17.1, then refresh HKU Portal and Moodle."
                 if error_code == "EXTENSION_UPDATE_REQUIRED"
                 else "Open HKU Portal and complete login/MFA, then retry the Moodle tool."
                 if error_code == "MOODLE_LOGIN_REQUIRED"
@@ -302,7 +303,7 @@ def create_integration_router(expected_token: str) -> APIRouter:
             task_error = record.error or {"code": "TASK_FAILED", "message": "The read-only HKUL task did not complete."}
             error_code = task_error.get("code", "TASK_FAILED")
             recovery = (
-                "Reload HKU AGENTS Browser Bridge 0.16.1, then retry."
+                "Reload HKU AGENTS Browser Bridge 0.17.1, then retry."
                 if error_code == "EXTENSION_UPDATE_REQUIRED"
                 else "Complete HKUL authentication in the visible Chrome tab, then retry; credentials and MFA remain manual."
                 if error_code == "LIBRARY_LOGIN_REQUIRED"
@@ -347,6 +348,19 @@ def create_integration_router(expected_token: str) -> APIRouter:
         correlation_id: str = Depends(authorize),
     ):
         return await run_library_task(request, correlation_id, "library.spaces.search_availability", body)
+
+    @router.post("/library/spaces/booking-preview", response_model=IntegrationResponse)
+    async def preview_library_space_booking(
+        body: LibrarySpaceBookingPreviewRequest,
+        request: Request,
+        correlation_id: str = Depends(authorize),
+    ):
+        return await run_library_task(
+            request,
+            correlation_id,
+            "library.spaces.booking_preview",
+            body,
+        )
 
     @router.post("/library/spaces/list-facilities", response_model=IntegrationResponse)
     async def list_library_facilities(
@@ -444,7 +458,7 @@ def create_integration_router(expected_token: str) -> APIRouter:
             }
             error_code = task_error.get("code", "TASK_FAILED")
             recovery = (
-                "Reload HKU AGENTS Browser Bridge 0.16.1 and refresh HKU Portal."
+                "Reload HKU AGENTS Browser Bridge 0.17.1 and refresh HKU Portal."
                 if error_code == "EXTENSION_UPDATE_REQUIRED"
                 else "Keep the authenticated HKU Portal home page open and report the count-only parser diagnostics."
                 if error_code == "PORTAL_NOTICE_PARSE_INCOMPLETE"

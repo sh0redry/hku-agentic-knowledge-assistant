@@ -4,7 +4,7 @@
   const PRIMO_ORIGIN = "https://julac-hku.primo.exlibrisgroup.com";
   const LIBRARY_ORIGIN = "https://lib.hku.hk";
   const BOOKING_ORIGIN = "https://booking.lib.hku.hk";
-  const VERSION = "0.2.2";
+  const VERSION = "0.3.1";
   const HOURS_VERSION = "0.1.1";
 
   function clean(value) {
@@ -302,6 +302,136 @@
     return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
   }
 
+  function optionText(select) {
+    const options = [...(select?.options || select?.querySelectorAll?.("option") || [])];
+    const selected = options.find((option) => option.selected) ||
+      (Number.isInteger(select?.selectedIndex) ? options[select.selectedIndex] : null);
+    return clean(selected?.textContent || selected?.innerText || "");
+  }
+
+  function bookingFilterSelects(documentObject) {
+    const selects = [...(documentObject.querySelectorAll?.("select") || [])];
+    const pageSelect = (select) => {
+      const values = [...(select.options || select.querySelectorAll?.("option") || [])]
+        .map((option) => clean(option.textContent || option.innerText))
+        .filter(Boolean);
+      return values.length > 0 && values.every((value) => /^\d+$/.test(value));
+    };
+    const candidates = selects.filter((select) => !pageSelect(select));
+    const descriptor = (select) => clean([
+      select.id,
+      select.name,
+      select.getAttribute?.("aria-label"),
+      select.getAttribute?.("title")
+    ].join(" ")).toLowerCase();
+    const byHint = (pattern) => {
+      const matches = candidates.filter((select) => pattern.test(descriptor(select)));
+      return matches.length === 1 ? matches[0] : null;
+    };
+    const byLabel = (pattern) => {
+      const matches = [];
+      for (const label of documentObject.querySelectorAll?.("label") || []) {
+        if (!pattern.test(clean(label.textContent || label.innerText).toLowerCase())) continue;
+        const id = label.htmlFor || label.getAttribute?.("for");
+        const control = label.control || (id ? documentObject.getElementById?.(id) : null);
+        if (control && candidates.includes(control) && !matches.includes(control)) matches.push(control);
+      }
+      return matches.length === 1 ? matches[0] : null;
+    };
+
+    let location = byLabel(/^location\b/) || byHint(/(?:^|[_$-])(?:ddl|drp|select)?location(?:$|[_$-])/);
+    let facilityType = byLabel(/^facility\s*type\b/) || byHint(/facility.*type|type.*facility/);
+    let date = byLabel(/^date\b/) || byHint(/(?:^|[_$-])(?:ddl|drp|select)?date(?:$|[_$-])/);
+
+    // The initial ASP.NET page exposes all three dependent controls with only
+    // placeholder options, so a date-option heuristic cannot bootstrap Location.
+    // Its stable form order is Location, Facility Type, Date; use that order only
+    // after excluding the numeric result-page selector and only for exactly three.
+    if ((!location || !facilityType || !date) && candidates.length === 3) {
+      [location, facilityType, date] = candidates;
+    }
+    if (!location || !facilityType || !date || new Set([location, facilityType, date]).size !== 3) {
+      return { location: null, facilityType: null, date: null };
+    }
+    return { location, facilityType, date };
+  }
+
+  function selectExact(select, expected, dateMode = false) {
+    const normalized = clean(expected).toLowerCase();
+    const options = [...(select?.options || select?.querySelectorAll?.("option") || [])];
+    const matches = options.filter((option) => {
+      const text = clean(option.textContent || option.innerText).toLowerCase();
+      return dateMode ? text.startsWith(normalized) : text === normalized;
+    });
+    if (matches.length !== 1) {
+      const error = new Error(`The exact booking filter '${expected}' was not uniquely available.`);
+      error.code = matches.length ? "LIBRARY_SPACE_FILTER_AMBIGUOUS" : "LIBRARY_SPACE_FILTER_UNAVAILABLE";
+      throw error;
+    }
+    const option = matches[0];
+    if (optionText(select).toLowerCase() === clean(option.textContent || option.innerText).toLowerCase()) return false;
+    select.value = option.value;
+    const index = options.indexOf(option);
+    if (index >= 0) select.selectedIndex = index;
+    option.selected = true;
+    const EventConstructor = select?.ownerDocument?.defaultView?.Event || globalThis.Event;
+    if (typeof select.dispatchEvent === "function" && EventConstructor) {
+      select.dispatchEvent(new EventConstructor("input", { bubbles: true }));
+      select.dispatchEvent(new EventConstructor("change", { bubbles: true }));
+    }
+    return true;
+  }
+
+  function configureSpaceAvailability(documentObject, locationObject, payload, scheduler) {
+    if (locationObject?.origin !== BOOKING_ORIGIN) {
+      const error = new Error("Open the verified HKUL Facilities Booking System first.");
+      error.code = "WRONG_LIBRARY_SPACE_PAGE";
+      throw error;
+    }
+    const filters = bookingFilterSelects(documentObject);
+    if (!filters.location || !filters.facilityType || !filters.date) {
+      const error = new Error("The Location, Facility Type, and Date controls are not ready.");
+      error.code = "LIBRARY_SPACE_FILTERS_NOT_READY";
+      throw error;
+    }
+    const stages = [
+      [filters.location, payload?.location, false, "location"],
+      [filters.facilityType, payload?.booking_facility_type, false, "facility_type"],
+      [filters.date, payload?.date, true, "date"]
+    ];
+    for (const [select, expected, dateMode, stage] of stages) {
+      if (!clean(expected)) {
+        const error = new Error(`Exact ${stage} is required for HKUL availability.`);
+        error.code = "INVALID_INPUT";
+        throw error;
+      }
+      if (selectExact(select, expected, dateMode)) {
+        return { navigation_started: true, stage, availability_search_submitted: false };
+      }
+    }
+    const bodyText = clean(documentObject.body?.innerText || documentObject.body?.textContent);
+    const hasMatrix = [...(documentObject.querySelectorAll?.("table tr") || [])]
+      .some((row) => [...(row.querySelectorAll?.("th,td") || [])]
+        .some((cell) => Boolean(timeRange(cell.innerText || cell.textContent))));
+    if (payload?.submit_search === true) {
+      const controls = [...(documentObject.querySelectorAll?.("button, input[type='button'], input[type='submit']") || [])]
+        .filter((node) => /^search$/i.test(clean(node.innerText || node.textContent || node.value)));
+      if (controls.length !== 1) {
+        const error = new Error("The exact HKUL availability Search control was not uniquely available.");
+        error.code = controls.length ? "LIBRARY_SPACE_SEARCH_AMBIGUOUS" : "LIBRARY_SPACE_SEARCH_UNAVAILABLE";
+        throw error;
+      }
+      const defer = scheduler || ((callback) => setTimeout(callback, 50));
+      defer(() => controls[0].click());
+      return { navigation_started: true, stage: "search", availability_search_submitted: true };
+    }
+    return {
+      navigation_started: !hasMatrix,
+      stage: hasMatrix ? "ready" : "results_wait",
+      availability_search_submitted: false
+    };
+  }
+
   function timeRange(value) {
     const match = clean(value).match(/\b([01]?\d|2[0-3]):([0-5]\d)\s*(?:-|\u2013|\u2014|to)\s*([01]?\d|2[0-3]):([0-5]\d)\b/i);
     return match ? {
@@ -437,6 +567,10 @@
     }
 
     const bodyText = clean(documentObject.body?.innerText || documentObject.body?.textContent);
+    const filters = bookingFilterSelects(documentObject);
+    const selectedLocation = optionText(filters.location) || null;
+    const selectedFacilityType = optionText(filters.facilityType) || null;
+    const selectedDateText = optionText(filters.date);
     const availableLegendFound = /(?:=\s*)?\bAvailable\b/i.test(bodyText);
     const bookedLegendFound = /(?:=\s*)?\bBooked\b/i.test(bodyText);
     const legendsFound = availableLegendFound && bookedLegendFound;
@@ -503,11 +637,27 @@
     }
 
     for (const slot of slots) delete slot._key;
+    const lastUpdatedMatch = bodyText.match(/Last\s+Updated\s*:\s*(20\d{2}-[01]\d-[0-3]\d\s+[0-2]\d:[0-5]\d:[0-5]\d)/i);
+    const pageSelect = [...(documentObject.querySelectorAll?.("select") || [])].find((select) => {
+      const values = [...(select.options || select.querySelectorAll?.("option") || [])]
+        .map((option) => clean(option.textContent || option.innerText));
+      return values.length > 0 && values.every((value) => /^\d+$/.test(value));
+    }) || null;
+    const pageOptions = [...(pageSelect?.options || pageSelect?.querySelectorAll?.("option") || [])];
+    const pageNumber = Number(optionText(pageSelect) || 1);
+    const pageCount = Math.max(1, pageOptions.length || 1);
+    const parsedDate = selectedDateText.match(/\b20\d{2}-[01]\d-[0-3]\d\b/)?.[0] || bookingDate(documentObject);
     return {
       origin: BOOKING_ORIGIN,
       logged_in: true,
       page_kind: "space_availability",
-      date: bookingDate(documentObject),
+      location: selectedLocation,
+      booking_facility_type: selectedFacilityType,
+      date: parsedDate,
+      source_last_updated_at: lastUpdatedMatch?.[1] || null,
+      page_number: pageNumber,
+      page_count: pageCount,
+      result_set_complete: pageCount === 1,
       available_slot_count: slots.length,
       available_slots: slots.slice(0, 200),
       diagnostics: {
@@ -516,6 +666,8 @@
         availability_legend_found: availableLegendFound,
         booked_legend_found: bookedLegendFound,
         table_matrix_found: tableMatrixFound,
+        selected_filters_found: Boolean(selectedLocation && selectedFacilityType && parsedDate),
+        result_set_complete: pageCount === 1,
         slot_candidate_count: candidateCount,
         parsed_available_slot_count: slots.length,
         incomplete_available_slot_candidate_count: incomplete
@@ -523,6 +675,6 @@
     };
   }
 
-  root.HKULibraryParser = { parseResearch, parseResearchDetail, parseSpaceAvailability, parseHoursAndLocations, safeDetailUrl };
+  root.HKULibraryParser = { parseResearch, parseResearchDetail, parseSpaceAvailability, configureSpaceAvailability, parseHoursAndLocations, safeDetailUrl };
   if (typeof module !== "undefined" && module.exports) module.exports = root.HKULibraryParser;
 })(typeof self !== "undefined" ? self : this);

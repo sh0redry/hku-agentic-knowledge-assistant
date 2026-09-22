@@ -169,11 +169,56 @@ class HKUAgentsAPIClient:
             "POST", "/library/research/access-options", json={"record_id": record_id}
         )
 
-    def library_space_availability(self, facility_type: str) -> dict:
+    def library_space_availability(self, facility_type: str, date: str) -> dict:
+        normalized_date = date.strip()
+        if not normalized_date:
+            raise APIClientError("Availability date is required in YYYY-MM-DD format.")
         return self._integration_request(
             "POST",
             "/library/spaces/search-availability",
-            json={"facility_type": facility_type},
+            json={"facility_type": facility_type, "date": normalized_date},
+        )
+
+    def library_space_booking_preview(
+        self,
+        facility_type: str,
+        date: str,
+        floor: str,
+        room: str,
+        start_time: str,
+        end_time: str,
+        eligibility_category: str,
+    ) -> dict:
+        normalized_date = date.strip()
+        normalized_room = room.strip()
+        normalized_start = start_time.strip()
+        normalized_end = end_time.strip()
+        if not normalized_date:
+            raise APIClientError(
+                "Booking preview date is required. Run availability first and copy its exact date."
+            )
+        if not normalized_room:
+            raise APIClientError(
+                "Booking preview room is required. Copy the exact room from availability."
+            )
+        if not normalized_start or not normalized_end:
+            raise APIClientError(
+                "Booking preview start and end times are required. Copy them from availability."
+            )
+        payload = {
+            "facility_type": facility_type,
+            "date": normalized_date,
+            "room": normalized_room,
+            "start_time": normalized_start,
+            "end_time": normalized_end,
+            "eligibility_category": eligibility_category,
+        }
+        if floor.strip():
+            payload["floor"] = floor.strip()
+        return self._integration_request(
+            "POST",
+            "/library/spaces/booking-preview",
+            json=payload,
         )
 
     def library_list_facilities(self) -> dict:

@@ -189,15 +189,31 @@ function row(cells) {
 const headerRow = row([cell("Floor"), cell("Facility"), cell("09:00 - 10:30")]);
 const availableRow = row([cell("4/F"), cell("Single Study Room 422"), cell("", "rgb(91, 159, 11)")]);
 const bookedRow = row([cell("4/F"), cell("Single Study Room 423"), cell("", "rgb(227, 99, 99)")]);
+function selectedOption(text) {
+  return { textContent: text, innerText: text, value: text, selected: true };
+}
+const bookingSelects = [
+  { options: [selectedOption("Main Library")], selectedIndex: 0 },
+  { options: [selectedOption("Single Study Room (3 sessions)")], selectedIndex: 0 },
+  { options: [selectedOption("2026-09-20 (Sun)")], selectedIndex: 0 }
+];
 const spaceDocument = {
-  body: { textContent: "Facilities Booking System 2026-09-20 Booked Available" },
-  querySelectorAll(selector) { return selector === "table tr" ? [headerRow, availableRow, bookedRow] : []; }
+  body: { textContent: "Facilities Booking System 2026-09-20 Booked Available Last Updated: 2026-09-19 12:34:56" },
+  querySelectorAll(selector) {
+    if (selector === "table tr") return [headerRow, availableRow, bookedRow];
+    if (selector === "select") return bookingSelects;
+    return [];
+  }
 };
 const spaces = parser.parseSpaceAvailability(spaceDocument, {
   origin: "https://booking.lib.hku.hk",
   pathname: "/FView.aspx"
 });
 assert.equal(spaces.date, "2026-09-20");
+assert.equal(spaces.location, "Main Library");
+assert.equal(spaces.booking_facility_type, "Single Study Room (3 sessions)");
+assert.equal(spaces.source_last_updated_at, "2026-09-19 12:34:56");
+assert.equal(spaces.result_set_complete, true);
 assert.equal(spaces.available_slot_count, 1);
 assert.deepEqual(spaces.available_slots[0], {
   floor: "4/F",
@@ -209,9 +225,150 @@ assert.deepEqual(spaces.available_slots[0], {
 assert.equal(spaces.diagnostics.table_matrix_found, true);
 assert.equal(spaces.diagnostics.slot_candidate_count, 2);
 
+function filterSelect(values, selectedIndex = 0) {
+  const options = values.map((text, index) => ({
+    textContent: text,
+    innerText: text,
+    value: text,
+    selected: index === selectedIndex
+  }));
+  const select = {
+    options,
+    selectedIndex,
+    dispatchEvent() {},
+    ownerDocument: { defaultView: { Event: class Event {} } }
+  };
+  Object.defineProperty(select, "value", {
+    get() { return options[select.selectedIndex]?.value || ""; },
+    set(value) {
+      const index = options.findIndex((option) => option.value === value);
+      if (index >= 0) {
+        select.selectedIndex = index;
+        options.forEach((option, optionIndex) => { option.selected = optionIndex === index; });
+      }
+    }
+  });
+  return select;
+}
+const configurableSelects = [
+  filterSelect(["- Please Select -", "Main Library", "Chi Wah Learning Commons"]),
+  filterSelect(["- Please Select -", "Single Study Room (3 sessions)", "Study Room"]),
+  filterSelect(["- Please Select -", "2026-09-20 (Sun)", "2026-09-23 (Wed)"])
+];
+let searchClicks = 0;
+const searchControl = {
+  value: "Search",
+  innerText: "",
+  textContent: "",
+  click() { searchClicks += 1; }
+};
+const configurableDocument = {
+  body: { textContent: "Facilities Booking System Booked Available" },
+  querySelectorAll(selector) {
+    if (selector === "select") return configurableSelects;
+    if (selector === "table tr") return [];
+    if (selector === "button, input[type='button'], input[type='submit']") return [searchControl];
+    return [];
+  }
+};
+const exactFilterPayload = {
+  location: "Chi Wah Learning Commons",
+  booking_facility_type: "Study Room",
+  date: "2026-09-23",
+  submit_search: true
+};
+assert.equal(parser.configureSpaceAvailability(
+  configurableDocument,
+  { origin: "https://booking.lib.hku.hk" },
+  exactFilterPayload,
+  callback => callback()
+).stage, "location");
+assert.equal(parser.configureSpaceAvailability(
+  configurableDocument,
+  { origin: "https://booking.lib.hku.hk" },
+  exactFilterPayload,
+  callback => callback()
+).stage, "facility_type");
+assert.equal(parser.configureSpaceAvailability(
+  configurableDocument,
+  { origin: "https://booking.lib.hku.hk" },
+  exactFilterPayload,
+  callback => callback()
+).stage, "date");
+const configuredSearch = parser.configureSpaceAvailability(
+  configurableDocument,
+  { origin: "https://booking.lib.hku.hk" },
+  exactFilterPayload,
+  callback => callback()
+);
+assert.equal(configuredSearch.stage, "search");
+assert.equal(configuredSearch.availability_search_submitted, true);
+assert.equal(searchClicks, 1);
+assert.equal(configurableSelects[0].value, "Chi Wah Learning Commons");
+assert.equal(configurableSelects[1].value, "Study Room");
+assert.equal(configurableSelects[2].value, "2026-09-23 (Wed)");
+const waitingForResults = parser.configureSpaceAvailability(
+  configurableDocument,
+  { origin: "https://booking.lib.hku.hk" },
+  { ...exactFilterPayload, submit_search: false },
+  callback => callback()
+);
+assert.equal(waitingForResults.stage, "results_wait");
+assert.equal(waitingForResults.navigation_started, true);
+assert.equal(searchClicks, 1);
+
+// Regression: the live initial ASP.NET form has three placeholder selects and
+// does not populate Date until Location and Facility Type have posted back.
+const initialDependentSelects = [
+  filterSelect(["- Please Select -", "Main Library", "Chi Wah Learning Commons"]),
+  filterSelect(["- Please Select -"]),
+  filterSelect(["- Please Select -"])
+];
+const initialDependentDocument = {
+  body: { textContent: "Facilities Booking System Booked Available" },
+  querySelectorAll(selector) {
+    if (selector === "select") return initialDependentSelects;
+    if (selector === "label") return [];
+    if (selector === "table tr") return [];
+    return [];
+  }
+};
+const initialStage = parser.configureSpaceAvailability(
+  initialDependentDocument,
+  { origin: "https://booking.lib.hku.hk" },
+  exactFilterPayload,
+  callback => callback()
+);
+assert.equal(initialStage.stage, "location");
+assert.equal(initialDependentSelects[0].value, "Chi Wah Learning Commons");
+
+const pageSelect = {
+  options: [selectedOption("1"), { ...selectedOption("2"), selected: false }],
+  selectedIndex: 0
+};
+const paginatedDocument = {
+  body: spaceDocument.body,
+  querySelectorAll(selector) {
+    if (selector === "table tr") return [headerRow, availableRow, bookedRow];
+    if (selector === "select") return [...bookingSelects, pageSelect];
+    return [];
+  }
+};
+const paginatedSpaces = parser.parseSpaceAvailability(paginatedDocument, {
+  origin: "https://booking.lib.hku.hk",
+  pathname: "/Secure/FacilityStatusDate.aspx"
+});
+assert.equal(paginatedSpaces.page_count, 2);
+assert.equal(paginatedSpaces.result_set_complete, false);
+assert.equal(paginatedSpaces.diagnostics.result_set_complete, false);
+
 const fullyBookedDocument = {
   body: { textContent: "Facilities Booking System 2026-09-20 Booked Available" },
-  querySelectorAll(selector) { return selector === "table tr" ? [headerRow, bookedRow] : []; }
+  querySelectorAll(selector) {
+    if (selector === "table tr") return [headerRow, bookedRow];
+    if (selector === "select") return bookingSelects;
+    return [];
+  }
 };
 const fullyBooked = parser.parseSpaceAvailability(fullyBookedDocument, {
   origin: "https://booking.lib.hku.hk",

@@ -175,6 +175,7 @@ class PlatformAPITests(unittest.TestCase):
                 "library.research.access_options",
                 "library.spaces.list_facilities",
                 "library.spaces.search_availability",
+                "library.spaces.booking_preview",
                 "library.hours_and_locations",
             },
         )
@@ -833,6 +834,30 @@ class PlatformAPITests(unittest.TestCase):
 
 
 class SafetyFrameworkTests(unittest.TestCase):
+    def test_booking_library_target_is_valid_in_bridge_heartbeat(self):
+        heartbeat = HeartbeatMessage.model_validate(
+            {
+                "type": "heartbeat",
+                "tab": None,
+                "targets": [
+                    {
+                        "system": "library",
+                        "origin": "https://booking.lib.hku.hk",
+                        "path": "/Secure/FacilityStatusDate.aspx",
+                        "logged_in": None,
+                        "page_kind": "space_availability",
+                        "parser_version": None,
+                        "active": True,
+                        "safe_for_writes": False,
+                    }
+                ],
+            }
+        )
+        self.assertEqual(
+            heartbeat.targets[0].origin,
+            "https://booking.lib.hku.hk",
+        )
+
     def test_browser_bridge_named_command_round_trip(self):
         class FakeWebSocket:
             def __init__(self):
@@ -1042,7 +1067,7 @@ class SafetyFrameworkTests(unittest.TestCase):
                 "http://127.0.0.1/*",
             ],
         )
-        self.assertEqual(manifest["version"], "0.16.1")
+        self.assertEqual(manifest["version"], "0.17.1")
 
         node = shutil.which("node")
         if node is None:

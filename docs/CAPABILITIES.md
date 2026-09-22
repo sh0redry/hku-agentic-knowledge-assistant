@@ -83,12 +83,16 @@ return an authentication URL.
 | Capability | Harness tool | Input | Interaction and boundary |
 |---|---|---|---|
 | `library.spaces.list_facilities` | `hku_library_list_facilities` | none | local verified policy catalog; no browser interaction |
-| `library.spaces.search_availability` | `hku_library_space_availability` | one supported facility type | fixed route and visible availability read; no slot selection or booking form |
+| `library.spaces.search_availability` | `hku_library_space_availability` | one supported facility type plus exact `YYYY-MM-DD` date | exact allow-listed Location/Facility Type/Date filters, Search, and complete visible availability read; no slot selection or booking form |
+| `library.spaces.booking_preview` | `hku_library_space_booking_preview` | exact date, room, time, optional floor, and self-declared eligibility category | fresh availability match plus short-lived policy preview; no selection, form, authorization, or booking |
 | `library.hours_and_locations` | `hku_library_hours_and_locations` | none | official public hours page; visible location/time-period rows only |
 
-Supported availability routes currently include `single_study_room`,
-`studio_editing_room`, and `study_table`. Listing a facility does not establish
-current eligibility or availability.
+Supported availability targets currently include `single_study_room`,
+`studio_editing_room`, `study_table`, and the live-verified Chi Wah Learning
+Commons `study_room`. Results expose the selected booking labels, displayed
+date, source update timestamp when visible, and result-set completeness. The
+capability fails closed on pagination or filter mismatch. Listing a facility
+does not establish current eligibility or availability.
 
 ## Host examples
 

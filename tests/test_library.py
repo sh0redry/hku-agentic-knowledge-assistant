@@ -137,6 +137,68 @@ class LibraryIntegrationTests(unittest.TestCase):
             },
         }
 
+    def space_navigation(
+        self,
+        *,
+        date: str = "2026-09-20",
+        slots: list | None = None,
+        incomplete: int = 0,
+        location: str = "Main Library",
+        booking_facility_type: str = "Single Study Room (3 sessions)",
+        page_count: int = 1,
+    ) -> dict:
+        available_slots = slots if slots is not None else [{
+            "floor": "4/F",
+            "room": "Study Room A",
+            "start_time": "09:00",
+            "end_time": "10:30",
+            "status": "available",
+        }]
+        return {
+            "read_only": True,
+            "navigation_only": True,
+            "library_write_requests_sent": 0,
+            "booking_writes_performed": 0,
+            "navigation_interactions_performed": True,
+            "target_origin": "https://booking.lib.hku.hk",
+            "target_page_kind": "space_availability",
+            "facility_type": "single_study_room",
+            "location": location,
+            "booking_facility_type": booking_facility_type,
+            "date": date,
+            "availability_search_submitted": True,
+            "steps": [
+                "library_fixed_route_to_space_availability",
+                "library_set_exact_availability_filters",
+            ],
+            "snapshot": {
+                "origin": "https://booking.lib.hku.hk",
+                "logged_in": True,
+                "page_kind": "space_availability",
+                "location": location,
+                "booking_facility_type": booking_facility_type,
+                "date": date,
+                "source_last_updated_at": "2026-09-19 12:00:00",
+                "page_number": 1,
+                "page_count": page_count,
+                "result_set_complete": page_count == 1,
+                "available_slot_count": len(available_slots),
+                "available_slots": available_slots,
+                "diagnostics": {
+                    "parser_version": "0.3.1",
+                    "availability_marker_found": True,
+                    "availability_legend_found": True,
+                    "booked_legend_found": True,
+                    "table_matrix_found": True,
+                    "selected_filters_found": True,
+                    "result_set_complete": page_count == 1,
+                    "slot_candidate_count": len(available_slots) + incomplete,
+                    "parsed_available_slot_count": len(available_slots),
+                    "incomplete_available_slot_candidate_count": incomplete,
+                },
+            },
+        }
+
     def test_research_search_returns_rows_without_persisting_query_or_titles(self):
         connector = self.container.connectors["sis_browser"]
         connector.search_library_research = AsyncMock(return_value=self.research_navigation())
@@ -173,7 +235,7 @@ class LibraryIntegrationTests(unittest.TestCase):
         response = self.client.post(
             "/api/v1/integration/library/spaces/search-availability",
             headers=self.headers,
-            json={"facility_type": "single_study_room"},
+            json={"facility_type": "single_study_room", "date": "2026-09-20"},
         ).json()
         self.assertFalse(response["ok"])
         self.assertEqual(response["error"]["code"], "LIBRARY_LOGIN_REQUIRED")
@@ -190,10 +252,10 @@ class LibraryIntegrationTests(unittest.TestCase):
         self.assertTrue(result["derived_locally"])
         self.assertFalse(result["browser_interactions_performed"])
         self.assertEqual(result["booking_writes_performed"], 0)
-        self.assertEqual(result["facility_count"], 3)
+        self.assertEqual(result["facility_count"], 4)
         self.assertEqual(
             {item["facility_type"] for item in result["facilities"]},
-            {"single_study_room", "studio_editing_room", "study_table"},
+            {"single_study_room", "studio_editing_room", "study_table", "study_room"},
         )
         self.assertTrue(all(item["availability_search_supported"] for item in result["facilities"]))
         single_room = next(
@@ -206,7 +268,7 @@ class LibraryIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(len(result["policy_sources"]), 2)
         stored = self.container.store.get_task(response["task"]["id"])
-        self.assertEqual(stored.result["facility_count"], 3)
+        self.assertEqual(stored.result["facility_count"], 4)
         self.assertNotIn("facilities", stored.result)
 
     def test_hours_and_locations_reads_public_page_without_persisting_rows(self):
@@ -285,44 +347,231 @@ class LibraryIntegrationTests(unittest.TestCase):
 
     def test_space_availability_has_zero_booking_writes(self):
         connector = self.container.connectors["sis_browser"]
-        connector.search_library_space_availability = AsyncMock(return_value={
-            "read_only": True,
-            "navigation_only": True,
-            "library_write_requests_sent": 0,
-            "booking_writes_performed": 0,
-            "navigation_interactions_performed": True,
-            "target_origin": "https://booking.lib.hku.hk",
-            "target_page_kind": "space_availability",
-            "facility_type": "single_study_room",
-            "steps": ["library_fixed_route_to_space_availability"],
-            "snapshot": {
-                "origin": "https://booking.lib.hku.hk",
-                "logged_in": True,
-                "page_kind": "space_availability",
-                "date": "2026-09-20",
-                "available_slot_count": 1,
-                "available_slots": [{"floor": "4/F", "room": "Study Room A", "start_time": "09:00", "end_time": "10:30", "status": "available"}],
-                "diagnostics": {
-                    "parser_version": "0.2.2",
-                    "availability_marker_found": True,
-                    "availability_legend_found": True,
-                    "booked_legend_found": True,
-                    "table_matrix_found": True,
-                    "slot_candidate_count": 1,
-                    "parsed_available_slot_count": 1,
-                    "incomplete_available_slot_candidate_count": 0,
-                },
-            },
-        })
+        connector.search_library_space_availability = AsyncMock(
+            return_value=self.space_navigation()
+        )
         response = self.client.post(
             "/api/v1/integration/library/spaces/search-availability",
             headers=self.headers,
-            json={"facility_type": "single_study_room"},
+            json={"facility_type": "single_study_room", "date": "2026-09-20"},
         ).json()
         self.assertTrue(response["ok"])
         self.assertEqual(response["result"]["booking_writes_performed"], 0)
         self.assertFalse(response["result"]["slot_selection_performed"])
         self.assertFalse(response["result"]["booking_form_opened"])
+
+    def test_space_availability_requires_exact_date(self):
+        response = self.client.post(
+            "/api/v1/integration/library/spaces/search-availability",
+            headers=self.headers,
+            json={"facility_type": "study_room"},
+        ).json()
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["error"]["code"], "INVALID_REQUEST")
+
+    def test_space_availability_fails_closed_when_results_are_paginated(self):
+        connector = self.container.connectors["sis_browser"]
+        connector.search_library_space_availability = AsyncMock(
+            return_value=self.space_navigation(page_count=2)
+        )
+        response = self.client.post(
+            "/api/v1/integration/library/spaces/search-availability",
+            headers=self.headers,
+            json={"facility_type": "single_study_room", "date": "2026-09-20"},
+        ).json()
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["error"]["code"], "LIBRARY_SPACE_RESULTS_PAGINATED")
+
+    def test_booking_preview_matches_exact_slot_without_booking_write(self):
+        connector = self.container.connectors["sis_browser"]
+        connector.search_library_space_availability = AsyncMock(
+            return_value=self.space_navigation()
+        )
+        response = self.client.post(
+            "/api/v1/integration/library/spaces/booking-preview",
+            headers=self.headers,
+            json={
+                "facility_type": "single_study_room",
+                "date": "2026-09-20",
+                "floor": "4/F",
+                "room": "Study Room A",
+                "start_time": "09:00",
+                "end_time": "10:30",
+                "eligibility_category": "current_hku_students",
+            },
+        ).json()
+        self.assertTrue(response["ok"])
+        result = response["result"]
+        self.assertTrue(result["ready"])
+        self.assertEqual(result["reason"], "exact_slot_available")
+        self.assertEqual(len(result["preview_digest"]), 64)
+        self.assertFalse(result["preview"]["domain_write_authorized"])
+        self.assertFalse(result["policy_acceptance_recorded"])
+        self.assertEqual(result["booking_writes_performed"], 0)
+        self.assertFalse(result["slot_selection_performed"])
+        self.assertFalse(result["booking_form_opened"])
+        connector.search_library_space_availability.assert_awaited_once_with(
+            {"facility_type": "single_study_room", "date": "2026-09-20"}
+        )
+        stored = self.container.store.get_task(response["task"]["id"])
+        self.assertFalse(stored.input["private_booking_target_persisted"])
+        self.assertNotIn("Study Room A", str(stored.input))
+        self.assertFalse(stored.result["private_preview_details_persisted"])
+        self.assertNotIn("preview_digest", stored.result)
+
+    def test_booking_preview_unavailable_is_successful_domain_verdict(self):
+        connector = self.container.connectors["sis_browser"]
+        connector.search_library_space_availability = AsyncMock(
+            return_value=self.space_navigation(slots=[])
+        )
+        response = self.client.post(
+            "/api/v1/integration/library/spaces/booking-preview",
+            headers=self.headers,
+            json={
+                "facility_type": "single_study_room",
+                "date": "2026-09-20",
+                "room": "Study Room A",
+                "start_time": "09:00",
+                "end_time": "10:30",
+                "eligibility_category": "current_hku_students",
+            },
+        ).json()
+        self.assertTrue(response["ok"])
+        self.assertFalse(response["result"]["ready"])
+        self.assertEqual(response["result"]["reason"], "slot_not_available")
+        self.assertIsNone(response["result"]["preview"])
+
+    def test_booking_preview_rejects_displayed_date_mismatch(self):
+        connector = self.container.connectors["sis_browser"]
+        connector.search_library_space_availability = AsyncMock(
+            return_value=self.space_navigation(date="2026-09-21")
+        )
+        response = self.client.post(
+            "/api/v1/integration/library/spaces/booking-preview",
+            headers=self.headers,
+            json={
+                "facility_type": "single_study_room",
+                "date": "2026-09-20",
+                "room": "Study Room A",
+                "start_time": "09:00",
+                "end_time": "10:30",
+                "eligibility_category": "current_hku_students",
+            },
+        ).json()
+        self.assertTrue(response["ok"])
+        self.assertFalse(response["result"]["ready"])
+        self.assertEqual(response["result"]["reason"], "date_mismatch")
+        self.assertIsNone(response["result"]["preview_digest"])
+
+    def test_booking_preview_rejects_live_facility_context_mismatch(self):
+        connector = self.container.connectors["sis_browser"]
+        connector.search_library_space_availability = AsyncMock(
+            return_value=self.space_navigation(
+                location="Chi Wah Learning Commons",
+                booking_facility_type="Study Room",
+            )
+        )
+        response = self.client.post(
+            "/api/v1/integration/library/spaces/booking-preview",
+            headers=self.headers,
+            json={
+                "facility_type": "single_study_room",
+                "date": "2026-09-20",
+                "room": "Study Room A",
+                "start_time": "09:00",
+                "end_time": "10:30",
+                "eligibility_category": "current_hku_students",
+            },
+        ).json()
+        self.assertTrue(response["ok"])
+        self.assertFalse(response["result"]["ready"])
+        self.assertEqual(response["result"]["reason"], "facility_context_mismatch")
+        self.assertIsNone(response["result"]["preview"])
+
+    def test_booking_preview_unsupported_eligibility_does_not_open_browser(self):
+        connector = self.container.connectors["sis_browser"]
+        connector.search_library_space_availability = AsyncMock()
+        response = self.client.post(
+            "/api/v1/integration/library/spaces/booking-preview",
+            headers=self.headers,
+            json={
+                "facility_type": "studio_editing_room",
+                "date": "2026-09-20",
+                "room": "Editing Room A",
+                "start_time": "09:00",
+                "end_time": "10:00",
+                "eligibility_category": "hku_alumni",
+            },
+        ).json()
+        self.assertTrue(response["ok"])
+        self.assertFalse(response["result"]["ready"])
+        self.assertEqual(response["result"]["reason"], "eligibility_not_supported")
+        self.assertFalse(response["result"]["navigation_interactions_performed"])
+        connector.search_library_space_availability.assert_not_awaited()
+
+    def test_booking_preview_rejects_invalid_time_range(self):
+        response = self.client.post(
+            "/api/v1/integration/library/spaces/booking-preview",
+            headers=self.headers,
+            json={
+                "facility_type": "single_study_room",
+                "date": "2026-09-20",
+                "room": "Study Room A",
+                "start_time": "10:30",
+                "end_time": "09:00",
+                "eligibility_category": "current_hku_students",
+            },
+        ).json()
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["error"]["code"], "INVALID_REQUEST")
+
+    def test_booking_preview_fails_closed_on_ambiguous_exact_match(self):
+        connector = self.container.connectors["sis_browser"]
+        slot = {
+            "floor": "4/F",
+            "room": "Study Room A",
+            "start_time": "09:00",
+            "end_time": "10:30",
+            "status": "available",
+        }
+        connector.search_library_space_availability = AsyncMock(
+            return_value=self.space_navigation(slots=[slot, slot.copy()])
+        )
+        response = self.client.post(
+            "/api/v1/integration/library/spaces/booking-preview",
+            headers=self.headers,
+            json={
+                "facility_type": "single_study_room",
+                "date": "2026-09-20",
+                "floor": "4/F",
+                "room": "Study Room A",
+                "start_time": "09:00",
+                "end_time": "10:30",
+                "eligibility_category": "current_hku_students",
+            },
+        ).json()
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["error"]["code"], "LIBRARY_SPACE_SLOT_AMBIGUOUS")
+
+    def test_booking_preview_fails_closed_on_incomplete_availability_parse(self):
+        connector = self.container.connectors["sis_browser"]
+        connector.search_library_space_availability = AsyncMock(
+            return_value=self.space_navigation(incomplete=1)
+        )
+        response = self.client.post(
+            "/api/v1/integration/library/spaces/booking-preview",
+            headers=self.headers,
+            json={
+                "facility_type": "single_study_room",
+                "date": "2026-09-20",
+                "room": "Study Room A",
+                "start_time": "09:00",
+                "end_time": "10:30",
+                "eligibility_category": "current_hku_students",
+            },
+        ).json()
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["error"]["code"], "LIBRARY_SPACE_PARSE_INCOMPLETE")
 
 
 if __name__ == "__main__":

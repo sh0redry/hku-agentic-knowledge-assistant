@@ -25,6 +25,7 @@ from agents.library.agent import (
     LibraryResearchItemCapability,
     LibraryResearchSearchCapability,
     LibrarySpaceAvailabilityCapability,
+    LibrarySpaceBookingPreviewCapability,
 )
 from agents.timetable.agent import (
     SISExamStatusCapability,
@@ -111,6 +112,7 @@ class ApplicationContainer:
         self.registry.register(LibraryFacilityListCapability())
         self.registry.register(LibraryHoursAndLocationsCapability(self.connectors["sis_browser"]))
         self.registry.register(LibrarySpaceAvailabilityCapability(self.connectors["sis_browser"]))
+        self.registry.register(LibrarySpaceBookingPreviewCapability(self.connectors["sis_browser"]))
 
         self.tasks = TaskManager(self.registry, self.store)
         self.actions = ActionService(self.registry, self.store, self.tasks, self.policy)

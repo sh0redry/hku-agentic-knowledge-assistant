@@ -28,10 +28,11 @@ not free-form browser automation.
 
 | Component | Version |
 |---|---:|
-| Browser Bridge extension | `0.16.1` |
-| DeepSeek Harness plugin | `0.16.1` |
+| Browser Bridge extension | `0.17.1` |
+| DeepSeek Harness plugin | `0.18.0` |
 | Integration API | `v1` |
-| Library research/space parser | `0.2.2` |
+| Library research parser | `0.2.2` |
+| Library space parser | `0.3.1` |
 | Library hours parser | `0.1.1` |
 
 Implementation and synthetic testing are complete for the capabilities below.
@@ -51,7 +52,8 @@ opening hours.
 | Moodle courses and deadlines | Complete | Complete | Dashboard-visible scope; no grades, submissions, or participants |
 | Portal notices and daily briefing | Complete | Complete | Notice details are not opened |
 | Find@HKUL research | Complete | Complete | Licensed full text and account actions are not opened |
-| Library spaces and hours | Complete | Complete | Availability is read-only; no slot selection or booking |
+| Library availability and hours | Complete | Complete | Availability is read-only; no slot selection or booking |
+| Library exact booking preview | Complete | Pending | Short-lived read-only preview; no write authority |
 
 This table is a release summary, not a substitute for the evidence checklist in
 [the live acceptance runbook](docs/LIVE_ACCEPTANCE.md).
@@ -107,7 +109,10 @@ opens or submits an activity.
 - Return visible online/physical access labels while suppressing proxy, SSO, and
   licensed full-text destinations.
 - List supported facilities and verified booking-policy summaries.
-- Read visible Book a Space availability for supported fixed facility routes.
+- Set an allow-listed exact Location, Facility Type, and Date on the official
+  Book a Space status page, submit Search, and read the complete visible matrix.
+- Create a short-lived, exact, read-only booking preview with current
+  availability, published eligibility, and policy evidence.
 - Read locations and visible time-period rows from the official HKUL current
   hours page.
 
@@ -183,12 +188,20 @@ account.
 1. `library.spaces.list_facilities` returns the supported facility catalog and
    verified policy summary locally.
 2. `library.spaces.search_availability` opens the fixed booking availability
-   page for a supported facility/date and parses visible available slots.
+   page, selects the exact allow-listed Location and Facility Type plus the
+   required date, submits Search, and parses visible available slots.
 3. The result must keep `slot_selection_performed: false`,
    `booking_form_opened: false`, and `booking_writes_performed: 0`.
 
-Selecting a slot, previewing a booking, or submitting a reservation is outside
-the current phase and would require a separately reviewed write contract.
+The availability result includes the selected filter labels, displayed date,
+source `Last Updated` value when present, and a completeness verdict. F1.1
+fails closed if results span multiple pages or the live filters differ from the
+requested allow-listed target.
+
+An exact read-only booking preview is now available after the availability
+read. Selecting a slot, opening the booking form, or submitting a reservation
+remains outside the current phase and requires a separately reviewed write
+contract.
 
 ## Safety model
 
@@ -297,7 +310,7 @@ Open:
 1. Open `chrome://extensions`.
 2. Enable **Developer mode**.
 3. Choose **Load unpacked** and select `browser_runtime/extension`.
-4. Confirm extension version `0.16.1`.
+4. Confirm extension version `0.17.1`.
 5. Log into HKU Portal manually and complete password/MFA prompts yourself.
 6. Copy the browser pairing token from the GUI **Connections** tab into the
    extension popup.
@@ -307,7 +320,7 @@ unchanged, restarting HKU AGENTS does not require pairing again.
 
 ## DeepSeek Harness integration
 
-The first-party package exposes 21 restricted HKU tools. It is a thin adapter:
+The first-party package exposes 22 restricted HKU tools. It is a thin adapter:
 HTML parsing, session state, navigation, privacy filtering, and safety checks
 remain inside HKU AGENTS.
 
@@ -331,7 +344,7 @@ Install and run:
 
 ```powershell
 $env:INTEGRATION_API_TOKEN = "the-token-from-project-env-or-the-GUI"
-npx.cmd --yes @deepseek-ai/dsh@0.1.2-rc.1 plugin --profile web add .\dsh-hku-agents-0.16.1.tgz
+npx.cmd --yes @deepseek-ai/dsh@0.1.2-rc.1 plugin --profile web add .\dsh-hku-agents-0.18.0.tgz
 npx.cmd --yes @deepseek-ai/dsh@0.1.2-rc.1 --profile web --dump-config
 npx.cmd --yes @deepseek-ai/dsh@0.1.2-rc.1 --profile web
 ```
@@ -373,7 +386,7 @@ preflight mismatch is `ok: true` with `result.ready: false`.
 | Moodle | `moodle.dashboard.inspect`, `moodle.courses.list`, `moodle.assignments.upcoming` |
 | Portal/briefing | `portal.notices.list`, `briefing.today` |
 | Library research | `library.research.search`, `library.research.item`, `library.research.access_options` |
-| Library spaces/hours | `library.spaces.list_facilities`, `library.spaces.search_availability`, `library.hours_and_locations` |
+| Library spaces/hours | `library.spaces.list_facilities`, `library.spaces.search_availability`, `library.spaces.booking_preview`, `library.hours_and_locations` |
 
 Use `GET /api/v1/capabilities` as the authoritative runtime inventory.
 
@@ -394,7 +407,7 @@ cd integrations\deepseek_harness
 npm test
 ```
 
-Current baseline: 66 Python tests, 9 JavaScript suites, and 14 Harness tests.
+Current baseline: 73 Python tests, 9 JavaScript suites, and 15 Harness tests.
 
 Live acceptance is separate: reload the unpacked extension after every Browser
 Bridge version change, keep the relevant authenticated HKU tab available, invoke
@@ -439,8 +452,8 @@ HKU_AGENTS_INTEGRATION_PLAN.md   Roadmap and acceptance history
   not a guaranteed weekly schedule.
 - Library database/guide discovery, Reading Lists, digital collections,
   Scholars Hub, and research-support routing are the next Phase E2 work.
-- Space-booking preview and every Library write remain future separately
-  governed phases.
+- Slot selection, booking-form access, and every Library write remain future
+  separately governed phases; the current booking preview is read-only.
 
 See [HKU_AGENTS_INTEGRATION_PLAN.md](HKU_AGENTS_INTEGRATION_PLAN.md) for the full
 roadmap and completed live-acceptance checkpoints.
@@ -454,7 +467,7 @@ roadmap and completed live-acceptance checkpoints.
 | `PAGE_SCRIPT_UNAVAILABLE` | Reload the unpacked extension and refresh the relevant HKU page. |
 | `PORTAL_LOGIN_REQUIRED` / `SIS_LOGIN_REQUIRED` | Complete the visible HKU authentication flow manually, then retry. |
 | `SSO_MANUAL_ACTION_REQUIRED` | Complete the visible password, MFA, CAPTCHA, consent, or recovery step. |
-| Parser version mismatch | Reload the extension, refresh the page, and confirm version `0.16.1`. |
+| Parser version mismatch | Reload the extension, refresh the page, and confirm version `0.17.1`. |
 | Harness plugin install fails | Install `pnpm`; on Windows, enable Developer Mode or use an elevated shell if profile symlink creation fails. |
 | Harness receives `401` | Export the Integration API token, not the browser pairing token. |
 

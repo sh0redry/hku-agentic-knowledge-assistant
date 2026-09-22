@@ -21,7 +21,8 @@ authorized browser session.
 | Find@HKUL search | ✅ | ✅ | dynamic Primo result rendering verified |
 | Find@HKUL item/access options | ✅ | ✅ | stable record and sanitized labels verified |
 | Book a Space availability | ✅ | ✅ | color matrix and zero booking writes verified |
-| Library facility catalog | ✅ | ✅ | three supported policy summaries reviewed |
+| Book a Space exact booking preview | ✅ | Pending | read-only F1 contract implemented; live exact-slot match required |
+| Library facility catalog | ✅ | ✅ | four supported policy summaries; Chi Wah Study Room added in F1.1 |
 | HKUL hours and locations | ✅ | ✅ | 14 unique live locations; duplicate DOM candidates counted |
 
 ## Standard procedure
@@ -93,8 +94,19 @@ For research search, compare the requested query and visible first-page results.
 Open one stable `record_id` through the item and access-options tools. Confirm
 that operational UI text and unsafe links are not returned.
 
-For Book a Space, confirm that visible green cells correspond exactly to the
-returned room/time rows and that no slot was selected.
+For Book a Space, call availability with an exact facility type and
+`YYYY-MM-DD` date. Confirm the live selected Location, Facility Type, and Date
+match the requested allow-listed target; visible green cells correspond exactly
+to returned floor/room/time rows; `result_set_complete` is true; and no slot was
+selected. Compare `source_last_updated_at` with the visible page when present.
+If the page selector exposes more than one page, acceptance must fail closed
+with `LIBRARY_SPACE_RESULTS_PAGINATED` until pagination is implemented.
+
+For `library.spaces.booking_preview`, copy one exact returned slot and confirm
+`ready: true`, an exact target, a bounded expiry, a 64-character digest,
+`policy_acceptance_recorded: false`, and all selection/form/write counters at
+zero. Repeat with a mismatched date and unavailable room; both must return
+`ready: false` without creating a preview or performing a write.
 
 For hours, compare every returned location with the current official page. A
 live `Today` view must remain described as visible time-period data, not as a

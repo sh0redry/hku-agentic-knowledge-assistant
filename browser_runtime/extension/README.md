@@ -47,9 +47,12 @@ forms.
 10. To test Portal News, keep the authenticated Portal home page open and use
     **Read visible Portal notices**. The bridge reads structured visible cards,
     performs no navigation, and never opens a notice detail page.
-11. To test Library Phase E1, use the GUI **Library** tab. Find@HKUL searches use
-    a fixed Primo route. Book a Space may first show HKUL Authentication; complete
-    it manually, then rerun the same availability check.
+11. To test Library Phase E1/F1.1, use the GUI **Library** tab. Find@HKUL
+    searches use a fixed Primo route. Book a Space availability requires a
+    supported facility type and exact date. The bridge selects the allow-listed
+    Location, Facility Type, and Date and presses only the non-writing Search
+    control. It never presses a green Select cell or opens/submits New Booking.
+    If HKUL Authentication appears, complete it manually and rerun the check.
 
 When the unpacked extension receives a new ID, restart HKU AGENTS to clear the
 in-memory development pin, or set `BROWSER_EXTENSION_IDS` explicitly in

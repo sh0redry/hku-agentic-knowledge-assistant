@@ -328,19 +328,64 @@ export function apply(ctx, config) {
     }));
     ctx.tools.register(defineTool({
         name: 'hku_library_space_availability',
-        description: 'Open one fixed HKUL Book a Space facility route and read visible available slots after the user manually completes HKUL authentication. It may navigate to the authentication or availability page, but never selects a slot, opens a booking form, enters details, or submits a reservation. Check booking_writes_performed (always 0).',
+        description: 'Open the fixed HKUL Facilities Booking System, set the allowlisted Location and Facility Type for one supported facility class, set the exact requested date, click only Search, and read the complete visible availability matrix. It never clicks a green Select cell, opens a booking form, checks a session, enters a description, or submits a reservation.',
         parameters: {
             facility_type: {
                 type: 'string',
                 required: true,
-                enum: ['single_study_room', 'studio_editing_room', 'study_table'],
-                description: 'Supported fixed HKUL facility route.',
+                enum: ['single_study_room', 'studio_editing_room', 'study_table', 'study_room'],
+                description: 'Supported allowlisted HKUL facility class. study_room means Chi Wah Learning Commons Study Room.',
+            },
+            date: {
+                type: 'string',
+                required: true,
+                examples: ['2026-09-23'],
+                description: 'Exact booking date to select in YYYY-MM-DD format.',
             },
         },
         output: envelopeOutput,
         timeoutMs: config.timeoutMs,
         async execute(args, execution) {
             return client.searchLibrarySpaceAvailability(args, execution.signal);
+        },
+    }));
+    ctx.tools.register(defineTool({
+        name: 'hku_library_space_booking_preview',
+        description: 'Re-read one supported HKUL Book a Space page and create a short-lived read-only preview for one exact date, room, and time returned by hku_library_space_availability. Call availability first and copy all four exact fields; never pass an empty date or invent a target. This checks published eligibility and policy metadata but does not verify account status, click a slot, open a booking form, authorize a write, or submit a reservation. A successful preview is not a booking.',
+        parameters: {
+            facility_type: {
+                type: 'string',
+                required: true,
+                enum: ['single_study_room', 'studio_editing_room', 'study_table', 'study_room'],
+                description: 'Supported fixed HKUL facility route.',
+            },
+            date: {
+                type: 'string',
+                required: true,
+                examples: ['2026-09-20'],
+                description: 'Non-empty exact displayed date copied from hku_library_space_availability, in YYYY-MM-DD format. Do not call this tool until availability returns a date.',
+            },
+            floor: { type: 'string', description: 'Exact floor label when the availability result exposes one.' },
+            room: { type: 'string', required: true, description: 'Non-empty exact room/facility label copied from availability.' },
+            start_time: { type: 'string', required: true, examples: ['13:00'], description: 'Exact start time copied from availability in 24-hour HH:MM format.' },
+            end_time: { type: 'string', required: true, examples: ['17:00'], description: 'Exact end time copied from availability in 24-hour HH:MM format.' },
+            eligibility_category: {
+                type: 'string',
+                required: true,
+                enum: [
+                    'current_hku_students',
+                    'current_hku_staff',
+                    'current_hku_space_students',
+                    'current_hku_space_staff',
+                    'hku_alumni',
+                ],
+                description: 'User-supplied category checked against published policy; not verified from account data.',
+            },
+        },
+        output: envelopeOutput,
+        timeoutMs: config.timeoutMs,
+        async execute(args, execution) {
+            return client.previewLibrarySpaceBooking(args, execution.signal);
         },
     }));
     ctx.tools.register(defineTool({

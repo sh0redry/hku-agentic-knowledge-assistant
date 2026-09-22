@@ -114,7 +114,17 @@ export declare class HKUAgentsClient {
         record_id: string;
     }, signal?: AbortSignal): Promise<IntegrationEnvelope>;
     searchLibrarySpaceAvailability(input: {
-        facility_type: 'single_study_room' | 'studio_editing_room' | 'study_table';
+        facility_type: 'single_study_room' | 'studio_editing_room' | 'study_table' | 'study_room';
+        date: string;
+    }, signal?: AbortSignal): Promise<IntegrationEnvelope>;
+    previewLibrarySpaceBooking(input: {
+        facility_type: 'single_study_room' | 'studio_editing_room' | 'study_table' | 'study_room';
+        date: string;
+        floor?: string;
+        room: string;
+        start_time: string;
+        end_time: string;
+        eligibility_category: 'current_hku_students' | 'current_hku_staff' | 'current_hku_space_students' | 'current_hku_space_staff' | 'hku_alumni';
     }, signal?: AbortSignal): Promise<IntegrationEnvelope>;
     listLibraryFacilities(signal?: AbortSignal): Promise<IntegrationEnvelope>;
     libraryHoursAndLocations(signal?: AbortSignal): Promise<IntegrationEnvelope>;

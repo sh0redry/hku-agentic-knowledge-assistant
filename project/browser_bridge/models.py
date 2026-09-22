@@ -67,6 +67,7 @@ class BrowserTargetState(StrictMessage):
         "https://moodle.hku.hk",
         "https://julac-hku.primo.exlibrisgroup.com",
         "https://lib.hku.hk",
+        "https://booking.lib.hku.hk",
     ]
     path: str = Field(default="/", min_length=1, max_length=300)
     logged_in: bool | None = None
@@ -575,6 +576,8 @@ class LibrarySpaceDiagnostics(StrictMessage):
     availability_legend_found: bool = False
     booked_legend_found: bool = False
     table_matrix_found: bool = False
+    selected_filters_found: bool = False
+    result_set_complete: bool = True
     slot_candidate_count: int = Field(ge=0, le=10000)
     parsed_available_slot_count: int = Field(ge=0, le=1000)
     incomplete_available_slot_candidate_count: int = Field(ge=0, le=1000)
@@ -584,7 +587,13 @@ class LibrarySpaceSnapshot(StrictMessage):
     origin: Literal["https://booking.lib.hku.hk"]
     logged_in: Literal[True]
     page_kind: Literal["space_availability"]
+    location: str | None = Field(default=None, max_length=160)
+    booking_facility_type: str | None = Field(default=None, max_length=160)
     date: datetime_module.date | None = None
+    source_last_updated_at: str | None = Field(default=None, max_length=40)
+    page_number: int = Field(default=1, ge=1, le=100)
+    page_count: int = Field(default=1, ge=1, le=100)
+    result_set_complete: bool = True
     available_slot_count: int = Field(ge=0, le=200)
     available_slots: list[LibrarySpaceSlot] = Field(default_factory=list, max_length=200)
     diagnostics: LibrarySpaceDiagnostics
@@ -595,6 +604,13 @@ class LibrarySpaceSnapshot(StrictMessage):
             raise ValueError("Library slot count does not match the structured rows.")
         if self.diagnostics.parsed_available_slot_count != len(self.available_slots):
             raise ValueError("Library slot parser count does not match the structured rows.")
+        if self.page_number > self.page_count:
+            raise ValueError("Library availability page number exceeds the page count.")
+        expected_complete = self.page_count == 1
+        if self.result_set_complete != expected_complete:
+            raise ValueError("Library result completeness does not match pagination.")
+        if self.diagnostics.result_set_complete != self.result_set_complete:
+            raise ValueError("Library parser completeness disagrees with the snapshot.")
         return self
 
 
@@ -606,9 +622,23 @@ class LibrarySpaceNavigationResult(StrictMessage):
     navigation_interactions_performed: bool
     target_origin: Literal["https://booking.lib.hku.hk"]
     target_page_kind: Literal["space_availability"]
-    facility_type: Literal["single_study_room", "studio_editing_room", "study_table"]
-    steps: list[Literal["library_fixed_route_to_space_availability"]] = Field(min_length=1, max_length=1)
+    facility_type: Literal["single_study_room", "studio_editing_room", "study_table", "study_room"]
+    location: str = Field(min_length=1, max_length=160)
+    booking_facility_type: str = Field(min_length=1, max_length=160)
+    date: datetime_module.date
+    availability_search_submitted: bool
+    steps: list[Literal["library_fixed_route_to_space_availability", "library_set_exact_availability_filters"]] = Field(min_length=2, max_length=2)
     snapshot: LibrarySpaceSnapshot
+
+    @model_validator(mode="after")
+    def validate_exact_filter_context(self):
+        if self.snapshot.location != self.location:
+            raise ValueError("Library Location filter does not match the navigation target.")
+        if self.snapshot.booking_facility_type != self.booking_facility_type:
+            raise ValueError("Library Facility Type filter does not match the navigation target.")
+        if self.snapshot.date != self.date:
+            raise ValueError("Library Date filter does not match the navigation target.")
+        return self
 
 
 class SISNavigationResult(StrictMessage):
