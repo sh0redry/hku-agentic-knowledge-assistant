@@ -8,7 +8,8 @@ hku_agents.db-shm
 hku_agents.db-wal
 tests/.tmp/
 .cache/
-docs/
+docs/*
+!docs/*.md
 __pycache__/
 *.pyc
 .vscode/
