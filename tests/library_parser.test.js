@@ -361,6 +361,23 @@ const paginatedSpaces = parser.parseSpaceAvailability(paginatedDocument, {
 assert.equal(paginatedSpaces.page_count, 2);
 assert.equal(paginatedSpaces.result_set_complete, false);
 assert.equal(paginatedSpaces.diagnostics.result_set_complete, false);
+let pageChangeCount = 0;
+pageSelect.value = "1";
+pageSelect.dispatchEvent = (event) => { if (event.type === "change") pageChangeCount += 1; };
+const selectedPage = parser.selectSpaceResultPage(paginatedDocument, {
+  origin: "https://booking.lib.hku.hk",
+  pathname: "/Secure/FacilityStatusDate.aspx"
+}, { page_number: 2 });
+assert.equal(selectedPage.navigation_started, true);
+assert.equal(pageSelect.value, "2");
+assert.equal(pageChangeCount, 1);
+assert.throws(
+  () => parser.selectSpaceResultPage(paginatedDocument, {
+    origin: "https://booking.lib.hku.hk", pathname: "/Secure/FacilityStatusDate.aspx"
+  }, { page_number: 3 }),
+  error => error.code === "LIBRARY_SPACE_RESULT_PAGE_UNAVAILABLE"
+);
+assert.notEqual(paginatedSpaces.diagnostics.matrix_signature, "");
 
 const fullyBookedDocument = {
   body: { textContent: "Facilities Booking System 2026-09-20 Booked Available" },
@@ -376,7 +393,128 @@ const fullyBooked = parser.parseSpaceAvailability(fullyBookedDocument, {
 });
 assert.equal(fullyBooked.available_slot_count, 0);
 assert.equal(fullyBooked.diagnostics.slot_candidate_count, 1);
+assert.equal(fullyBooked.diagnostics.facility_row_count, 1);
+assert.equal(fullyBooked.diagnostics.status_cell_count, 1);
+assert.equal(fullyBooked.diagnostics.unclassified_status_cell_count, 0);
+assert.equal(fullyBooked.diagnostics.verified_empty_result_found, false);
 assert.equal(fullyBooked.diagnostics.incomplete_available_slot_candidate_count, 0);
+
+const unknownStatusRow = row([cell("4/F"), cell("Room 999"), cell("", "rgb(255, 255, 255)")]);
+const unknownStatusDocument = {
+  body: { textContent: "Facilities Booking System 2026-09-20 Booked Available" },
+  querySelectorAll(selector) {
+    if (selector === "table tr") return [headerRow, unknownStatusRow];
+    if (selector === "select") return bookingSelects;
+    return [];
+  }
+};
+const unknownStatus = parser.parseSpaceAvailability(unknownStatusDocument, {
+  origin: "https://booking.lib.hku.hk",
+  pathname: "/FView.aspx"
+});
+assert.equal(unknownStatus.diagnostics.facility_row_count, 1);
+assert.equal(unknownStatus.diagnostics.status_cell_count, 1);
+assert.equal(unknownStatus.diagnostics.slot_candidate_count, 0);
+assert.equal(unknownStatus.diagnostics.unclassified_status_cell_count, 0);
+assert.equal(unknownStatus.diagnostics.neutral_nonselectable_cell_count, 1);
+
+const ambiguousStatusRow = row([cell("4/F"), cell("Room 998"), cell("", "rgb(120, 80, 180)")]);
+const ambiguousStatus = parser.parseSpaceAvailability({
+  body: unknownStatusDocument.body,
+  querySelectorAll(selector) {
+    if (selector === "table tr") return [headerRow, ambiguousStatusRow];
+    if (selector === "select") return bookingSelects;
+    return [];
+  }
+}, { origin: "https://booking.lib.hku.hk", pathname: "/FView.aspx" });
+assert.equal(ambiguousStatus.diagnostics.unclassified_status_cell_count, 1);
+assert.deepEqual(ambiguousStatus.diagnostics.unclassified_cell_shapes, [{
+  row_index: 1,
+  column_index: 2,
+  text_present: false,
+  interactive: false,
+  color_family: "other",
+  colspan: 1
+}]);
+
+function paintedChildRow(childColors) {
+  const statusCell = cell("", "rgba(0, 0, 0, 0)");
+  statusCell.querySelectorAll = () => childColors.map((color) => cell("", color));
+  statusCell.querySelector = () => null;
+  return row([cell("4/F"), cell("Room 997"), statusCell]);
+}
+function documentWithStatusRow(statusRow) {
+  return {
+    body: unknownStatusDocument.body,
+    querySelectorAll(selector) {
+      if (selector === "table tr") return [headerRow, statusRow];
+      if (selector === "select") return bookingSelects;
+      return [];
+    }
+  };
+}
+const innerPainted = parser.parseSpaceAvailability(
+  documentWithStatusRow(paintedChildRow(["rgb(91, 159, 11)"])),
+  { origin: "https://booking.lib.hku.hk", pathname: "/FView.aspx" }
+);
+assert.equal(innerPainted.available_slot_count, 1);
+assert.equal(innerPainted.diagnostics.unclassified_status_cell_count, 0);
+const conflictingPaint = parser.parseSpaceAvailability(
+  documentWithStatusRow(paintedChildRow(["rgb(91, 159, 11)", "rgb(227, 99, 99)"])),
+  { origin: "https://booking.lib.hku.hk", pathname: "/FView.aspx" }
+);
+assert.equal(conflictingPaint.available_slot_count, 0);
+assert.equal(conflictingPaint.diagnostics.unclassified_status_cell_count, 1);
+const mixedParentChild = paintedChildRow(["rgb(91, 159, 11)"]);
+mixedParentChild.querySelectorAll("th, td")[2].style.backgroundColor = "rgb(227, 99, 99)";
+const conflictingParentPaint = parser.parseSpaceAvailability(
+  documentWithStatusRow(mixedParentChild),
+  { origin: "https://booking.lib.hku.hk", pathname: "/FView.aspx" }
+);
+assert.equal(conflictingParentPaint.available_slot_count, 0);
+assert.equal(conflictingParentPaint.diagnostics.unclassified_status_cell_count, 1);
+const inheritedPaintCell = cell("", "rgba(0, 0, 0, 0)");
+const inheritedPaintRow = {
+  tagName: "TR",
+  style: { backgroundColor: "rgb(91, 159, 11)" },
+  querySelectorAll() { return [cell("4/F"), cell("Room 996"), inheritedPaintCell]; }
+};
+inheritedPaintCell.parentElement = inheritedPaintRow;
+const inheritedPaint = parser.parseSpaceAvailability({
+  body: unknownStatusDocument.body,
+  querySelectorAll(selector) {
+    if (selector === "table tr") return [headerRow, inheritedPaintRow];
+    if (selector === "select") return bookingSelects;
+    return [];
+  }
+}, { origin: "https://booking.lib.hku.hk", pathname: "/FView.aspx" });
+assert.equal(inheritedPaint.available_slot_count, 1);
+assert.equal(inheritedPaint.diagnostics.unclassified_status_cell_count, 0);
+const transparentNeutral = parser.parseSpaceAvailability({
+  body: unknownStatusDocument.body,
+  querySelectorAll(selector) {
+    if (selector === "table tr") return [headerRow, row([cell("4/F"), cell("Room 995"), cell("", "rgba(0, 0, 0, 0)")])];
+    if (selector === "select") return bookingSelects;
+    return [];
+  }
+}, { origin: "https://booking.lib.hku.hk", pathname: "/FView.aspx" });
+assert.equal(transparentNeutral.diagnostics.unclassified_status_cell_count, 0);
+assert.equal(transparentNeutral.diagnostics.neutral_nonselectable_cell_count, 1);
+
+const explicitEmptyDocument = {
+  body: { textContent: "Facilities Booking System 2026-09-20 Booked Available No facilities found" },
+  querySelectorAll(selector) {
+    if (selector === "table tr") return [headerRow];
+    if (selector === "select") return bookingSelects;
+    return [];
+  }
+};
+const explicitEmpty = parser.parseSpaceAvailability(explicitEmptyDocument, {
+  origin: "https://booking.lib.hku.hk",
+  pathname: "/FView.aspx"
+});
+assert.equal(explicitEmpty.diagnostics.verified_empty_result_found, true);
+assert.equal(explicitEmpty.diagnostics.slot_candidate_count, 0);
 
 assert.throws(
   () => parser.parseSpaceAvailability(spaceDocument, {

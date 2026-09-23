@@ -25,6 +25,7 @@ from agents.library.agent import (
     LibraryResearchItemCapability,
     LibraryResearchSearchCapability,
     LibrarySpaceAvailabilityCapability,
+    LibrarySpaceBookCapability,
     LibrarySpaceBookingPreviewCapability,
 )
 from agents.timetable.agent import (
@@ -45,6 +46,7 @@ from services.timetable import TimetableService
 from services.moodle import MoodleAssignmentService, MoodleCourseService
 from services.briefing import DailyBriefingService
 from services.portal import PortalNoticeService
+from services.library_booking import LibraryBookingPreviewRegistry
 
 
 class ApplicationContainer:
@@ -69,6 +71,7 @@ class ApplicationContainer:
         self.moodle_courses = MoodleCourseService()
         self.moodle_assignments = MoodleAssignmentService()
         self.portal_notices = PortalNoticeService()
+        self.library_booking_previews = LibraryBookingPreviewRegistry()
         self.daily_briefing = DailyBriefingService(
             self.timetable, self.moodle_assignments, self.portal_notices
         )
@@ -112,7 +115,16 @@ class ApplicationContainer:
         self.registry.register(LibraryFacilityListCapability())
         self.registry.register(LibraryHoursAndLocationsCapability(self.connectors["sis_browser"]))
         self.registry.register(LibrarySpaceAvailabilityCapability(self.connectors["sis_browser"]))
-        self.registry.register(LibrarySpaceBookingPreviewCapability(self.connectors["sis_browser"]))
+        self.registry.register(
+            LibrarySpaceBookingPreviewCapability(
+                self.connectors["sis_browser"], self.library_booking_previews
+            )
+        )
+        self.registry.register(
+            LibrarySpaceBookCapability(
+                self.connectors["sis_browser"], self.library_booking_previews
+            )
+        )
 
         self.tasks = TaskManager(self.registry, self.store)
         self.actions = ActionService(self.registry, self.store, self.tasks, self.policy)

@@ -258,7 +258,7 @@ const SPACE_ROUTES = Object.freeze({
 });
 const SPACE_AVAILABILITY_URL = "https://booking.lib.hku.hk/Secure/FacilityStatusDate.aspx";
 
-async function waitForLibraryRead(tabId, command, payload, deadline) {
+async function waitForLibraryRead(tabId, command, payload, deadline, expectedPage = null, priorMatrixSignature = null) {
   let lastError = null;
   let previousReadySignature = null;
   while (Date.now() < deadline) {
@@ -277,7 +277,9 @@ async function waitForLibraryRead(tabId, command, payload, deadline) {
               (diagnostics.parsed_location_count > 0 || diagnostics.empty_state_found === true)
           : diagnostics.availability_marker_found === true &&
             diagnostics.selected_filters_found === true &&
-            diagnostics.table_matrix_found === true;
+            diagnostics.table_matrix_found === true &&
+            (expectedPage === null || snapshot.page_number === expectedPage) &&
+            (priorMatrixSignature === null || diagnostics.matrix_signature !== priorMatrixSignature);
       if (ready) {
         const signature = command === "library.research.read_results"
           ? `${diagnostics.result_candidate_count}|${diagnostics.parsed_result_count}|${diagnostics.incomplete_result_candidate_count}`
@@ -285,7 +287,7 @@ async function waitForLibraryRead(tabId, command, payload, deadline) {
             ? `${snapshot.record_id || ""}|${snapshot.title || ""}|${diagnostics.metadata_field_count}|${diagnostics.parsed_access_option_count}`
             : command === "library.hours.read"
               ? `${snapshot.hours_available}|${diagnostics.row_count}|${diagnostics.parsed_location_count}|${diagnostics.empty_state_found}`
-              : `${snapshot.location || ""}|${snapshot.booking_facility_type || ""}|${snapshot.date || ""}|${snapshot.page_number || 1}|${diagnostics.slot_candidate_count}|${diagnostics.parsed_available_slot_count}`;
+              : `${snapshot.location || ""}|${snapshot.booking_facility_type || ""}|${snapshot.date || ""}|${snapshot.page_number || 1}|${diagnostics.matrix_signature}|${diagnostics.slot_candidate_count}|${diagnostics.parsed_available_slot_count}|${diagnostics.unclassified_status_cell_count}|${diagnostics.neutral_nonselectable_cell_count}`;
         if (signature === previousReadySignature) return snapshot;
         previousReadySignature = signature;
       } else {
@@ -351,6 +353,20 @@ async function searchLibrarySpaceAvailability(payload) {
   if (!target || !/^20\d{2}-[01]\d-[0-3]\d$/.test(date)) {
     throw commandError("INVALID_INPUT", "Supported facility_type and exact YYYY-MM-DD date are required.");
   }
+  const hongKongDateParts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Hong_Kong", year: "numeric", month: "2-digit", day: "2-digit"
+  }).formatToParts(new Date());
+  const part = (type) => hongKongDateParts.find((item) => item.type === type)?.value || "";
+  const hongKongToday = `${part("year")}-${part("month")}-${part("day")}`;
+  const tomorrowDate = new Date(`${hongKongToday}T00:00:00Z`);
+  tomorrowDate.setUTCDate(tomorrowDate.getUTCDate() + 1);
+  const hongKongTomorrow = tomorrowDate.toISOString().slice(0, 10);
+  if (date !== hongKongToday && date !== hongKongTomorrow) {
+    throw commandError(
+      "LIBRARY_SPACE_DATE_OUT_OF_WINDOW",
+      `Choose ${hongKongToday} or ${hongKongTomorrow} (Hong Kong time) for the supported HKUL facilities.`
+    );
+  }
   const tab = await chrome.tabs.create({ url: SPACE_AVAILABILITY_URL, active: true });
   const deadline = Date.now() + NAVIGATION_DEADLINE_MS;
   const filterPayload = { ...target, date };
@@ -381,10 +397,56 @@ async function searchLibrarySpaceAvailability(payload) {
       lastConfigurationError?.message || "The exact HKUL booking filters did not become ready before the deadline."
     );
   }
-  const snapshot = await waitForLibraryRead(tab.id, "library.spaces.read_availability", {}, deadline);
-  if (snapshot.location !== target.location || snapshot.booking_facility_type !== target.booking_facility_type || snapshot.date !== date) {
+  const firstPage = await waitForLibraryRead(tab.id, "library.spaces.read_availability", {}, deadline, 1);
+  if (firstPage.location !== target.location || firstPage.booking_facility_type !== target.booking_facility_type || firstPage.date !== date) {
     throw commandError("LIBRARY_SPACE_FILTER_MISMATCH", "The live booking filters do not match the exact requested target.");
   }
+  if (firstPage.page_count > 10) {
+    throw commandError("LIBRARY_SPACE_RESULTS_PAGINATED", "The HKUL result has more than ten pages; controlled reading stopped.");
+  }
+  const pages = [firstPage];
+  for (let page = 2; page <= firstPage.page_count; page += 1) {
+    await sendTabCommand(tab.id, "library.spaces.select_result_page", { page_number: page });
+    const current = await waitForLibraryRead(
+      tab.id, "library.spaces.read_availability", {}, deadline, page,
+      pages[pages.length - 1].diagnostics.matrix_signature
+    );
+    if (current.location !== target.location || current.booking_facility_type !== target.booking_facility_type ||
+        current.date !== date || current.page_count !== firstPage.page_count) {
+      throw commandError("LIBRARY_SPACE_RESULT_PAGE_MISMATCH", "A HKUL result page changed its filters or page count during reading.");
+    }
+    pages.push(current);
+  }
+  const slots = pages.flatMap((page) => page.available_slots);
+  if (slots.length > 1000) {
+    throw commandError("LIBRARY_SPACE_RESULTS_TOO_LARGE", "The HKUL result exceeded the bounded slot limit.");
+  }
+  const slotKeys = slots.map((slot) => `${slot.floor || ""}|${slot.room || ""}|${slot.start_time}|${slot.end_time}`);
+  if (new Set(slotKeys).size !== slots.length) {
+    throw commandError("LIBRARY_SPACE_RESULT_PAGE_DUPLICATE", "A HKUL result page repeated a previously read availability slot.");
+  }
+  const countFields = ["facility_row_count", "status_cell_count", "unclassified_status_cell_count",
+    "neutral_nonselectable_cell_count", "slot_candidate_count", "incomplete_available_slot_candidate_count"];
+  const diagnostics = { ...firstPage.diagnostics };
+  for (const field of countFields) diagnostics[field] = pages.reduce((total, page) => total + Number(page.diagnostics[field] || 0), 0);
+  diagnostics.unclassified_cell_shapes = pages.flatMap((page) =>
+    (page.diagnostics.unclassified_cell_shapes || []).map((shape) => ({
+      ...shape,
+      page_number: page.page_number
+    }))
+  ).slice(0, 8);
+  diagnostics.matrix_signature = pages[pages.length - 1].diagnostics.matrix_signature;
+  diagnostics.parsed_available_slot_count = slots.length;
+  diagnostics.verified_empty_result_found = pages.some((page) => page.diagnostics.verified_empty_result_found);
+  diagnostics.result_set_complete = true;
+  const snapshot = {
+    ...pages[pages.length - 1],
+    pages_read_count: pages.length,
+    result_set_complete: true,
+    available_slot_count: slots.length,
+    available_slots: slots,
+    diagnostics
+  };
   return {
     read_only: true,
     navigation_only: true,
@@ -398,6 +460,8 @@ async function searchLibrarySpaceAvailability(payload) {
     booking_facility_type: target.booking_facility_type,
     date,
     availability_search_submitted: searchSubmitted,
+    page_navigation_interactions_performed: pages.length > 1,
+    result_pages_read: pages.length,
     steps: ["library_fixed_route_to_space_availability", "library_set_exact_availability_filters"],
     snapshot
   };

@@ -570,14 +570,31 @@ class LibrarySpaceSlot(StrictMessage):
     status: Literal["available"]
 
 
+class LibrarySpaceUnknownCellShape(StrictMessage):
+    row_index: int = Field(ge=0, le=10000)
+    column_index: int = Field(ge=0, le=1000)
+    text_present: bool
+    interactive: bool
+    color_family: Literal["unreadable", "white", "dark", "other"]
+    colspan: int = Field(ge=1, le=100)
+    page_number: int | None = Field(default=None, ge=1, le=100)
+
+
 class LibrarySpaceDiagnostics(StrictMessage):
     parser_version: str = Field(pattern=r"^\d+\.\d+\.\d+$", max_length=20)
     availability_marker_found: bool
     availability_legend_found: bool = False
     booked_legend_found: bool = False
     table_matrix_found: bool = False
+    matrix_signature: str = Field(default="00000000", pattern=r"^[a-f0-9]{8}$")
     selected_filters_found: bool = False
     result_set_complete: bool = True
+    verified_empty_result_found: bool = False
+    facility_row_count: int = Field(default=0, ge=0, le=1000)
+    status_cell_count: int = Field(default=0, ge=0, le=10000)
+    unclassified_status_cell_count: int = Field(default=0, ge=0, le=10000)
+    unclassified_cell_shapes: list[LibrarySpaceUnknownCellShape] = Field(default_factory=list, max_length=8)
+    neutral_nonselectable_cell_count: int = Field(default=0, ge=0, le=10000)
     slot_candidate_count: int = Field(ge=0, le=10000)
     parsed_available_slot_count: int = Field(ge=0, le=1000)
     incomplete_available_slot_candidate_count: int = Field(ge=0, le=1000)
@@ -593,9 +610,10 @@ class LibrarySpaceSnapshot(StrictMessage):
     source_last_updated_at: str | None = Field(default=None, max_length=40)
     page_number: int = Field(default=1, ge=1, le=100)
     page_count: int = Field(default=1, ge=1, le=100)
+    pages_read_count: int = Field(default=1, ge=1, le=100)
     result_set_complete: bool = True
-    available_slot_count: int = Field(ge=0, le=200)
-    available_slots: list[LibrarySpaceSlot] = Field(default_factory=list, max_length=200)
+    available_slot_count: int = Field(ge=0, le=1000)
+    available_slots: list[LibrarySpaceSlot] = Field(default_factory=list, max_length=1000)
     diagnostics: LibrarySpaceDiagnostics
 
     @model_validator(mode="after")
@@ -606,9 +624,11 @@ class LibrarySpaceSnapshot(StrictMessage):
             raise ValueError("Library slot parser count does not match the structured rows.")
         if self.page_number > self.page_count:
             raise ValueError("Library availability page number exceeds the page count.")
-        expected_complete = self.page_count == 1
+        if self.pages_read_count > self.page_count:
+            raise ValueError("Library pages read exceed the reported page count.")
+        expected_complete = self.pages_read_count == self.page_count
         if self.result_set_complete != expected_complete:
-            raise ValueError("Library result completeness does not match pagination.")
+            raise ValueError("Library result completeness does not match the number of pages read.")
         if self.diagnostics.result_set_complete != self.result_set_complete:
             raise ValueError("Library parser completeness disagrees with the snapshot.")
         return self
@@ -627,6 +647,8 @@ class LibrarySpaceNavigationResult(StrictMessage):
     booking_facility_type: str = Field(min_length=1, max_length=160)
     date: datetime_module.date
     availability_search_submitted: bool
+    page_navigation_interactions_performed: bool = False
+    result_pages_read: int = Field(default=1, ge=1, le=100)
     steps: list[Literal["library_fixed_route_to_space_availability", "library_set_exact_availability_filters"]] = Field(min_length=2, max_length=2)
     snapshot: LibrarySpaceSnapshot
 
@@ -638,6 +660,8 @@ class LibrarySpaceNavigationResult(StrictMessage):
             raise ValueError("Library Facility Type filter does not match the navigation target.")
         if self.snapshot.date != self.date:
             raise ValueError("Library Date filter does not match the navigation target.")
+        if self.snapshot.pages_read_count != self.result_pages_read:
+            raise ValueError("Library result page count does not match the navigation record.")
         return self
 
 

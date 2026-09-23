@@ -4,7 +4,7 @@
   const PRIMO_ORIGIN = "https://julac-hku.primo.exlibrisgroup.com";
   const LIBRARY_ORIGIN = "https://lib.hku.hk";
   const BOOKING_ORIGIN = "https://booking.lib.hku.hk";
-  const VERSION = "0.3.1";
+  const VERSION = "0.3.5";
   const HOURS_VERSION = "0.1.1";
 
   function clean(value) {
@@ -457,8 +457,11 @@
 
   function rgbOf(value) {
     const color = clean(value).toLowerCase();
-    let match = color.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
-    if (match) return match.slice(1, 4).map(Number);
+    let match = color.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*([\d.]+))?\s*\)/);
+    if (match) {
+      if (match[4] !== undefined && Number(match[4]) === 0) return null;
+      return match.slice(1, 4).map(Number);
+    }
     match = color.match(/^#([0-9a-f]{6})$/i);
     if (match) return [0, 2, 4].map((offset) => parseInt(match[1].slice(offset, offset + 2), 16));
     match = color.match(/^#([0-9a-f]{3})$/i);
@@ -466,18 +469,135 @@
     return null;
   }
 
-  function colorStatus(node, legendsFound) {
+  function directColorStatus(node, legendsFound) {
     const text = clean(node?.innerText || node?.textContent || node?.getAttribute?.("title") || node?.getAttribute?.("aria-label"));
     const className = clean(node?.className);
     if (/\b(?:available|vacant)\b/i.test(`${text} ${className}`) && !/\b(?:unavailable|not available)\b/i.test(text)) return "available";
     if (/\b(?:booked|unavailable|not available)\b/i.test(`${text} ${className}`)) return "booked";
     if (!legendsFound) return null;
-    const rgb = rgbOf(colorOf(node));
+    return statusFromRgb(rgbOf(colorOf(node)));
+  }
+
+  function statusFromRgb(rgb) {
     if (!rgb) return null;
     const [red, green, blue] = rgb;
     if (green >= 70 && green > red * 1.15 && green > blue * 1.15) return "available";
     if (red >= 100 && red > green * 1.12 && red > blue * 1.12) return "booked";
     return null;
+  }
+
+  function colorStatus(node, legendsFound) {
+    const direct = directColorStatus(node, legendsFound);
+    if (!legendsFound) return direct;
+    // The grid may paint an inner control or its row while the td is transparent.
+    const descendants = [...(node?.querySelectorAll?.("a,button,input,span,div") || [])].slice(0, 24);
+    const ancestorEvidence = [];
+    let ancestor = node?.parentElement;
+    for (let depth = 0; ancestor && depth < 4; depth += 1, ancestor = ancestor.parentElement) {
+      if (/^(?:table|tbody|thead|tfoot)$/i.test(String(ancestor.tagName || ""))) break;
+      ancestorEvidence.push(statusFromRgb(rgbOf(colorOf(ancestor))));
+      if (/^tr$/i.test(String(ancestor.tagName || ""))) break;
+    }
+    const evidence = [
+      direct,
+      ...descendants.map((child) => directColorStatus(child, legendsFound)),
+      ...ancestorEvidence
+    ].filter(Boolean);
+    return evidence.length && evidence.every((status) => status === evidence[0]) ? evidence[0] : null;
+  }
+
+  function transparentColor(value) {
+    const match = clean(value).toLowerCase().match(/^rgba\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*,\s*([\d.]+)\s*\)$/);
+    return Boolean(match && Number(match[1]) === 0);
+  }
+
+  function interactiveCell(node) {
+    if (!node) return false;
+    const style = node?.ownerDocument?.defaultView?.getComputedStyle?.(node);
+    if (node.onclick || node.getAttribute?.("onclick") || node.getAttribute?.("role") === "button" ||
+        node.hasAttribute?.("tabindex") || /pointer/i.test(clean(style?.cursor))) return true;
+    return Boolean(node.querySelector?.("a,button,input,[role='button'],[onclick],[tabindex]"));
+  }
+
+  function unknownCellShape(node, rowIndex, columnIndex) {
+    const value = clean(node?.innerText || node?.textContent || "");
+    const rgb = rgbOf(colorOf(node));
+    let colorFamily = "unreadable";
+    if (rgb) {
+      if (rgb.every((channel) => channel >= 245)) colorFamily = "white";
+      else if (rgb.every((channel) => channel <= 40)) colorFamily = "dark";
+      else colorFamily = "other";
+    }
+    return {
+      row_index: rowIndex,
+      column_index: columnIndex,
+      text_present: Boolean(value),
+      interactive: interactiveCell(node),
+      color_family: colorFamily,
+      colspan: Math.min(100, Math.max(1, Number(node?.colSpan || node?.getAttribute?.("colspan") || 1) || 1))
+    };
+  }
+
+  function neutralNonSelectableCell(node) {
+    const text = clean(node?.innerText || node?.textContent || "");
+    if (text && !/^(?:n\/?a|[-\u2013\u2014]+)$/i.test(text)) return false;
+    if (interactiveCell(node)) return false;
+    const descendants = [...(node?.querySelectorAll?.("a,button,input,span,div") || [])].slice(0, 24);
+    if ([node, ...descendants].some((candidate) => directColorStatus(candidate, true))) return false;
+    const color = colorOf(node);
+    const rgb = rgbOf(color);
+    if (rgb && rgb.every((channel) => channel >= 245)) return true;
+    return transparentColor(color);
+  }
+
+  function resultPageSelect(documentObject) {
+    const matches = [...(documentObject.querySelectorAll?.("select") || [])].filter((select) => {
+      const values = [...(select.options || select.querySelectorAll?.("option") || [])]
+        .map((option) => clean(option.textContent || option.innerText));
+      return values.length > 0 && values.every((value) => /^\d+$/.test(value));
+    });
+    return matches.length === 1 ? matches[0] : null;
+  }
+
+  function matrixSignature(rows) {
+    let hash = 2166136261;
+    for (const row of rows) {
+      for (const cell of cellsOf(row)) {
+        const value = `${clean(cell.innerText || cell.textContent)}|${colorOf(cell)}|`;
+        for (let index = 0; index < value.length; index += 1) {
+          hash = Math.imul(hash ^ value.charCodeAt(index), 16777619);
+        }
+      }
+    }
+    return (hash >>> 0).toString(16).padStart(8, "0");
+  }
+
+  function selectSpaceResultPage(documentObject, locationObject, payload) {
+    if (locationObject?.origin !== BOOKING_ORIGIN) {
+      const error = new Error("Open the verified HKUL availability page first.");
+      error.code = "WRONG_LIBRARY_SPACE_PAGE";
+      throw error;
+    }
+    const page = Number(payload?.page_number);
+    const select = resultPageSelect(documentObject);
+    const options = [...(select?.options || select?.querySelectorAll?.("option") || [])];
+    const matching = options.filter((option) => Number(clean(option.textContent || option.innerText)) === page);
+    if (!Number.isInteger(page) || page < 1 || !select || matching.length !== 1) {
+      const error = new Error("The requested HKUL result page is not uniquely available.");
+      error.code = "LIBRARY_SPACE_RESULT_PAGE_UNAVAILABLE";
+      throw error;
+    }
+    if (Number(optionText(select)) === page) return { navigation_started: false, page_number: page };
+    const option = matching[0];
+    select.value = option.value;
+    select.selectedIndex = options.indexOf(option);
+    option.selected = true;
+    const EventConstructor = select?.ownerDocument?.defaultView?.Event || globalThis.Event;
+    if (typeof select.dispatchEvent === "function" && EventConstructor) {
+      select.dispatchEvent(new EventConstructor("input", { bubbles: true }));
+      select.dispatchEvent(new EventConstructor("change", { bubbles: true }));
+    }
+    return { navigation_started: true, page_number: page };
   }
 
   function libraryHoursStatus(value) {
@@ -578,7 +698,13 @@
     const slots = [];
     let incomplete = 0;
     let candidateCount = 0;
+    let facilityRowCount = 0;
+    let statusCellCount = 0;
+    let unclassifiedStatusCellCount = 0;
+    let neutralNonSelectableCellCount = 0;
+    const unclassifiedCellShapes = [];
     let tableMatrixFound = false;
+    const verifiedEmptyResultFound = /\b(?:no\s+(?:facilities|rooms?|slots?|records?)\s+(?:found|available)|no\s+matching\s+(?:facilities|rooms?|slots?)|no\s+data\s+(?:found|available))\b/i.test(bodyText);
 
     let timeColumns = new Map();
     for (const row of rows) {
@@ -593,17 +719,26 @@
 
     if (timeColumns.size) {
       tableMatrixFound = true;
-      for (const row of rows) {
+      for (const [rowIndex, row] of rows.entries()) {
         const cells = cellsOf(row);
         if (cells.length < 3) continue;
         const floor = clean(cells[0]?.innerText || cells[0]?.textContent) || null;
         const room = clean(cells[1]?.innerText || cells[1]?.textContent) || null;
         if (!room || /^(?:facility|room)$/i.test(room)) continue;
+        facilityRowCount += 1;
         for (const [index, range] of timeColumns) {
           const cell = cells[index];
           if (!cell) continue;
+          statusCellCount += 1;
           const status = colorStatus(cell, legendsFound);
-          if (!status) continue;
+          if (!status) {
+            if (neutralNonSelectableCell(cell)) neutralNonSelectableCellCount += 1;
+            else {
+              unclassifiedStatusCellCount += 1;
+              if (unclassifiedCellShapes.length < 8) unclassifiedCellShapes.push(unknownCellShape(cell, rowIndex, index));
+            }
+            continue;
+          }
           candidateCount += 1;
           if (status !== "available") continue;
           const key = `${floor || ""}|${room}|${range.start}|${range.end}`;
@@ -638,11 +773,7 @@
 
     for (const slot of slots) delete slot._key;
     const lastUpdatedMatch = bodyText.match(/Last\s+Updated\s*:\s*(20\d{2}-[01]\d-[0-3]\d\s+[0-2]\d:[0-5]\d:[0-5]\d)/i);
-    const pageSelect = [...(documentObject.querySelectorAll?.("select") || [])].find((select) => {
-      const values = [...(select.options || select.querySelectorAll?.("option") || [])]
-        .map((option) => clean(option.textContent || option.innerText));
-      return values.length > 0 && values.every((value) => /^\d+$/.test(value));
-    }) || null;
+    const pageSelect = resultPageSelect(documentObject);
     const pageOptions = [...(pageSelect?.options || pageSelect?.querySelectorAll?.("option") || [])];
     const pageNumber = Number(optionText(pageSelect) || 1);
     const pageCount = Math.max(1, pageOptions.length || 1);
@@ -659,15 +790,22 @@
       page_count: pageCount,
       result_set_complete: pageCount === 1,
       available_slot_count: slots.length,
-      available_slots: slots.slice(0, 200),
+      available_slots: slots.slice(0, 1000),
       diagnostics: {
         parser_version: VERSION,
         availability_marker_found: /\b(?:facilities booking system|book a space|facility status|new booking)\b/i.test(bodyText),
         availability_legend_found: availableLegendFound,
         booked_legend_found: bookedLegendFound,
         table_matrix_found: tableMatrixFound,
+        matrix_signature: matrixSignature(rows),
         selected_filters_found: Boolean(selectedLocation && selectedFacilityType && parsedDate),
         result_set_complete: pageCount === 1,
+        verified_empty_result_found: verifiedEmptyResultFound,
+        facility_row_count: facilityRowCount,
+        status_cell_count: statusCellCount,
+        unclassified_status_cell_count: unclassifiedStatusCellCount,
+        unclassified_cell_shapes: unclassifiedCellShapes,
+        neutral_nonselectable_cell_count: neutralNonSelectableCellCount,
         slot_candidate_count: candidateCount,
         parsed_available_slot_count: slots.length,
         incomplete_available_slot_candidate_count: incomplete
@@ -675,6 +813,6 @@
     };
   }
 
-  root.HKULibraryParser = { parseResearch, parseResearchDetail, parseSpaceAvailability, configureSpaceAvailability, parseHoursAndLocations, safeDetailUrl };
+  root.HKULibraryParser = { parseResearch, parseResearchDetail, parseSpaceAvailability, configureSpaceAvailability, selectSpaceResultPage, parseHoursAndLocations, safeDetailUrl };
   if (typeof module !== "undefined" && module.exports) module.exports = root.HKULibraryParser;
 })(typeof self !== "undefined" ? self : this);

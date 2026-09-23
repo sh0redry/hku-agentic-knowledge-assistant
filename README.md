@@ -28,11 +28,11 @@ not free-form browser automation.
 
 | Component | Version |
 |---|---:|
-| Browser Bridge extension | `0.17.1` |
+| Browser Bridge extension | `0.17.5` |
 | DeepSeek Harness plugin | `0.18.0` |
 | Integration API | `v1` |
 | Library research parser | `0.2.2` |
-| Library space parser | `0.3.1` |
+| Library space parser | `0.3.5` |
 | Library hours parser | `0.1.1` |
 
 Implementation and synthetic testing are complete for the capabilities below.
@@ -54,6 +54,7 @@ opening hours.
 | Find@HKUL research | Complete | Complete | Licensed full text and account actions are not opened |
 | Library availability and hours | Complete | Complete | Availability is read-only; no slot selection or booking |
 | Library exact booking preview | Complete | Pending | Short-lived read-only preview; no write authority |
+| Library supervised booking safety envelope | Complete | Not enabled | Process-issued preview + two-phase confirmation; external Submit absent |
 
 This table is a release summary, not a substitute for the evidence checklist in
 [the live acceptance runbook](docs/LIVE_ACCEPTANCE.md).
@@ -190,18 +191,34 @@ account.
 2. `library.spaces.search_availability` opens the fixed booking availability
    page, selects the exact allow-listed Location and Facility Type plus the
    required date, submits Search, and parses visible available slots.
+   For the currently supported facility types, the requested date must be
+   today or tomorrow in Hong Kong time; the check runs before opening a tab.
 3. The result must keep `slot_selection_performed: false`,
    `booking_form_opened: false`, and `booking_writes_performed: 0`.
 
 The availability result includes the selected filter labels, displayed date,
 source `Last Updated` value when present, and a completeness verdict. F1.1
 fails closed if results span multiple pages or the live filters differ from the
-requested allow-listed target.
+requested allow-listed target. A multi-page matrix is read through its numeric
+page selector, with the same filters verified on every page. If any page cannot
+be read, the tool fails without claiming a complete result. A
+zero-slot result is accepted only when the
+page exposes either classified booked cells or an explicit empty-result marker;
+a matrix with zero classifiable cells fails closed rather than being reported
+as “fully booked.”
 
 An exact read-only booking preview is now available after the availability
 read. Selecting a slot, opening the booking form, or submitting a reservation
 remains outside the current phase and requires a separately reviewed write
 contract.
+
+The next F2 safety layer is registered as `library.spaces.book`, but it is not a
+working booking tool yet. It accepts only a fresh preview issued by the same
+running HKU AGENTS process and uses the generic draft/validate/confirm/execute
+API. The environment gate defaults off, Harness does not expose the capability,
+and the executor stops before any browser booking write even if the gate is
+changed. This allows the confirmation and expiry contracts to be tested without
+creating a reservation.
 
 ## Safety model
 
@@ -310,7 +327,7 @@ Open:
 1. Open `chrome://extensions`.
 2. Enable **Developer mode**.
 3. Choose **Load unpacked** and select `browser_runtime/extension`.
-4. Confirm extension version `0.17.1`.
+4. Confirm extension version `0.17.5`.
 5. Log into HKU Portal manually and complete password/MFA prompts yourself.
 6. Copy the browser pairing token from the GUI **Connections** tab into the
    extension popup.
@@ -407,7 +424,7 @@ cd integrations\deepseek_harness
 npm test
 ```
 
-Current baseline: 73 Python tests, 9 JavaScript suites, and 15 Harness tests.
+Current baseline: 87 Python tests, 10 JavaScript suites, and 15 Harness tests.
 
 Live acceptance is separate: reload the unpacked extension after every Browser
 Bridge version change, keep the relevant authenticated HKU tab available, invoke
@@ -467,7 +484,7 @@ roadmap and completed live-acceptance checkpoints.
 | `PAGE_SCRIPT_UNAVAILABLE` | Reload the unpacked extension and refresh the relevant HKU page. |
 | `PORTAL_LOGIN_REQUIRED` / `SIS_LOGIN_REQUIRED` | Complete the visible HKU authentication flow manually, then retry. |
 | `SSO_MANUAL_ACTION_REQUIRED` | Complete the visible password, MFA, CAPTCHA, consent, or recovery step. |
-| Parser version mismatch | Reload the extension, refresh the page, and confirm version `0.17.1`. |
+| Parser version mismatch | Reload the extension, refresh the page, and confirm version `0.17.5`. |
 | Harness plugin install fails | Install `pnpm`; on Windows, enable Developer Mode or use an elevated shell if profile symlink creation fails. |
 | Harness receives `401` | Export the Integration API token, not the browser pairing token. |
 

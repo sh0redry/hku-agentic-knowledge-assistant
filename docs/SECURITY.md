@@ -99,8 +99,12 @@ limited to approved HKU origins and loopback communication.
 
 ## Write governance
 
-Current HKU integrations expose no domain writes. A future write must be a
-separate capability and satisfy all of the following:
+Current HKU integrations perform no domain writes. The registered
+`library.spaces.book` F2 envelope is a separate high-risk capability, but its
+external submission path is hard-disabled and is not exposed to Harness. It
+accepts only a fresh process-issued preview digest and requires the platform's
+one-time two-phase confirmation. A future enabled write must additionally
+satisfy all of the following:
 
 1. exact structured target;
 2. fresh read-only precondition check;

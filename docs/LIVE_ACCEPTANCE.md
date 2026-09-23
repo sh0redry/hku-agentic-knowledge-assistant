@@ -99,14 +99,31 @@ For Book a Space, call availability with an exact facility type and
 match the requested allow-listed target; visible green cells correspond exactly
 to returned floor/room/time rows; `result_set_complete` is true; and no slot was
 selected. Compare `source_last_updated_at` with the visible page when present.
-If the page selector exposes more than one page, acceptance must fail closed
-with `LIBRARY_SPACE_RESULTS_PAGINATED` until pagination is implemented.
+For the currently supported facility types, a date beyond tomorrow in
+`Asia/Hong_Kong` must return `LIBRARY_SPACE_DATE_OUT_OF_WINDOW` before a
+booking tab opens. Repeat around Hong Kong midnight to verify the window rolls
+over with the local date.
+If the page selector exposes more than one page, verify the tool reads each
+numbered page, `result_pages_read` equals the displayed page count, and the
+returned slots include both pages without duplicates. A failed page switch or
+changed filter context must fail closed.
+For a day with no available slots, confirm that `slot_candidate_count` is still
+positive because booked cells were classified, or that
+`verified_empty_result_found` is true. A matrix with zero classifiable cells and
+no explicit empty message must fail with
+`LIBRARY_SPACE_EMPTY_STATE_UNVERIFIED`, not return a successful empty list.
 
 For `library.spaces.booking_preview`, copy one exact returned slot and confirm
 `ready: true`, an exact target, a bounded expiry, a 64-character digest,
 `policy_acceptance_recorded: false`, and all selection/form/write counters at
 zero. Repeat with a mismatched date and unavailable room; both must return
 `ready: false` without creating a preview or performing a write.
+
+F2 must remain disabled during this read-only acceptance. After a successful
+preview, an action draft for `library.spaces.book` may be inspected to verify
+that it reproduces the exact target, eligibility basis, policy digest, observed
+time, and expiry. Do not enable `LIBRARY_BOOKING_WRITES_ENABLED`; the current
+executor intentionally stops before any slot selection or Submit action.
 
 For hours, compare every returned location with the current official page. A
 live `Today` view must remain described as visible time-period data, not as a

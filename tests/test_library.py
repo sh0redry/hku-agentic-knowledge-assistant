@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
@@ -16,10 +17,17 @@ sys.path.insert(0, str(PROJECT))
 from api.app import create_api_app
 from application import ApplicationContainer
 from browser_bridge.service import BrowserBridgeError
+from agents.models import TaskStatus
+from agents.library.agent import hku_booking_today
+from datetime import date, datetime, timezone
+from services.library_booking import LibraryBookingPreviewRegistry
 
 
 class LibraryIntegrationTests(unittest.TestCase):
     def setUp(self):
+        self.booking_clock = patch("agents.library.agent.hku_booking_today", return_value=date(2026, 9, 20))
+        self.booking_clock.start()
+        self.addCleanup(self.booking_clock.stop)
         self.temp_dir = tempfile.TemporaryDirectory(dir=ROOT / "tests" / ".tmp")
         self.container = ApplicationContainer(Path(self.temp_dir.name) / "test.db")
         self.token = "library-test-token-" + "x" * 32
@@ -146,6 +154,10 @@ class LibraryIntegrationTests(unittest.TestCase):
         location: str = "Main Library",
         booking_facility_type: str = "Single Study Room (3 sessions)",
         page_count: int = 1,
+        pages_read_count: int | None = None,
+        booked_candidates: int = 0,
+        unclassified_status_cells: int = 0,
+        verified_empty: bool = False,
     ) -> dict:
         available_slots = slots if slots is not None else [{
             "floor": "4/F",
@@ -154,6 +166,7 @@ class LibraryIntegrationTests(unittest.TestCase):
             "end_time": "10:30",
             "status": "available",
         }]
+        pages_read = page_count if pages_read_count is None else pages_read_count
         return {
             "read_only": True,
             "navigation_only": True,
@@ -167,6 +180,8 @@ class LibraryIntegrationTests(unittest.TestCase):
             "booking_facility_type": booking_facility_type,
             "date": date,
             "availability_search_submitted": True,
+            "page_navigation_interactions_performed": pages_read > 1,
+            "result_pages_read": pages_read,
             "steps": [
                 "library_fixed_route_to_space_availability",
                 "library_set_exact_availability_filters",
@@ -181,18 +196,25 @@ class LibraryIntegrationTests(unittest.TestCase):
                 "source_last_updated_at": "2026-09-19 12:00:00",
                 "page_number": 1,
                 "page_count": page_count,
-                "result_set_complete": page_count == 1,
+                "pages_read_count": pages_read,
+                "result_set_complete": pages_read == page_count,
                 "available_slot_count": len(available_slots),
                 "available_slots": available_slots,
                 "diagnostics": {
-                    "parser_version": "0.3.1",
+                    "parser_version": "0.3.5",
                     "availability_marker_found": True,
                     "availability_legend_found": True,
                     "booked_legend_found": True,
                     "table_matrix_found": True,
+                    "matrix_signature": "12345678",
                     "selected_filters_found": True,
-                    "result_set_complete": page_count == 1,
-                    "slot_candidate_count": len(available_slots) + incomplete,
+                    "result_set_complete": pages_read == page_count,
+                    "verified_empty_result_found": verified_empty,
+                    "facility_row_count": 1 if available_slots or booked_candidates or unclassified_status_cells else 0,
+                    "status_cell_count": len(available_slots) + booked_candidates + unclassified_status_cells,
+                    "unclassified_status_cell_count": unclassified_status_cells,
+                    "neutral_nonselectable_cell_count": 0,
+                    "slot_candidate_count": len(available_slots) + booked_candidates + incomplete,
                     "parsed_available_slot_count": len(available_slots),
                     "incomplete_available_slot_candidate_count": incomplete,
                 },
@@ -369,7 +391,56 @@ class LibraryIntegrationTests(unittest.TestCase):
         self.assertFalse(response["ok"])
         self.assertEqual(response["error"]["code"], "INVALID_REQUEST")
 
+    def test_hong_kong_booking_day_changes_at_local_midnight(self):
+        self.assertEqual(
+            hku_booking_today(datetime(2026, 9, 22, 15, 59, tzinfo=timezone.utc)),
+            date(2026, 9, 22),
+        )
+        self.assertEqual(
+            hku_booking_today(datetime(2026, 9, 22, 16, 0, tzinfo=timezone.utc)),
+            date(2026, 9, 23),
+        )
+
+    def test_space_availability_rejects_out_of_window_before_browser(self):
+        connector = self.container.connectors["sis_browser"]
+        connector.search_library_space_availability = AsyncMock()
+        response = self.client.post(
+            "/api/v1/integration/library/spaces/search-availability",
+            headers=self.headers,
+            json={"facility_type": "single_study_room", "date": "2026-09-22"},
+        ).json()
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["error"]["code"], "LIBRARY_SPACE_DATE_OUT_OF_WINDOW")
+        self.assertIn("2026-09-21", response["error"]["message"])
+        connector.search_library_space_availability.assert_not_awaited()
+
+    def test_space_availability_accepts_tomorrow_in_hong_kong(self):
+        connector = self.container.connectors["sis_browser"]
+        connector.search_library_space_availability = AsyncMock(
+            return_value=self.space_navigation(date="2026-09-21")
+        )
+        response = self.client.post(
+            "/api/v1/integration/library/spaces/search-availability",
+            headers=self.headers,
+            json={"facility_type": "single_study_room", "date": "2026-09-21"},
+        ).json()
+        self.assertTrue(response["ok"])
+        connector.search_library_space_availability.assert_awaited_once()
+
     def test_space_availability_fails_closed_when_results_are_paginated(self):
+        connector = self.container.connectors["sis_browser"]
+        navigation = self.space_navigation(page_count=2, pages_read_count=1)
+        navigation["snapshot"]["diagnostics"]["unclassified_status_cell_count"] = 1
+        connector.search_library_space_availability = AsyncMock(return_value=navigation)
+        response = self.client.post(
+            "/api/v1/integration/library/spaces/search-availability",
+            headers=self.headers,
+            json={"facility_type": "single_study_room", "date": "2026-09-20"},
+        ).json()
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["error"]["code"], "LIBRARY_SPACE_RESULTS_PAGINATED")
+
+    def test_space_availability_accepts_complete_two_page_result(self):
         connector = self.container.connectors["sis_browser"]
         connector.search_library_space_availability = AsyncMock(
             return_value=self.space_navigation(page_count=2)
@@ -379,8 +450,49 @@ class LibraryIntegrationTests(unittest.TestCase):
             headers=self.headers,
             json={"facility_type": "single_study_room", "date": "2026-09-20"},
         ).json()
+        self.assertTrue(response["ok"])
+        self.assertTrue(response["result"]["result_set_complete"])
+        self.assertEqual(response["result"]["result_pages_read"], 2)
+        self.assertTrue(response["result"]["page_navigation_interactions_performed"])
+
+    def test_space_availability_accepts_a_verified_empty_result(self):
+        connector = self.container.connectors["sis_browser"]
+        connector.search_library_space_availability = AsyncMock(
+            return_value=self.space_navigation(slots=[], verified_empty=True)
+        )
+        response = self.client.post(
+            "/api/v1/integration/library/spaces/search-availability",
+            headers=self.headers,
+            json={"facility_type": "single_study_room", "date": "2026-09-20"},
+        ).json()
+        self.assertTrue(response["ok"])
+        self.assertEqual(response["result"]["available_slot_count"], 0)
+
+    def test_space_availability_fails_closed_on_unverified_zero_candidates(self):
+        connector = self.container.connectors["sis_browser"]
+        connector.search_library_space_availability = AsyncMock(
+            return_value=self.space_navigation(slots=[])
+        )
+        response = self.client.post(
+            "/api/v1/integration/library/spaces/search-availability",
+            headers=self.headers,
+            json={"facility_type": "single_study_room", "date": "2026-09-20"},
+        ).json()
         self.assertFalse(response["ok"])
-        self.assertEqual(response["error"]["code"], "LIBRARY_SPACE_RESULTS_PAGINATED")
+        self.assertEqual(response["error"]["code"], "LIBRARY_SPACE_EMPTY_STATE_UNVERIFIED")
+
+    def test_space_availability_fails_closed_on_unclassified_status_cell(self):
+        connector = self.container.connectors["sis_browser"]
+        connector.search_library_space_availability = AsyncMock(
+            return_value=self.space_navigation(slots=[], unclassified_status_cells=1)
+        )
+        response = self.client.post(
+            "/api/v1/integration/library/spaces/search-availability",
+            headers=self.headers,
+            json={"facility_type": "single_study_room", "date": "2026-09-20"},
+        ).json()
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["error"]["code"], "LIBRARY_SPACE_STATUS_PARSE_INCOMPLETE")
 
     def test_booking_preview_matches_exact_slot_without_booking_write(self):
         connector = self.container.connectors["sis_browser"]
@@ -419,10 +531,111 @@ class LibraryIntegrationTests(unittest.TestCase):
         self.assertFalse(stored.result["private_preview_details_persisted"])
         self.assertNotIn("preview_digest", stored.result)
 
+    def test_booking_preview_rejects_out_of_window_before_browser(self):
+        connector = self.container.connectors["sis_browser"]
+        connector.search_library_space_availability = AsyncMock()
+        response = self.client.post(
+            "/api/v1/integration/library/spaces/booking-preview",
+            headers=self.headers,
+            json={
+                "facility_type": "single_study_room",
+                "date": "2026-09-22",
+                "room": "Study Room A",
+                "start_time": "09:00",
+                "end_time": "10:30",
+                "eligibility_category": "current_hku_students",
+            },
+        ).json()
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["error"]["code"], "LIBRARY_SPACE_DATE_OUT_OF_WINDOW")
+        connector.search_library_space_availability.assert_not_awaited()
+
+    def test_f2_booking_draft_binds_process_issued_preview_and_stays_disabled(self):
+        async def scenario():
+            connector = self.container.connectors["sis_browser"]
+            connector.search_library_space_availability = AsyncMock(
+                return_value=self.space_navigation()
+            )
+            preview_task = await self.container.tasks.submit_and_wait(
+                "library.spaces.booking_preview",
+                {
+                    "facility_type": "single_study_room",
+                    "date": "2026-09-20",
+                    "floor": "4/F",
+                    "room": "Study Room A",
+                    "start_time": "09:00",
+                    "end_time": "10:30",
+                    "eligibility_category": "current_hku_students",
+                },
+            )
+            digest = preview_task.result["preview_digest"]
+            draft = self.container.actions.create_draft(
+                "library.spaces.book", {"preview_digest": digest}
+            )
+            self.assertEqual(draft.status, TaskStatus.AWAITING_CONFIRMATION)
+            self.assertEqual(draft.preview["exact_target"]["room"], "Study Room A")
+            self.assertFalse(draft.preview["external_submission_enabled"])
+
+            confirmed, token = self.container.actions.confirm(
+                draft.id, draft.preview_digest
+            )
+            self.assertEqual(confirmed.status, TaskStatus.QUEUED)
+            with patch("config.LIBRARY_BOOKING_WRITES_ENABLED", False):
+                task = self.container.actions.execute(
+                    draft.id,
+                    confirmation_token=token,
+                    session_id="test-user",
+                )
+                await self.container.tasks._running[task.id]
+            failed = self.container.store.get_task(task.id)
+            self.assertEqual(failed.status, TaskStatus.FAILED)
+            self.assertEqual(failed.error["code"], "LIBRARY_BOOKING_WRITE_DISABLED")
+            self.assertEqual(failed.error["details"]["booking_writes_performed"], 0)
+            self.assertFalse(failed.error["details"]["preview_consumed"])
+
+            second = self.container.actions.create_draft(
+                "library.spaces.book", {"preview_digest": digest}
+            )
+            confirmed_second, second_token = self.container.actions.confirm(
+                second.id, second.preview_digest
+            )
+            with patch("config.LIBRARY_BOOKING_WRITES_ENABLED", True):
+                second_task = self.container.actions.execute(
+                    confirmed_second.id,
+                    confirmation_token=second_token,
+                    session_id="test-user",
+                )
+                await self.container.tasks._running[second_task.id]
+            not_implemented = self.container.store.get_task(second_task.id)
+            self.assertEqual(not_implemented.status, TaskStatus.FAILED)
+            self.assertEqual(
+                not_implemented.error["code"],
+                "LIBRARY_BOOKING_SUBMIT_NOT_IMPLEMENTED",
+            )
+            self.assertEqual(
+                not_implemented.error["details"]["booking_writes_performed"], 0
+            )
+            self.assertFalse(not_implemented.error["details"]["preview_consumed"])
+
+        asyncio.run(scenario())
+
+    def test_f2_booking_draft_rejects_unissued_and_expired_preview(self):
+        with self.assertRaises(Exception) as unissued:
+            self.container.actions.create_draft(
+                "library.spaces.book", {"preview_digest": "a" * 64}
+            )
+        self.assertEqual(unissued.exception.code, "LIBRARY_BOOKING_PREVIEW_NOT_ISSUED")
+
+        registry = LibraryBookingPreviewRegistry()
+        registry.issue("b" * 64, {"expires_at": "2020-01-01T00:00:00+00:00"})
+        with self.assertRaises(Exception) as expired:
+            registry.require("b" * 64)
+        self.assertEqual(expired.exception.code, "LIBRARY_BOOKING_PREVIEW_EXPIRED")
+
     def test_booking_preview_unavailable_is_successful_domain_verdict(self):
         connector = self.container.connectors["sis_browser"]
         connector.search_library_space_availability = AsyncMock(
-            return_value=self.space_navigation(slots=[])
+            return_value=self.space_navigation(slots=[], booked_candidates=1)
         )
         response = self.client.post(
             "/api/v1/integration/library/spaces/booking-preview",

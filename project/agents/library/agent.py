@@ -1,15 +1,16 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import hashlib
 import json
-from datetime import date as date_type, timedelta
+from datetime import date as date_type, datetime, timedelta
 from typing import Literal
+from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 import config
 from agents.base import BaseCapability
-from agents.errors import CapabilityError
+from agents.errors import CapabilityError, PolicyDeniedError
 from agents.models import (
     CapabilityManifest,
     CapabilityMode,
@@ -20,6 +21,7 @@ from agents.models import (
 )
 from browser_bridge.service import BrowserBridgeError
 from connectors.sis.browser import BrowserSISConnector
+from services.library_booking import LibraryBookingPreviewRegistry
 
 
 class LibraryResearchSearchRequest(BaseModel):
@@ -84,6 +86,12 @@ class LibrarySpaceBookingPreviewRequest(BaseModel):
         return self
 
 
+class LibrarySpaceBookRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    preview_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
 class LibraryFacilityListRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -102,9 +110,25 @@ def _translate_browser_error(exc: BrowserBridgeError) -> CapabilityError:
     if exc.code in {"COMMAND_NOT_ALLOWED", "PAGE_SCRIPT_UNAVAILABLE"}:
         return CapabilityError(
             "EXTENSION_UPDATE_REQUIRED",
-            "Reload HKU AGENTS Browser Bridge 0.17.1 before using HKUL tools.",
+            "Reload HKU AGENTS Browser Bridge 0.17.5 before using HKUL tools.",
         )
     return CapabilityError(exc.code, str(exc))
+
+
+def hku_booking_today(now: datetime | None = None) -> date_type:
+    instant = now or datetime.now(ZoneInfo("Asia/Hong_Kong"))
+    return instant.astimezone(ZoneInfo("Asia/Hong_Kong")).date()
+
+
+def require_supported_booking_date(requested: date_type) -> None:
+    today = hku_booking_today()
+    tomorrow = today + timedelta(days=1)
+    if requested not in {today, tomorrow}:
+        raise CapabilityError(
+            "LIBRARY_SPACE_DATE_OUT_OF_WINDOW",
+            f"HKUL availability for the supported facilities can be searched for {today} or {tomorrow} (Hong Kong time); requested {requested}.",
+            {"requested_date": requested.isoformat(), "today": today.isoformat(), "tomorrow": tomorrow.isoformat()},
+        )
 
 
 class LibraryResearchSearchCapability(BaseCapability):
@@ -158,7 +182,7 @@ class LibraryResearchSearchCapability(BaseCapability):
         snapshot = navigation["snapshot"]
         diagnostics = snapshot["diagnostics"]
         if diagnostics["parser_version"] != "0.2.2":
-            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.17.1.")
+            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.17.5.")
         if diagnostics["incomplete_result_candidate_count"] or diagnostics["unsafe_result_url_candidate_count"]:
             raise CapabilityError(
                 "LIBRARY_RESEARCH_PARSE_INCOMPLETE",
@@ -228,7 +252,7 @@ class LibraryResearchItemCapability(BaseCapability):
         snapshot = navigation["snapshot"]
         diagnostics = snapshot["diagnostics"]
         if diagnostics["parser_version"] != "0.2.2":
-            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.17.1.")
+            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.17.5.")
         if not diagnostics["detail_marker_found"] or not diagnostics["record_id_found"] or not diagnostics["title_found"]:
             raise CapabilityError(
                 "LIBRARY_ITEM_PARSE_INCOMPLETE",
@@ -297,7 +321,7 @@ class LibraryResearchAccessOptionsCapability(BaseCapability):
         snapshot = navigation["snapshot"]
         diagnostics = snapshot["diagnostics"]
         if diagnostics["parser_version"] != "0.2.2":
-            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.17.1.")
+            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.17.5.")
         if not diagnostics["detail_marker_found"] or not diagnostics["record_id_found"] or not diagnostics["title_found"]:
             raise CapabilityError(
                 "LIBRARY_ACCESS_PARSE_INCOMPLETE",
@@ -517,7 +541,7 @@ class LibraryHoursAndLocationsCapability(BaseCapability):
         snapshot = navigation["snapshot"]
         diagnostics = snapshot["diagnostics"]
         if diagnostics["parser_version"] != "0.1.1":
-            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.17.1.")
+            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.17.5.")
         if not diagnostics["hours_marker_found"]:
             raise CapabilityError("LIBRARY_HOURS_NOT_READY", "The official HKUL opening-hours view is not ready.")
         if not snapshot["hours_available"] and not diagnostics["empty_state_found"]:
@@ -588,6 +612,7 @@ class LibrarySpaceAvailabilityCapability(BaseCapability):
         }
 
     async def execute(self, validated_input: LibrarySpaceAvailabilityRequest, context: ExecutionContext) -> dict:
+        require_supported_booking_date(validated_input.date)
         try:
             navigation = await self.connector.search_library_space_availability(
                 validated_input.model_dump(mode="json")
@@ -596,23 +621,41 @@ class LibrarySpaceAvailabilityCapability(BaseCapability):
             raise _translate_browser_error(exc) from exc
         snapshot = navigation["snapshot"]
         diagnostics = snapshot["diagnostics"]
-        if diagnostics["parser_version"] != "0.3.1":
-            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.17.1.")
+        if diagnostics["parser_version"] != "0.3.5":
+            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.17.5.")
+        if not snapshot["result_set_complete"]:
+            raise CapabilityError(
+                "LIBRARY_SPACE_RESULTS_PAGINATED",
+                "The browser did not verify every HKUL availability result page.",
+                {"page_number": snapshot["page_number"], "page_count": snapshot["page_count"], "diagnostics": diagnostics},
+            )
         if diagnostics["incomplete_available_slot_candidate_count"]:
             raise CapabilityError(
                 "LIBRARY_SPACE_PARSE_INCOMPLETE",
                 "One or more visible available HKUL time slots could not be parsed safely.",
                 {"diagnostics": diagnostics},
             )
+        if diagnostics["unclassified_status_cell_count"] or (
+            diagnostics["facility_row_count"] > 0
+            and diagnostics["status_cell_count"] == 0
+        ):
+            raise CapabilityError(
+                "LIBRARY_SPACE_STATUS_PARSE_INCOMPLETE",
+                "One or more visible HKUL availability cells could not be classified as available or booked.",
+                {"diagnostics": diagnostics},
+            )
         if not diagnostics["availability_marker_found"]:
             raise CapabilityError("LIBRARY_SPACE_PAGE_NOT_READY", "The verified HKUL availability page is not ready.")
         if not diagnostics["selected_filters_found"] or not diagnostics["table_matrix_found"]:
             raise CapabilityError("LIBRARY_SPACE_FILTERS_NOT_READY", "The exact HKUL availability filters or result matrix are not ready.")
-        if not snapshot["result_set_complete"]:
+        if (
+            diagnostics["slot_candidate_count"] == 0
+            and not diagnostics["verified_empty_result_found"]
+        ):
             raise CapabilityError(
-                "LIBRARY_SPACE_RESULTS_PAGINATED",
-                "Availability spans multiple pages; F1.1 stops rather than treating the current page as complete.",
-                {"page_number": snapshot["page_number"], "page_count": snapshot["page_count"]},
+                "LIBRARY_SPACE_EMPTY_STATE_UNVERIFIED",
+                "The HKUL matrix exposed no classifiable availability cells and no explicit empty-result message.",
+                {"diagnostics": diagnostics},
             )
         return {
             "read_only": True,
@@ -630,6 +673,8 @@ class LibrarySpaceAvailabilityCapability(BaseCapability):
             "date": snapshot["date"],
             "source_last_updated_at": snapshot["source_last_updated_at"],
             "result_set_complete": snapshot["result_set_complete"],
+            "result_pages_read": navigation["result_pages_read"],
+            "page_navigation_interactions_performed": navigation["page_navigation_interactions_performed"],
             "available_slot_count": snapshot["available_slot_count"],
             "available_slots": snapshot["available_slots"],
             "diagnostics": diagnostics,
@@ -671,8 +716,13 @@ class LibrarySpaceBookingPreviewCapability(BaseCapability):
         },
     ]
 
-    def __init__(self, connector: BrowserSISConnector):
+    def __init__(
+        self,
+        connector: BrowserSISConnector,
+        preview_registry: LibraryBookingPreviewRegistry | None = None,
+    ):
         self.connector = connector
+        self.preview_registry = preview_registry or LibraryBookingPreviewRegistry()
 
     @staticmethod
     def _canonical_digest(value: dict) -> str:
@@ -720,6 +770,7 @@ class LibrarySpaceBookingPreviewCapability(BaseCapability):
         validated_input: LibrarySpaceBookingPreviewRequest,
         context: ExecutionContext,
     ) -> dict:
+        require_supported_booking_date(validated_input.date)
         facility = self._facility(validated_input.facility_type)
         policy_contract = {
             "facility_type": facility["facility_type"],
@@ -794,15 +845,30 @@ class LibrarySpaceBookingPreviewCapability(BaseCapability):
             raise _translate_browser_error(exc) from exc
         snapshot = navigation["snapshot"]
         diagnostics = snapshot["diagnostics"]
-        if diagnostics["parser_version"] != "0.3.1":
+        if diagnostics["parser_version"] != "0.3.5":
             raise CapabilityError(
                 "EXTENSION_UPDATE_REQUIRED",
-                "Reload HKU AGENTS Browser Bridge 0.17.1.",
+                "Reload HKU AGENTS Browser Bridge 0.17.5.",
+            )
+        if not snapshot["result_set_complete"]:
+            raise CapabilityError(
+                "LIBRARY_SPACE_RESULTS_PAGINATED",
+                "The browser did not verify every HKUL availability result page for this preview.",
+                {"page_number": snapshot["page_number"], "page_count": snapshot["page_count"], "diagnostics": diagnostics},
             )
         if diagnostics["incomplete_available_slot_candidate_count"]:
             raise CapabilityError(
                 "LIBRARY_SPACE_PARSE_INCOMPLETE",
                 "One or more visible available HKUL time slots could not be parsed safely.",
+                {"diagnostics": diagnostics},
+            )
+        if diagnostics["unclassified_status_cell_count"] or (
+            diagnostics["facility_row_count"] > 0
+            and diagnostics["status_cell_count"] == 0
+        ):
+            raise CapabilityError(
+                "LIBRARY_SPACE_STATUS_PARSE_INCOMPLETE",
+                "One or more visible HKUL availability cells could not be classified as available or booked.",
                 {"diagnostics": diagnostics},
             )
         if not diagnostics["availability_marker_found"]:
@@ -815,11 +881,14 @@ class LibrarySpaceBookingPreviewCapability(BaseCapability):
                 "LIBRARY_SPACE_FILTERS_NOT_READY",
                 "The exact HKUL availability filters or result matrix are not ready.",
             )
-        if not snapshot["result_set_complete"]:
+        if (
+            diagnostics["slot_candidate_count"] == 0
+            and not diagnostics["verified_empty_result_found"]
+        ):
             raise CapabilityError(
-                "LIBRARY_SPACE_RESULTS_PAGINATED",
-                "Availability spans multiple pages; the preview cannot prove the result set is complete.",
-                {"page_number": snapshot["page_number"], "page_count": snapshot["page_count"]},
+                "LIBRARY_SPACE_EMPTY_STATE_UNVERIFIED",
+                "The HKUL matrix exposed no classifiable availability cells and no explicit empty-result message.",
+                {"diagnostics": diagnostics},
             )
 
         observed_at = utc_now()
@@ -943,6 +1012,7 @@ class LibrarySpaceBookingPreviewCapability(BaseCapability):
             "domain_write_authorized": False,
         }
         preview_digest = self._canonical_digest(preview)
+        self.preview_registry.issue(preview_digest, preview)
         return {
             **common,
             "ready": True,
@@ -966,3 +1036,94 @@ class LibrarySpaceBookingPreviewCapability(BaseCapability):
             ],
             "navigation": navigation_summary,
         }
+
+
+class LibrarySpaceBookCapability(BaseCapability):
+    """F2 safety envelope. External submission intentionally remains gated."""
+
+    input_model = LibrarySpaceBookRequest
+    manifest = CapabilityManifest(
+        id="library.spaces.book",
+        version=1,
+        agent="library",
+        title="Book one exact HKUL space",
+        description=(
+            "Consume one fresh process-issued booking preview under a separate, "
+            "one-time two-phase confirmation. The external Submit path remains "
+            "disabled until supervised live-write acceptance is complete."
+        ),
+        mode=CapabilityMode.WRITE,
+        risk=RiskLevel.HIGH,
+        confirmation=ConfirmationMode.EXPLICIT_TWO_PHASE,
+        required_connections=["sis_browser"],
+        availability="disabled_pending_f2_live_write_acceptance",
+        input_schema="LibrarySpaceBookRequest",
+        output_schema="LibrarySpaceBookResult",
+        timeout_seconds=35,
+    )
+
+    def __init__(
+        self,
+        connector: BrowserSISConnector,
+        preview_registry: LibraryBookingPreviewRegistry,
+    ):
+        self.connector = connector
+        self.preview_registry = preview_registry
+
+    def preview(self, validated_input: LibrarySpaceBookRequest) -> dict:
+        issued = self.preview_registry.require(validated_input.preview_digest)
+        return {
+            "capability": self.manifest.id,
+            "capability_version": self.manifest.version,
+            "mode": self.manifest.mode.value,
+            "risk": self.manifest.risk.value,
+            "preview_digest": validated_input.preview_digest,
+            "exact_target": issued["target"],
+            "eligibility_category": issued["eligibility_category"],
+            "eligibility_basis": issued["eligibility_basis"],
+            "policy_digest": issued["policy_digest"],
+            "policy_verified_on": issued["policy_verified_on"],
+            "availability_observed_at": issued["availability_observed_at"],
+            "preview_expires_at": issued["expires_at"],
+            "effect": "Submit exactly one HKUL facility booking and accept the displayed HKUL policy.",
+            "external_submission_enabled": config.LIBRARY_BOOKING_WRITES_ENABLED,
+        }
+
+    def persisted_input(self, validated_input: LibrarySpaceBookRequest) -> dict:
+        return {
+            "preview_digest": validated_input.preview_digest,
+            "exact_target_bound": True,
+        }
+
+    def persisted_result(self, result: dict) -> dict:
+        return {
+            "booking_writes_performed": result.get("booking_writes_performed", 0),
+            "outcome": result.get("outcome"),
+        }
+
+    async def execute(
+        self,
+        validated_input: LibrarySpaceBookRequest,
+        context: ExecutionContext,
+    ) -> dict:
+        # Re-check freshness/one-time status after confirmation. Do not consume
+        # the preview until immediately before a verified external submission.
+        self.preview_registry.require(validated_input.preview_digest)
+        if not config.LIBRARY_BOOKING_WRITES_ENABLED:
+            raise PolicyDeniedError(
+                "LIBRARY_BOOKING_WRITE_DISABLED",
+                "HKUL booking submission is disabled pending supervised F2 live-write acceptance.",
+                {
+                    "booking_writes_performed": 0,
+                    "preview_consumed": False,
+                    "recovery": "Keep LIBRARY_BOOKING_WRITES_ENABLED=false until the exact submit and post-condition contracts are verified.",
+                },
+            )
+        raise PolicyDeniedError(
+            "LIBRARY_BOOKING_SUBMIT_NOT_IMPLEMENTED",
+            "The external HKUL Submit command and authoritative booking-record verification are not implemented yet.",
+            {
+                "booking_writes_performed": 0,
+                "preview_consumed": False,
+            },
+        )

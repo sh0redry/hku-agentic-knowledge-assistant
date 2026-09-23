@@ -418,7 +418,7 @@ export function apply(ctx: Context, config: Config): void {
     defineTool({
       name: 'hku_library_space_availability',
       description:
-        'Open the fixed HKUL Facilities Booking System, set the allowlisted Location and Facility Type for one supported facility class, set the exact requested date, click only Search, and read the complete visible availability matrix. It never clicks a green Select cell, opens a booking form, checks a session, enters a description, or submits a reservation.',
+        'For the supported facilities, accept only today or tomorrow in Asia/Hong_Kong; reject other dates before opening HKUL. Open the fixed Facilities Booking System, set the allowlisted Location and Facility Type and exact date, click Search, and read every numbered result page. Never click a green Select cell, open a booking form, check a session, enter a description, or submit a reservation.',
       parameters: {
         facility_type: {
           type: 'string',
@@ -429,8 +429,7 @@ export function apply(ctx: Context, config: Config): void {
         date: {
           type: 'string',
           required: true,
-          examples: ['2026-09-23'],
-          description: 'Exact booking date to select in YYYY-MM-DD format.',
+          description: 'Exact YYYY-MM-DD date: today or tomorrow in Asia/Hong_Kong for the currently supported facilities. The live date dropdown remains authoritative.',
         },
       },
       output: envelopeOutput,
@@ -456,7 +455,6 @@ export function apply(ctx: Context, config: Config): void {
         date: {
           type: 'string',
           required: true,
-          examples: ['2026-09-20'],
           description:
             'Non-empty exact displayed date copied from hku_library_space_availability, in YYYY-MM-DD format. Do not call this tool until availability returns a date.',
         },
