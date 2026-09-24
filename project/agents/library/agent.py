@@ -146,7 +146,7 @@ def _translate_browser_error(exc: BrowserBridgeError) -> CapabilityError:
     if exc.code in {"COMMAND_NOT_ALLOWED", "PAGE_SCRIPT_UNAVAILABLE"}:
         return CapabilityError(
             "EXTENSION_UPDATE_REQUIRED",
-            "Reload HKU AGENTS Browser Bridge 0.17.12 before using HKUL tools.",
+            "Reload HKU AGENTS Browser Bridge 0.17.13 before using HKUL tools.",
         )
     return CapabilityError(exc.code, str(exc))
 
@@ -229,7 +229,7 @@ class LibraryResearchSearchCapability(BaseCapability):
         snapshot = navigation["snapshot"]
         diagnostics = snapshot["diagnostics"]
         if diagnostics["parser_version"] != "0.2.2":
-            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.17.12.")
+            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.17.13.")
         if diagnostics["incomplete_result_candidate_count"] or diagnostics["unsafe_result_url_candidate_count"]:
             raise CapabilityError(
                 "LIBRARY_RESEARCH_PARSE_INCOMPLETE",
@@ -299,7 +299,7 @@ class LibraryResearchItemCapability(BaseCapability):
         snapshot = navigation["snapshot"]
         diagnostics = snapshot["diagnostics"]
         if diagnostics["parser_version"] != "0.2.2":
-            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.17.12.")
+            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.17.13.")
         if not diagnostics["detail_marker_found"] or not diagnostics["record_id_found"] or not diagnostics["title_found"]:
             raise CapabilityError(
                 "LIBRARY_ITEM_PARSE_INCOMPLETE",
@@ -368,7 +368,7 @@ class LibraryResearchAccessOptionsCapability(BaseCapability):
         snapshot = navigation["snapshot"]
         diagnostics = snapshot["diagnostics"]
         if diagnostics["parser_version"] != "0.2.2":
-            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.17.12.")
+            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.17.13.")
         if not diagnostics["detail_marker_found"] or not diagnostics["record_id_found"] or not diagnostics["title_found"]:
             raise CapabilityError(
                 "LIBRARY_ACCESS_PARSE_INCOMPLETE",
@@ -636,7 +636,7 @@ class LibraryHoursAndLocationsCapability(BaseCapability):
         snapshot = navigation["snapshot"]
         diagnostics = snapshot["diagnostics"]
         if diagnostics["parser_version"] != "0.1.1":
-            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.17.12.")
+            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.17.13.")
         if not diagnostics["hours_marker_found"]:
             raise CapabilityError("LIBRARY_HOURS_NOT_READY", "The official HKUL opening-hours view is not ready.")
         if not snapshot["hours_available"] and not diagnostics["empty_state_found"]:
@@ -717,7 +717,7 @@ class LibrarySpaceAvailabilityCapability(BaseCapability):
         snapshot = navigation["snapshot"]
         diagnostics = snapshot["diagnostics"]
         if diagnostics["parser_version"] != "0.3.5":
-            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.17.12.")
+            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.17.13.")
         if not snapshot["result_set_complete"]:
             raise CapabilityError(
                 "LIBRARY_SPACE_RESULTS_PAGINATED",
@@ -953,7 +953,7 @@ class LibrarySpaceBookingPreviewCapability(BaseCapability):
         if diagnostics["parser_version"] != "0.3.5":
             raise CapabilityError(
                 "EXTENSION_UPDATE_REQUIRED",
-                "Reload HKU AGENTS Browser Bridge 0.17.12.",
+                "Reload HKU AGENTS Browser Bridge 0.17.13.",
             )
         if not snapshot["result_set_complete"]:
             raise CapabilityError(
@@ -1304,6 +1304,9 @@ class LibrarySpaceBookCapability(BaseCapability):
             "submit_clicks_dispatched": result.get("submit_clicks_dispatched", 0),
             "discussion_room_rules_acknowledged": result.get("discussion_room_rules_acknowledged", False),
             "outcome": result.get("outcome"),
+            "confirmation_source": result.get("confirmation_source"),
+            "booking_success_notice_verified": result.get("booking_success_notice_verified", False),
+            "exact_target_verified_in_booking_form": result.get("exact_target_verified_in_booking_form", False),
             "exact_target_verified_in_booking_record": result.get("exact_target_verified_in_booking_record", False),
             "record_match_count": result.get("record_match_count", 0),
             "private_target_persisted": False,
@@ -1419,15 +1422,31 @@ class LibrarySpaceBookCapability(BaseCapability):
                 "The one-shot Submit may have reached HKUL, but its response could not be verified. Inspect My Booking Record manually; do not retry.",
                 {"booking_writes_performed": "unknown", "submit_clicks_dispatched": "unknown", "preview_consumed": True},
             ) from exc
+        record_verified = (
+            result.get("exact_target_verified_in_booking_record") is True
+            and result.get("record_match_count") == 1
+            and result.get("confirmation_source") == "booking_record"
+        )
+        success_notice_verified = (
+            result.get("booking_success_notice_verified") is True
+            and result.get("exact_target_verified_in_booking_form") is True
+            and result.get("confirmation_source") == "booking_result_dialog"
+        )
         if (result.get("outcome") != "confirmed"
                 or result.get("booking_writes_performed") != 1
                 or result.get("submit_clicks_dispatched") != 1
-                or result.get("exact_target_verified_in_booking_record") is not True
-                or result.get("record_match_count") != 1):
+                or not (record_verified or success_notice_verified)):
             raise ExecutionUnknownError(
                 "LIBRARY_BOOKING_OUTCOME_UNKNOWN",
-                "Submit was dispatched, but the exact booking was not verified exactly once. Inspect My Booking Record manually; do not retry.",
-                {"booking_writes_performed": result.get("booking_writes_performed", "unknown"), "submit_clicks_dispatched": result.get("submit_clicks_dispatched", "unknown"), "record_match_count": result.get("record_match_count", 0)},
+                "Submit was dispatched, but neither a verified HKUL success result nor exactly one matching booking record was received. Inspect My Booking Record manually; do not retry.",
+                {
+                    "booking_writes_performed": result.get("booking_writes_performed", "unknown"),
+                    "submit_clicks_dispatched": result.get("submit_clicks_dispatched", "unknown"),
+                    "booking_success_notice_verified": result.get("booking_success_notice_verified", False),
+                    "exact_target_verified_in_booking_form": result.get("exact_target_verified_in_booking_form", False),
+                    "exact_target_verified_in_booking_record": result.get("exact_target_verified_in_booking_record", False),
+                    "record_match_count": result.get("record_match_count", 0),
+                },
             )
         return {
             **result,

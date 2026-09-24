@@ -136,7 +136,7 @@ must separately attest that at least two patrons will use the room and that your
 bookings comply with the two-session/120-minute daily limit and interleaving
 rule; the tool cannot inspect your existing account bookings or verify group size.
 
-1. Install/reload Browser Bridge `0.17.12`, restart HKU AGENTS, pair the
+1. Install/reload Browser Bridge `0.17.13`, restart HKU AGENTS, pair the
    extension, and log into the official HKUL booking system in Chrome. Keep
    `APP_HOST` on loopback (`127.0.0.1` by default); F2 refuses drafts otherwise.
 2. Keep `LIBRARY_BOOKING_WRITES_ENABLED=false`. In GUI **Library**, search
@@ -170,17 +170,19 @@ rule; the tool cannot inspect your existing account bookings or verify group siz
    once, then verifies HKUL's **Submit Booking** Yes/No dialog against the
    confirmed facility type, room, date, and session before clicking Yes once.
    A missing or mismatched dialog is never accepted.
-6. A successful result must report exactly one Submit, one booking write, and
-   `exact_target_verified_in_booking_record: true` with
-   `record_match_count: 1`. Open **My Booking Record** yourself and confirm the
-   exact row. F2 uses separate bounded browser-command windows (75 seconds for
-   read-only preparation and 60 seconds for one-shot submission/record
-   verification), within its 180-second capability deadline. If the result is
-   `unknown`, the browser disconnects after Submit, or the task times out,
-   inspect the record manually (including **Search Record** if required) and do
-   not retry. The extension never opens My Booking Record while confirmation
-   or submission is pending. If HKUL does not navigate to a verifiable result,
-   the task remains `unknown`, even after Yes.
+6. A successful result must report exactly one Submit and one booking write,
+   plus either `confirmation_source: "booking_record"` with
+   `exact_target_verified_in_booking_record: true` and `record_match_count: 1`,
+   or `confirmation_source: "booking_result_dialog"` with
+   `booking_success_notice_verified: true` and
+   `exact_target_verified_in_booking_form: true`. Open **My Booking Record**
+   yourself and confirm the exact row. F2 uses separate bounded browser-command
+   windows (75 seconds for read-only preparation and 60 seconds for one-shot
+   submission/result verification), within its 180-second capability deadline.
+   If the result is `unknown`, the browser disconnects after Submit, or the
+   task times out, inspect the record manually (including **Search Record** if
+   required) and do not retry. The extension never opens My Booking Record
+   while confirmation or submission is pending.
 7. Manually cancel the test reservation through HKUL if the official page
    permits it, then verify its cancelled state. F2 does not automate
    cancellation. If cancellation is unavailable or unclear, do not create a

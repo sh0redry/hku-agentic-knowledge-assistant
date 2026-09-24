@@ -848,6 +848,44 @@
     };
   }
 
+  function verifyBookingSuccessResult(documentObject, locationObject, target) {
+    if (locationObject?.origin !== BOOKING_ORIGIN) {
+      const error = new Error("The HKUL booking result is not on the verified booking origin.");
+      error.code = "WRONG_LIBRARY_BOOKING_PAGE";
+      throw error;
+    }
+    const bodyText = clean(documentObject.body?.innerText || documentObject.body?.textContent);
+    const resultMarker = /\bBooking\s+Result\b/i.test(bodyText);
+    const successMarker = /\bYour\s+Booking\s+is\s+successful\b/i.test(bodyText);
+    let exactTargetVisible = false;
+    if (resultMarker && successMarker) {
+      try {
+        const form = inspectBookingForm(documentObject, locationObject, target);
+        const fieldsMatch = Object.values(form.exact_target_matches || {}).length > 0 &&
+          Object.values(form.exact_target_matches).every(Boolean);
+        exactTargetVisible = fieldsMatch && form.session?.exact_session_selected === true &&
+          form.session?.other_selected_session_count === 0;
+      } catch (_error) {
+        exactTargetVisible = false;
+      }
+    }
+    return {
+      origin: BOOKING_ORIGIN,
+      logged_in: true,
+      page_kind: "booking_result",
+      booking_result_marker_found: resultMarker,
+      booking_success_marker_found: successMarker,
+      exact_target_visible: exactTargetVisible,
+      verified: resultMarker && successMarker && exactTargetVisible,
+      diagnostics: {
+        parser_version: BOOKING_FORM_VERSION,
+        booking_result_marker_found: resultMarker,
+        booking_success_marker_found: successMarker,
+        exact_target_visible: exactTargetVisible
+      }
+    };
+  }
+
   function timeRange(value) {
     const match = clean(value).match(/\b([01]?\d|2[0-3]):([0-5]\d)\s*(?:-|\u2013|\u2014|to)\s*([01]?\d|2[0-3]):([0-5]\d)\b/i);
     return match ? {
@@ -1230,6 +1268,6 @@
     };
   }
 
-  root.HKULibraryParser = { parseResearch, parseResearchDetail, parseSpaceAvailability, configureSpaceAvailability, selectSpaceResultPage, parseHoursAndLocations, safeDetailUrl, clickExactAvailableSlot, inspectBookingForm, configureBookingForm, submitBookingOnce, bookingConfirmationDialog, acceptExactBookingConfirmation, openBookingRecord, verifyBookingRecord };
+  root.HKULibraryParser = { parseResearch, parseResearchDetail, parseSpaceAvailability, configureSpaceAvailability, selectSpaceResultPage, parseHoursAndLocations, safeDetailUrl, clickExactAvailableSlot, inspectBookingForm, configureBookingForm, submitBookingOnce, bookingConfirmationDialog, acceptExactBookingConfirmation, openBookingRecord, verifyBookingRecord, verifyBookingSuccessResult };
   if (typeof module !== "undefined" && module.exports) module.exports = root.HKULibraryParser;
 })(typeof self !== "undefined" ? self : this);

@@ -28,7 +28,7 @@ not free-form browser automation.
 
 | Component | Version |
 |---|---:|
-| Browser Bridge extension | `0.17.12` |
+| Browser Bridge extension | `0.17.13` |
 | DeepSeek Harness plugin | `0.18.0` |
 | Integration API | `v1` |
 | Library research parser | `0.2.2` |
@@ -349,7 +349,7 @@ Open:
 1. Open `chrome://extensions`.
 2. Enable **Developer mode**.
 3. Choose **Load unpacked** and select `browser_runtime/extension`.
-4. Confirm extension version `0.17.12`.
+4. Confirm extension version `0.17.13`.
 5. Log into HKU Portal manually and complete password/MFA prompts yourself.
 6. Copy the browser pairing token from the GUI **Connections** tab into the
    extension popup.
@@ -507,7 +507,7 @@ roadmap and completed live-acceptance checkpoints.
 | `PAGE_SCRIPT_UNAVAILABLE` | Reload the unpacked extension and refresh the relevant HKU page. |
 | `PORTAL_LOGIN_REQUIRED` / `SIS_LOGIN_REQUIRED` | Complete the visible HKU authentication flow manually, then retry. |
 | `SSO_MANUAL_ACTION_REQUIRED` | Complete the visible password, MFA, CAPTCHA, consent, or recovery step. |
-| Parser version mismatch | Reload the extension, refresh the page, and confirm version `0.17.12`. |
+| Parser version mismatch | Reload the extension, refresh the page, and confirm version `0.17.13`. |
 | Harness plugin install fails | Install `pnpm`; on Windows, enable Developer Mode or use an elevated shell if profile symlink creation fails. |
 | Harness receives `401` | Export the Integration API token, not the browser pairing token. |
 

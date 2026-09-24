@@ -621,8 +621,11 @@ class LibraryBookingExecutionResult(StrictMessage):
     booking_form_opened: Literal[True]
     submit_clicks_dispatched: Literal[1]
     outcome: Literal["confirmed"]
-    exact_target_verified_in_booking_record: Literal[True]
-    record_match_count: Literal[1]
+    confirmation_source: Literal["booking_result_dialog", "booking_record"] = "booking_record"
+    booking_success_notice_verified: bool = False
+    exact_target_verified_in_booking_form: bool = False
+    exact_target_verified_in_booking_record: bool = False
+    record_match_count: int = Field(ge=0, le=100)
     policy_acceptance_acknowledged: Literal[True]
     diagnostics: dict
 

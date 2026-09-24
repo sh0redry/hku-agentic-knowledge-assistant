@@ -711,21 +711,33 @@ async function submitPreparedLibraryBooking(payload) {
     }
     await updateBookingAttempt(executionId, "site_confirmation_accepted");
     let record = null;
+    let successNotice = null;
     // Wait for the site to finish its own submit/navigation. Do not click
     // "My Booking Record" here: that can interrupt an asynchronous submit.
+    // HKUL may instead leave a visible "Booking Result" success dialog over
+    // the exact submitted form; accept that only when both the notice and the
+    // still-selected target are verified by the page parser.
     const recordDeadline = Date.now() + 12000;
     while (Date.now() < recordDeadline) {
+      try {
+        successNotice = await sendTabCommand(tab.id, "library.spaces.read_booking_success_result", { target });
+        if (successNotice?.verified === true) break;
+      } catch (_error) { /* The page may still be navigating or loading the result. */ }
       try {
         record = await sendTabCommand(tab.id, "library.spaces.read_booking_record", { target });
         if (record?.verified_exactly_once === true) break;
       } catch (_error) { /* Navigation may briefly unload the content script. */ }
       await delay(350);
     }
-    if (!record?.record_page_marker_found || record.exact_target_match_count !== 1 || record.verified_exactly_once !== true) {
+    const recordVerified = record?.record_page_marker_found === true &&
+      record.exact_target_match_count === 1 && record.verified_exactly_once === true;
+    const successNoticeVerified = successNotice?.verified === true &&
+      successNotice.booking_success_marker_found === true && successNotice.exact_target_visible === true;
+    if (!recordVerified && !successNoticeVerified) {
       await updateBookingAttempt(executionId, "record_not_verified");
-      throw commandError("LIBRARY_BOOKING_OUTCOME_UNKNOWN", "Submit was dispatched once, but the exact reservation could not be verified exactly once in My Booking Record. Do not retry; inspect the record manually.");
+      throw commandError("LIBRARY_BOOKING_OUTCOME_UNKNOWN", "Submit was dispatched once, but neither the exact HKUL success result nor one matching booking record could be verified. Do not retry; inspect the record manually.");
     }
-    await updateBookingAttempt(executionId, "record_verified");
+    await updateBookingAttempt(executionId, recordVerified ? "record_verified" : "success_notice_verified");
     return {
       read_only: false,
       systems_contacted: ["hkul_booking"],
@@ -738,8 +750,11 @@ async function submitPreparedLibraryBooking(payload) {
       booking_form_opened: true,
       submit_clicks_dispatched: 1,
       outcome: "confirmed",
-      exact_target_verified_in_booking_record: true,
-      record_match_count: record.exact_target_match_count,
+      confirmation_source: recordVerified ? "booking_record" : "booking_result_dialog",
+      booking_success_notice_verified: successNoticeVerified,
+      exact_target_verified_in_booking_form: successNoticeVerified,
+      exact_target_verified_in_booking_record: recordVerified,
+      record_match_count: record?.exact_target_match_count || 0,
       policy_acceptance_acknowledged: true,
       diagnostics: {
         parser_version: "0.1.0",
@@ -747,7 +762,8 @@ async function submitPreparedLibraryBooking(payload) {
         exact_target_rechecked_before_submit: true,
         booking_form_ready: true,
         submit_button_candidate_count: freshForm.submit_button_candidate_count,
-        record_diagnostics: record.diagnostics
+        record_diagnostics: record?.diagnostics || null,
+        booking_result_diagnostics: successNotice?.diagnostics || null
       }
     };
   } catch (error) {

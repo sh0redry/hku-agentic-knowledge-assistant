@@ -11,10 +11,12 @@ Portal News has a separate read-only structured parser in Phase D. Library Phase
 adds bounded Find@HKUL result reading and authenticated Book a Space availability
 reading. Phase F2 adds a separate high-risk, one-shot booking command gated by
 `LIBRARY_BOOKING_WRITES_ENABLED`, exact F1 preview provenance, the GUI's one-time
-confirmation, and a post-submit record check. It supports policy-verified Main
-Library single study rooms and discussion rooms; discussion rooms require an
-additional user attestation for the two-patron minimum and daily/interleaving
-limits. The extension has no arbitrary selector, URL, script, or
+confirmation, and verification of either HKUL's explicit Booking Result success
+notice bound to the selected form target or one exact My Booking Record row. It
+supports policy-verified Main Library single study rooms and discussion rooms;
+discussion rooms require an additional user attestation for the two-patron
+minimum and daily/interleaving limits. The extension has no arbitrary selector,
+URL, script, or
 form execution command. During the explicit F2 submit command, the extension
 checks HKUL's in-page **Submit Booking** dialog against the exact facility type,
 room, date, and session, then clicks Yes at most once. It does not navigate away
