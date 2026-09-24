@@ -288,7 +288,7 @@ class LibraryIntegrationTests(unittest.TestCase):
         )
         self.assertTrue(discussion_room["availability_search_supported"])
         self.assertTrue(discussion_room["booking_preview_supported"])
-        self.assertFalse(discussion_room["supervised_booking_supported"])
+        self.assertTrue(discussion_room["supervised_booking_supported"])
         single_room = next(
             item for item in result["facilities"]
             if item["facility_type"] == "single_study_room"
@@ -631,7 +631,8 @@ class LibraryIntegrationTests(unittest.TestCase):
         self.assertFalse(result["slot_selection_performed"])
         self.assertFalse(result["booking_form_opened"])
 
-        # A discussion-room preview must not widen the separately gated F2 write path.
+        # F2 requires an additional discussion-room attestation, then permits a
+        # local-only action draft bound to this exact server-issued preview.
         with self.assertRaises(Exception) as denied:
             self.container.actions.create_draft(
                 "library.spaces.book",
@@ -640,7 +641,22 @@ class LibraryIntegrationTests(unittest.TestCase):
                     "policy_acceptance_acknowledged": True,
                 },
             )
-        self.assertEqual(denied.exception.code, "LIBRARY_BOOKING_FACILITY_NOT_ENABLED")
+        self.assertEqual(denied.exception.code, "LIBRARY_DISCUSSION_ROOM_RULES_ACK_REQUIRED")
+        draft = self.container.actions.create_draft(
+            "library.spaces.book",
+            {
+                "preview_digest": result["preview_digest"],
+                "policy_acceptance_acknowledged": True,
+                "discussion_room_rules_acknowledged": True,
+            },
+        )
+        self.assertEqual(draft.preview["exact_target"]["facility_type"], "discussion_room")
+        self.assertTrue(draft.preview["discussion_room_rules_acknowledged"])
+        self.assertIn("at least two patrons", draft.preview["discussion_room_rules_attestation"])
+        self.assertFalse(draft.preview["external_submission_enabled"])
+        persisted_draft, _ = self.container.store.get_draft_with_token_hash(draft.id)
+        self.assertNotIn("Discussion Room 1", str(persisted_draft.preview))
+        self.assertTrue(persisted_draft.input["discussion_room_rules_acknowledged"])
 
         mismatch = self.client.post(
             "/api/v1/integration/library/spaces/booking-preview",
@@ -722,6 +738,57 @@ class LibraryIntegrationTests(unittest.TestCase):
             self.assertEqual(failed.error["details"]["booking_writes_performed"], 0)
             self.assertFalse(failed.error["details"]["preview_consumed"])
 
+            timeout_preview = await self.container.tasks.submit_and_wait(
+                "library.spaces.booking_preview",
+                {
+                    "facility_type": "single_study_room",
+                    "date": "2026-09-20",
+                    "floor": "4/F",
+                    "room": "Study Room A",
+                    "start_time": "09:00",
+                    "end_time": "10:30",
+                    "eligibility_category": "current_hku_students",
+                },
+            )
+            timeout_draft = self.container.actions.create_draft(
+                "library.spaces.book", {
+                    "preview_digest": timeout_preview.result["preview_digest"],
+                    "policy_acceptance_acknowledged": True,
+                }
+            )
+            timeout_confirmed, timeout_token = self.container.actions.confirm(
+                timeout_draft.id, timeout_draft.preview_digest
+            )
+            connector.prepare_library_space_booking = AsyncMock(
+                side_effect=BrowserBridgeError(
+                    "BROWSER_TIMEOUT", "simulated F2 preparation timeout"
+                )
+            )
+            connector.submit_library_space_booking = AsyncMock()
+            with patch("config.LIBRARY_BOOKING_WRITES_ENABLED", True):
+                timeout_task = self.container.actions.execute(
+                    timeout_confirmed.id,
+                    confirmation_token=timeout_token,
+                    session_id="test-user",
+                )
+                await self.container.tasks._running[timeout_task.id]
+            preparation_failed = self.container.store.get_task(timeout_task.id)
+            self.assertEqual(preparation_failed.status, TaskStatus.FAILED)
+            self.assertEqual(
+                preparation_failed.error["code"],
+                "LIBRARY_BOOKING_PREPARE_TIMEOUT",
+            )
+            self.assertEqual(
+                preparation_failed.error["details"]["booking_writes_performed"], 0
+            )
+            self.assertEqual(
+                preparation_failed.error["details"]["submit_clicks_dispatched"], 0
+            )
+            self.assertFalse(
+                preparation_failed.error["details"]["preview_consumed"]
+            )
+            connector.submit_library_space_booking.assert_not_awaited()
+
             second = self.container.actions.create_draft(
                 "library.spaces.book", {
                     "preview_digest": digest,
@@ -734,7 +801,6 @@ class LibraryIntegrationTests(unittest.TestCase):
             connector.prepare_library_space_booking = AsyncMock(return_value={
                 "ready_to_submit": True,
                 "exact_target_verified": True,
-                "policy_notice_found": True,
                 "booking_writes_performed": 0,
                 "slot_selection_performed": True,
                 "booking_form_opened": True,
@@ -829,6 +895,103 @@ class LibraryIntegrationTests(unittest.TestCase):
                 "unknown",
             )
             connector.submit_library_space_booking.assert_awaited_once()
+
+        asyncio.run(scenario())
+
+    def test_discussion_room_f2_one_shot_path_requires_attestation_and_binds_exact_slot(self):
+        async def scenario():
+            connector = self.container.connectors["sis_browser"]
+            connector.search_library_space_availability = AsyncMock(return_value=self.space_navigation(
+                date="2026-09-20",
+                location="Main Library",
+                booking_facility_type="Discussion Room",
+                facility_type="discussion_room",
+                slots=[{
+                    "floor": "Level 3",
+                    "room": "Discussion Room 2",
+                    "start_time": "10:00",
+                    "end_time": "11:00",
+                    "status": "available",
+                    "page_number": 1,
+                }],
+            ))
+            preview_task = await self.container.tasks.submit_and_wait(
+                "library.spaces.booking_preview",
+                {
+                    "facility_type": "discussion_room",
+                    "date": "2026-09-20",
+                    "floor": "Level 3",
+                    "room": "Discussion Room 2",
+                    "start_time": "10:00",
+                    "end_time": "11:00",
+                    "eligibility_category": "current_hku_students",
+                },
+            )
+            digest = preview_task.result["preview_digest"]
+            with self.assertRaises(Exception) as missing_attestation:
+                self.container.actions.create_draft(
+                    "library.spaces.book",
+                    {"preview_digest": digest, "policy_acceptance_acknowledged": True},
+                )
+            self.assertEqual(
+                missing_attestation.exception.code,
+                "LIBRARY_DISCUSSION_ROOM_RULES_ACK_REQUIRED",
+            )
+            draft = self.container.actions.create_draft(
+                "library.spaces.book",
+                {
+                    "preview_digest": digest,
+                    "policy_acceptance_acknowledged": True,
+                    "discussion_room_rules_acknowledged": True,
+                },
+            )
+            confirmed, token = self.container.actions.confirm(draft.id, draft.preview_digest)
+            connector.prepare_library_space_booking = AsyncMock(return_value={
+                "ready_to_submit": True,
+                "exact_target_verified": True,
+                "booking_writes_performed": 0,
+                "slot_selection_performed": True,
+                "booking_form_opened": True,
+                "prepared_tab_id": 42,
+            })
+            connector.submit_library_space_booking = AsyncMock(return_value={
+                "read_only": False,
+                "systems_contacted": ["hkul_booking"],
+                "navigation_interactions_performed": True,
+                "data_reads_performed": 2,
+                "domain_writes_performed": 1,
+                "library_writes_performed": 1,
+                "booking_writes_performed": 1,
+                "slot_selection_performed": True,
+                "booking_form_opened": True,
+                "submit_clicks_dispatched": 1,
+                "outcome": "confirmed",
+                "exact_target_verified_in_booking_record": True,
+                "record_match_count": 1,
+                "policy_acceptance_acknowledged": True,
+                "diagnostics": {"parser_version": "0.1.0"},
+            })
+            with patch("config.LIBRARY_BOOKING_WRITES_ENABLED", True):
+                task = self.container.actions.execute(
+                    confirmed.id,
+                    confirmation_token=token,
+                    session_id="test-user",
+                )
+                await self.container.tasks._running[task.id]
+            completed = self.container.store.get_task(task.id)
+            self.assertEqual(completed.status, TaskStatus.COMPLETED)
+            self.assertEqual(completed.result["booking_writes_performed"], 1)
+            self.assertTrue(completed.result["discussion_room_rules_acknowledged"])
+            self.assertEqual(
+                connector.prepare_library_space_booking.await_args.args[0]["target"]["facility_type"],
+                "discussion_room",
+            )
+            self.assertTrue(
+                connector.prepare_library_space_booking.await_args.args[0]["discussion_room_rules_acknowledged"]
+            )
+            self.assertTrue(
+                connector.submit_library_space_booking.await_args.args[0]["discussion_room_rules_acknowledged"]
+            )
 
         asyncio.run(scenario())
 

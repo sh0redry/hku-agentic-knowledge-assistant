@@ -272,6 +272,7 @@ const SPACE_ROUTES = Object.freeze({
   study_room: { location: "Chi Wah Learning Commons", booking_facility_type: "Study Room" }
 });
 const SPACE_AVAILABILITY_URL = "https://booking.lib.hku.hk/Secure/FacilityStatusDate.aspx";
+const F2_BOOKABLE_FACILITY_TYPES = new Set(["single_study_room", "discussion_room"]);
 
 async function waitForLibraryRead(tabId, command, payload, deadline, expectedPage = null, priorMatrixSignature = null) {
   let lastError = null;
@@ -496,7 +497,7 @@ async function waitForBookingForm(tabId, target, deadline) {
   while (Date.now() < deadline) {
     try {
       const form = await sendTabCommand(tabId, "library.spaces.configure_booking_form", { target });
-      if (form?.ready_to_submit === true && form.policy_notice_found === true) {
+      if (form?.ready_to_submit === true) {
         const signature = JSON.stringify([form.selected_fields, form.session, form.submit_button_candidate_count]);
         if (signature === prior) return form;
         prior = signature;
@@ -544,16 +545,31 @@ async function bookLibrarySpaceExactlyOnce(payload) {
   const targetRoute = SPACE_ROUTES[facilityType];
   const target = payload?.target || {};
   if (payload?.operation === "submit") return submitPreparedLibraryBooking(payload);
-  if (facilityType !== "single_study_room") {
+  if (!F2_BOOKABLE_FACILITY_TYPES.has(facilityType)) {
     throw commandError(
       "LIBRARY_BOOKING_FACILITY_NOT_ENABLED",
-      "F2 live submission is currently limited to Main Library single study rooms."
+      "F2 live submission is limited to Main Library single study rooms and discussion rooms."
+    );
+  }
+  if (facilityType === "discussion_room" && payload?.discussion_room_rules_acknowledged !== true) {
+    throw commandError(
+      "LIBRARY_DISCUSSION_ROOM_RULES_ACK_REQUIRED",
+      "Discussion-room preparation requires the user to attest the minimum group size, daily limits, and interleaving rule."
     );
   }
   if (payload?.operation !== "prepare" || !targetRoute ||
-      target.facility_type !== facilityType || !target.date || !target.room || !target.floor ||
+      target.facility_type !== facilityType || target.location !== targetRoute.location ||
+      target.booking_facility_type !== targetRoute.booking_facility_type || !target.date || !target.room || !target.floor ||
       !target.start_time || !target.end_time) {
     throw commandError("INVALID_INPUT", "A complete exact booking target is required for preparation.");
+  }
+  if (facilityType === "discussion_room") {
+    const start = String(target.start_time).split(":").map(Number);
+    const end = String(target.end_time).split(":").map(Number);
+    const duration = (end[0] * 60 + end[1]) - (start[0] * 60 + start[1]);
+    if (duration !== 60) {
+      throw commandError("LIBRARY_BOOKING_SESSION_POLICY_MISMATCH", "Discussion-room F2 supports only the published one-hour session.");
+    }
   }
   const availability = await searchLibrarySpaceAvailability(
     { facility_type: facilityType, date: target.date },
@@ -597,8 +613,8 @@ async function bookLibrarySpaceExactlyOnce(payload) {
     throw commandError("LIBRARY_BOOKING_SLOT_SELECT_FAILED", "The exact available Select control was not confirmed.");
   }
   const form = await waitForBookingForm(tab.id, target, Date.now() + NAVIGATION_DEADLINE_MS);
-  if (!form.ready_to_submit || !form.policy_notice_found) {
-    throw commandError("LIBRARY_BOOKING_FORM_MISMATCH", "The form fields, selected session, or policy notice did not match; Submit was not clicked.");
+  if (!form.ready_to_submit) {
+    throw commandError("LIBRARY_BOOKING_FORM_MISMATCH", "The exact form fields, selected session, or Submit control did not match; Submit was not clicked.");
   }
 
   return {
@@ -611,7 +627,6 @@ async function bookLibrarySpaceExactlyOnce(payload) {
     booking_form_opened: true,
     ready_to_submit: true,
     exact_target_verified: true,
-    policy_notice_found: true,
     prepared_tab_id: tab.id,
     form_snapshot: form,
     diagnostics: {
@@ -627,10 +642,16 @@ async function submitPreparedLibraryBooking(payload) {
   const target = payload?.target || {};
   const executionId = String(payload?.execution_id || "");
   const preparedTabId = Number(payload?.prepared_tab_id);
-  if (target.facility_type !== "single_study_room") {
+  if (!F2_BOOKABLE_FACILITY_TYPES.has(target.facility_type)) {
     throw commandError(
       "LIBRARY_BOOKING_FACILITY_NOT_ENABLED",
-      "F2 live submission is currently limited to Main Library single study rooms."
+      "F2 live submission is limited to Main Library single study rooms and discussion rooms."
+    );
+  }
+  if (target.facility_type === "discussion_room" && payload?.discussion_room_rules_acknowledged !== true) {
+    throw commandError(
+      "LIBRARY_DISCUSSION_ROOM_RULES_ACK_REQUIRED",
+      "Discussion-room submission requires the user to attest the minimum group size, daily limits, and interleaving rule."
     );
   }
   if (payload?.policy_acceptance_acknowledged !== true || !target.facility_type ||
@@ -644,20 +665,23 @@ async function submitPreparedLibraryBooking(payload) {
     throw commandError("LIBRARY_BOOKING_TAB_NOT_FOUND", "The prepared HKUL booking form is no longer available.");
   }
   const freshForm = await sendTabCommand(tab.id, "library.spaces.inspect_booking_form", { target });
-  if (!freshForm?.ready_to_submit || !freshForm?.policy_notice_found) {
-    throw commandError("LIBRARY_BOOKING_FORM_MISMATCH", "The live booking form no longer matches the confirmed action; Submit was not clicked.");
+  if (!freshForm?.ready_to_submit) {
+    throw commandError("LIBRARY_BOOKING_FORM_MISMATCH", "The live booking form fields, selected session, or Submit control no longer match the confirmed action; Submit was not clicked.");
   }
   // Persist the one-shot key before dispatch. A worker restart or ambiguous
   // response can never cause the same action to click Submit twice.
   await ensureBookingAttemptUnused(executionId);
   let submit;
   try {
-    submit = await sendTabCommand(tab.id, "library.spaces.submit_booking_once", { target });
+    submit = await sendTabCommand(tab.id, "library.spaces.submit_booking_once", {
+      target,
+      policy_acceptance_acknowledged: true
+    });
     if (submit?.submit_click_dispatched !== true || submit?.submit_button_candidate_count !== 1) {
       throw commandError("LIBRARY_BOOKING_SUBMIT_NOT_CONFIRMED", "The browser did not confirm exactly one Submit click.");
     }
   } catch (error) {
-    if (["LIBRARY_BOOKING_FORM_MISMATCH", "LIBRARY_BOOKING_SUBMIT_AMBIGUOUS", "LIBRARY_BOOKING_FORM_NOT_READY"].includes(error.code)) {
+    if (["LIBRARY_POLICY_ACK_REQUIRED", "LIBRARY_BOOKING_CONFIRM_HANDLER_UNAVAILABLE", "LIBRARY_BOOKING_CONFIRMATION_MISMATCH", "LIBRARY_BOOKING_FORM_MISMATCH", "LIBRARY_BOOKING_SUBMIT_AMBIGUOUS", "LIBRARY_BOOKING_FORM_NOT_READY"].includes(error.code)) {
       await updateBookingAttempt(executionId, "not_submitted");
       throw error;
     }
@@ -666,21 +690,35 @@ async function submitPreparedLibraryBooking(payload) {
   }
   await updateBookingAttempt(executionId, "submit_dispatched");
   try {
-    await sendTabCommand(tab.id, "library.spaces.open_booking_record");
+    // HKUL uses an in-page "Submit Booking" Yes/No dialog. A native
+    // window.confirm hook does not cover it. Never leave the New Booking page
+    // while that dialog is pending: doing so cancels the reservation.
+    if (submit.confirmation_dialog_seen !== true || submit.confirmation_dialog_accepted !== true) {
+      let dialog = null;
+      const dialogDeadline = Date.now() + 6000;
+      while (Date.now() < dialogDeadline) {
+        dialog = await sendTabCommand(tab.id, "library.spaces.inspect_booking_confirmation", { target });
+        if (dialog?.dialog_found) break;
+        await delay(250);
+      }
+      if (!dialog?.ready_to_confirm) {
+        throw commandError("LIBRARY_BOOKING_OUTCOME_UNKNOWN", "HKUL's exact Yes confirmation was not verified. The booking page was left open; inspect it manually and do not retry automatically.");
+      }
+      const accepted = await sendTabCommand(tab.id, "library.spaces.accept_booking_confirmation", { target });
+      if (accepted?.confirmation_yes_click_dispatched !== true || accepted?.exact_target_matched !== true) {
+        throw commandError("LIBRARY_BOOKING_OUTCOME_UNKNOWN", "HKUL's exact Yes confirmation was not acknowledged. Inspect the booking page manually; do not retry automatically.");
+      }
+    }
+    await updateBookingAttempt(executionId, "site_confirmation_accepted");
     let record = null;
-    let priorSignature = null;
-    const recordDeadline = Date.now() + NAVIGATION_DEADLINE_MS;
+    // Wait for the site to finish its own submit/navigation. Do not click
+    // "My Booking Record" here: that can interrupt an asynchronous submit.
+    const recordDeadline = Date.now() + 12000;
     while (Date.now() < recordDeadline) {
       try {
         record = await sendTabCommand(tab.id, "library.spaces.read_booking_record", { target });
-        if (record?.record_page_marker_found) {
-          const signature = `${record.exact_target_match_count}|${record.verified_exactly_once}`;
-          if (signature === priorSignature) break;
-          priorSignature = signature;
-        }
-      } catch (_error) {
-        priorSignature = null;
-      }
+        if (record?.verified_exactly_once === true) break;
+      } catch (_error) { /* Navigation may briefly unload the content script. */ }
       await delay(350);
     }
     if (!record?.record_page_marker_found || record.exact_target_match_count !== 1 || record.verified_exactly_once !== true) {

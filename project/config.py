@@ -46,6 +46,16 @@ BROWSER_HEARTBEAT_TIMEOUT_SECONDS = float(
 BROWSER_COMMAND_TIMEOUT_SECONDS = float(
     os.environ.get("BROWSER_COMMAND_TIMEOUT_SECONDS", "35")
 )
+# F2 has two bounded, multi-step browser commands: preparation re-reads up to
+# ten availability pages and configures the exact form; submission dispatches
+# once and verifies My Booking Record. Keep their independent limits below the
+# capability's 180-second ceiling so timeout classification can finish safely.
+BROWSER_BOOKING_PREPARE_TIMEOUT_SECONDS = float(
+    os.environ.get("BROWSER_BOOKING_PREPARE_TIMEOUT_SECONDS", "75")
+)
+BROWSER_BOOKING_SUBMIT_TIMEOUT_SECONDS = float(
+    os.environ.get("BROWSER_BOOKING_SUBMIT_TIMEOUT_SECONDS", "60")
+)
 _BROWSER_PAIRING_TOKEN_SETTING = os.environ.get("BROWSER_PAIRING_TOKEN", "").strip()
 BROWSER_PAIRING_TOKEN = _BROWSER_PAIRING_TOKEN_SETTING or secrets.token_urlsafe(32)
 BROWSER_PAIRING_TOKEN_SOURCE = (

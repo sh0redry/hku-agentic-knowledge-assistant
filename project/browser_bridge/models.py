@@ -604,7 +604,6 @@ class LibraryBookingPreparationResult(StrictMessage):
     booking_form_opened: Literal[True]
     ready_to_submit: Literal[True]
     exact_target_verified: Literal[True]
-    policy_notice_found: Literal[True]
     prepared_tab_id: int = Field(ge=0)
     form_snapshot: LibraryBookingFormSnapshot
     diagnostics: dict

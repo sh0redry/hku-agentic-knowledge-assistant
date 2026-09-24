@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "HKU AGENTS Multi-System Browser Bridge",
-  "version": "0.17.7",
+  "version": "0.17.12",
   "description": "Restricted local HKU navigation and discovery bridge with an opt-in, one-shot Library booking workflow.",
   "minimum_chrome_version": "116",
   "permissions": ["storage"],
@@ -55,6 +55,12 @@
       ],
       "js": ["library_parser.js", "library_content.js"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://booking.lib.hku.hk/Secure/*"],
+      "js": ["library_confirm_main.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
     }
   ],
   "content_security_policy": {

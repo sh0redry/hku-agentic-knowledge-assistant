@@ -19,7 +19,11 @@ from browser_bridge.models import (
 )
 from browser_bridge.registry import BrowserSessionRegistry
 from browser_bridge.security import redact_sensitive_text
-from connectors.sis.protocol import BrowserCommand, BrowserCommandResult
+from connectors.sis.protocol import (
+    BrowserCommand,
+    BrowserCommandName,
+    BrowserCommandResult,
+)
 
 
 EXTENSION_ORIGIN_PATTERN = re.compile(r"^chrome-extension://([a-p]{32})$")
@@ -41,12 +45,16 @@ class BrowserBridgeService:
         allowed_extension_ids: set[str] | None = None,
         heartbeat_timeout: float = 45.0,
         command_timeout: float = 10.0,
+        booking_prepare_timeout: float = 75.0,
+        booking_submit_timeout: float = 60.0,
         pairing_token: str | None = None,
         pairing_token_source: str = "process_generated",
     ):
         self._allowed_extension_ids = allowed_extension_ids or set()
         self._heartbeat_timeout = heartbeat_timeout
         self._command_timeout = command_timeout
+        self._booking_prepare_timeout = booking_prepare_timeout
+        self._booking_submit_timeout = booking_submit_timeout
         self._pairing_token = pairing_token or secrets.token_urlsafe(32)
         if not 32 <= len(self._pairing_token) <= 200:
             raise ValueError("Browser pairing token must contain 32 to 200 characters.")
@@ -378,7 +386,9 @@ class BrowserBridgeService:
             await websocket.send_json(command.model_dump(mode="json"))
             with self._state_lock:
                 self._last_command_stage = "awaiting_extension_result"
-            return await asyncio.wait_for(future, timeout=self._command_timeout)
+            return await asyncio.wait_for(
+                future, timeout=self._timeout_for(command)
+            )
         except asyncio.TimeoutError as exc:
             with self._state_lock:
                 self._last_command_stage = "timed_out"
@@ -389,3 +399,13 @@ class BrowserBridgeService:
         finally:
             with self._state_lock:
                 self._pending.pop(command.request_id, None)
+
+    def _timeout_for(self, command: BrowserCommand) -> float:
+        if command.command != BrowserCommandName.BOOK_LIBRARY_SPACE_ONCE:
+            return self._command_timeout
+        operation = command.payload.get("operation")
+        if operation == "prepare":
+            return self._booking_prepare_timeout
+        if operation == "submit":
+            return self._booking_submit_timeout
+        return self._command_timeout

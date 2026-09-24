@@ -46,6 +46,11 @@ BOOKING_PREVIEW_FACILITY_TYPES = frozenset({
     "single_study_room", "studio_editing_room", "study_table", "study_room",
     "discussion_room",
 })
+SUPERVISED_BOOKING_FACILITY_TYPES = frozenset({"single_study_room", "discussion_room"})
+SUPERVISED_BOOKING_ROUTES = {
+    "single_study_room": ("Main Library", "Single Study Room (3 sessions)"),
+    "discussion_room": ("Main Library", "Discussion Room"),
+}
 
 
 class LibraryResearchSearchRequest(BaseModel):
@@ -120,6 +125,7 @@ class LibrarySpaceBookRequest(BaseModel):
 
     preview_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
     policy_acceptance_acknowledged: Literal[True]
+    discussion_room_rules_acknowledged: Literal[True] | None = None
 
 
 class LibraryFacilityListRequest(BaseModel):
@@ -140,7 +146,7 @@ def _translate_browser_error(exc: BrowserBridgeError) -> CapabilityError:
     if exc.code in {"COMMAND_NOT_ALLOWED", "PAGE_SCRIPT_UNAVAILABLE"}:
         return CapabilityError(
             "EXTENSION_UPDATE_REQUIRED",
-            "Reload HKU AGENTS Browser Bridge 0.17.7 before using HKUL tools.",
+            "Reload HKU AGENTS Browser Bridge 0.17.12 before using HKUL tools.",
         )
     return CapabilityError(exc.code, str(exc))
 
@@ -223,7 +229,7 @@ class LibraryResearchSearchCapability(BaseCapability):
         snapshot = navigation["snapshot"]
         diagnostics = snapshot["diagnostics"]
         if diagnostics["parser_version"] != "0.2.2":
-            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.17.7.")
+            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.17.12.")
         if diagnostics["incomplete_result_candidate_count"] or diagnostics["unsafe_result_url_candidate_count"]:
             raise CapabilityError(
                 "LIBRARY_RESEARCH_PARSE_INCOMPLETE",
@@ -293,7 +299,7 @@ class LibraryResearchItemCapability(BaseCapability):
         snapshot = navigation["snapshot"]
         diagnostics = snapshot["diagnostics"]
         if diagnostics["parser_version"] != "0.2.2":
-            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.17.7.")
+            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.17.12.")
         if not diagnostics["detail_marker_found"] or not diagnostics["record_id_found"] or not diagnostics["title_found"]:
             raise CapabilityError(
                 "LIBRARY_ITEM_PARSE_INCOMPLETE",
@@ -362,7 +368,7 @@ class LibraryResearchAccessOptionsCapability(BaseCapability):
         snapshot = navigation["snapshot"]
         diagnostics = snapshot["diagnostics"]
         if diagnostics["parser_version"] != "0.2.2":
-            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.17.7.")
+            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.17.12.")
         if not diagnostics["detail_marker_found"] or not diagnostics["record_id_found"] or not diagnostics["title_found"]:
             raise CapabilityError(
                 "LIBRARY_ACCESS_PARSE_INCOMPLETE",
@@ -555,7 +561,7 @@ class LibraryFacilityListCapability(BaseCapability):
                 **target,
                 "availability_search_supported": True,
                 "booking_preview_supported": target["facility_type"] in BOOKING_PREVIEW_FACILITY_TYPES,
-                "supervised_booking_supported": target["facility_type"] == "single_study_room",
+                "supervised_booking_supported": target["facility_type"] in SUPERVISED_BOOKING_FACILITY_TYPES,
             }
             for target in MAIN_LIBRARY_AVAILABILITY_TARGETS
         ]
@@ -630,7 +636,7 @@ class LibraryHoursAndLocationsCapability(BaseCapability):
         snapshot = navigation["snapshot"]
         diagnostics = snapshot["diagnostics"]
         if diagnostics["parser_version"] != "0.1.1":
-            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.17.7.")
+            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.17.12.")
         if not diagnostics["hours_marker_found"]:
             raise CapabilityError("LIBRARY_HOURS_NOT_READY", "The official HKUL opening-hours view is not ready.")
         if not snapshot["hours_available"] and not diagnostics["empty_state_found"]:
@@ -711,7 +717,7 @@ class LibrarySpaceAvailabilityCapability(BaseCapability):
         snapshot = navigation["snapshot"]
         diagnostics = snapshot["diagnostics"]
         if diagnostics["parser_version"] != "0.3.5":
-            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.17.7.")
+            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.17.12.")
         if not snapshot["result_set_complete"]:
             raise CapabilityError(
                 "LIBRARY_SPACE_RESULTS_PAGINATED",
@@ -947,7 +953,7 @@ class LibrarySpaceBookingPreviewCapability(BaseCapability):
         if diagnostics["parser_version"] != "0.3.5":
             raise CapabilityError(
                 "EXTENSION_UPDATE_REQUIRED",
-                "Reload HKU AGENTS Browser Bridge 0.17.7.",
+                "Reload HKU AGENTS Browser Bridge 0.17.12.",
             )
         if not snapshot["result_set_complete"]:
             raise CapabilityError(
@@ -1196,7 +1202,7 @@ class LibrarySpaceBookCapability(BaseCapability):
         title="Book one exact HKUL space",
         description=(
             "Re-read one exact slot, open and verify its HKUL booking form, then "
-            "dispatch exactly one Submit after explicit policy acknowledgment and "
+            "dispatch exactly one Submit after explicit policy and facility-rule acknowledgments and "
             "one-time two-phase confirmation. Verify the exact reservation in My Booking Record."
         ),
         mode=CapabilityMode.WRITE,
@@ -1228,10 +1234,20 @@ class LibrarySpaceBookCapability(BaseCapability):
                 "HKUL booking is available only when HKU AGENTS is bound to a loopback host and used through the local GUI.",
             )
         issued = self.preview_registry.require(validated_input.preview_digest)
-        if issued.get("target", {}).get("facility_type") != "single_study_room":
+        target = issued.get("target") or {}
+        facility_type = target.get("facility_type")
+        expected_route = SUPERVISED_BOOKING_ROUTES.get(facility_type)
+        if (facility_type not in SUPERVISED_BOOKING_FACILITY_TYPES
+                or not expected_route
+                or (target.get("location"), target.get("booking_facility_type")) != expected_route):
             raise CapabilityError(
                 "LIBRARY_BOOKING_FACILITY_NOT_ENABLED",
-                "F2 live submission is currently limited to policy-verified Main Library single study rooms.",
+                "F2 live submission is limited to policy-verified Main Library single study rooms and discussion rooms.",
+            )
+        if facility_type == "discussion_room" and validated_input.discussion_room_rules_acknowledged is not True:
+            raise CapabilityError(
+                "LIBRARY_DISCUSSION_ROOM_RULES_ACK_REQUIRED",
+                "Discussion-room booking requires an explicit user attestation for the minimum group size, daily booking limits, and interleaving rule.",
             )
         return {
             "capability": self.manifest.id,
@@ -1247,6 +1263,11 @@ class LibrarySpaceBookCapability(BaseCapability):
             "availability_observed_at": issued["availability_observed_at"],
             "preview_expires_at": issued["expires_at"],
             "effect": "Submit exactly one HKUL facility booking and accept the displayed HKUL policy.",
+            "discussion_room_rules_acknowledged": validated_input.discussion_room_rules_acknowledged is True,
+            "discussion_room_rules_attestation": (
+                "I confirm at least two patrons will use the room, and my bookings for that day will comply with the two-session/120-minute limit and the published interleaving rule."
+                if facility_type == "discussion_room" else None
+            ),
             "external_submission_enabled": config.LIBRARY_BOOKING_WRITES_ENABLED,
             "policy_acceptance_acknowledged": validated_input.policy_acceptance_acknowledged,
         }
@@ -1255,6 +1276,7 @@ class LibrarySpaceBookCapability(BaseCapability):
         return {
             "preview_digest": validated_input.preview_digest,
             "policy_acceptance_acknowledged": True,
+            "discussion_room_rules_acknowledged": validated_input.discussion_room_rules_acknowledged is True,
             "exact_target_bound": True,
         }
 
@@ -1272,6 +1294,7 @@ class LibrarySpaceBookCapability(BaseCapability):
             "preview_expires_at": preview.get("preview_expires_at"),
             "external_submission_enabled": preview.get("external_submission_enabled"),
             "policy_acceptance_acknowledged": preview.get("policy_acceptance_acknowledged"),
+            "discussion_room_rules_acknowledged": preview.get("discussion_room_rules_acknowledged", False),
             "exact_target_persisted": False,
         }
 
@@ -1279,6 +1302,7 @@ class LibrarySpaceBookCapability(BaseCapability):
         return {
             "booking_writes_performed": result.get("booking_writes_performed", 0),
             "submit_clicks_dispatched": result.get("submit_clicks_dispatched", 0),
+            "discussion_room_rules_acknowledged": result.get("discussion_room_rules_acknowledged", False),
             "outcome": result.get("outcome"),
             "exact_target_verified_in_booking_record": result.get("exact_target_verified_in_booking_record", False),
             "record_match_count": result.get("record_match_count", 0),
@@ -1310,21 +1334,53 @@ class LibrarySpaceBookCapability(BaseCapability):
                 },
             )
         target = issued.get("target") or {}
+        facility_type = target.get("facility_type")
+        expected_route = SUPERVISED_BOOKING_ROUTES.get(facility_type)
+        if (facility_type not in SUPERVISED_BOOKING_FACILITY_TYPES
+                or not expected_route
+                or (target.get("location"), target.get("booking_facility_type")) != expected_route):
+            raise CapabilityError(
+                "LIBRARY_BOOKING_FACILITY_NOT_ENABLED",
+                "F2 live submission is limited to policy-verified Main Library single study rooms and discussion rooms.",
+                {"booking_writes_performed": 0, "preview_consumed": False},
+            )
+        if (facility_type == "discussion_room"
+                and validated_input.discussion_room_rules_acknowledged is not True):
+            raise CapabilityError(
+                "LIBRARY_DISCUSSION_ROOM_RULES_ACK_REQUIRED",
+                "Discussion-room booking requires a fresh explicit user attestation before execution.",
+                {"booking_writes_performed": 0, "preview_consumed": False},
+            )
         if target.get("result_page_number") is None:
             raise CapabilityError("LIBRARY_BOOKING_PAGE_UNVERIFIABLE", "The exact availability result page is not verifiable.")
         try:
             prepared = await self.connector.prepare_library_space_booking(
-                {"facility_type": target["facility_type"], "target": target}
+                {
+                    "facility_type": target["facility_type"],
+                    "target": target,
+                    "discussion_room_rules_acknowledged": validated_input.discussion_room_rules_acknowledged is True,
+                }
             )
         except BrowserBridgeError as exc:
+            if exc.code == "BROWSER_TIMEOUT":
+                raise CapabilityError(
+                    "LIBRARY_BOOKING_PREPARE_TIMEOUT",
+                    "Read-only slot and booking-form preparation timed out. No Submit command was issued; let the browser settle, then start a fresh availability and confirmation flow.",
+                    {
+                        "booking_writes_performed": 0,
+                        "submit_clicks_dispatched": 0,
+                        "slot_selection_performed": "unknown",
+                        "booking_form_opened": "unknown",
+                        "preview_consumed": False,
+                    },
+                ) from exc
             raise _translate_browser_error(exc) from exc
         if (prepared.get("ready_to_submit") is not True
                 or prepared.get("exact_target_verified") is not True
-                or prepared.get("policy_notice_found") is not True
                 or prepared.get("booking_writes_performed") != 0):
             raise CapabilityError(
                 "LIBRARY_BOOKING_FORM_MISMATCH",
-                "The refreshed slot or live booking form did not match the confirmed preview; no Submit was issued.",
+                "The refreshed slot or exact live booking form did not match the confirmed preview; no Submit was issued.",
                 {"booking_writes_performed": 0, "slot_selection_performed": prepared.get("slot_selection_performed", False)},
             )
 
@@ -1338,12 +1394,13 @@ class LibrarySpaceBookCapability(BaseCapability):
                     "execution_id": context.task_id,
                     "prepared_tab_id": prepared.get("prepared_tab_id"),
                     "policy_acceptance_acknowledged": True,
+                    "discussion_room_rules_acknowledged": validated_input.discussion_room_rules_acknowledged is True,
                 }
             )
         except BrowserBridgeError as exc:
             # A disconnect can happen after the extension received the
             # one-shot command; treat transport loss as ambiguous, not zero writes.
-            if exc.code in {"PAIRING_TOKEN_REJECTED", "COMMAND_NOT_ALLOWED", "LIBRARY_BOOKING_FORM_MISMATCH", "LIBRARY_BOOKING_SUBMIT_AMBIGUOUS", "LIBRARY_BOOKING_FORM_NOT_READY"}:
+            if exc.code in {"PAIRING_TOKEN_REJECTED", "COMMAND_NOT_ALLOWED", "LIBRARY_BOOKING_CONFIRM_HANDLER_UNAVAILABLE", "LIBRARY_BOOKING_CONFIRMATION_MISMATCH", "LIBRARY_BOOKING_FORM_MISMATCH", "LIBRARY_BOOKING_SUBMIT_AMBIGUOUS", "LIBRARY_BOOKING_FORM_NOT_READY"}:
                 raise CapabilityError(
                     exc.code,
                     str(exc),
@@ -1372,4 +1429,9 @@ class LibrarySpaceBookCapability(BaseCapability):
                 "Submit was dispatched, but the exact booking was not verified exactly once. Inspect My Booking Record manually; do not retry.",
                 {"booking_writes_performed": result.get("booking_writes_performed", "unknown"), "submit_clicks_dispatched": result.get("submit_clicks_dispatched", "unknown"), "record_match_count": result.get("record_match_count", 0)},
             )
-        return result
+        return {
+            **result,
+            "discussion_room_rules_acknowledged": (
+                validated_input.discussion_room_rules_acknowledged is True
+            ),
+        }

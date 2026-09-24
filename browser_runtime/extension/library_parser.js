@@ -6,7 +6,8 @@
   const BOOKING_ORIGIN = "https://booking.lib.hku.hk";
   const VERSION = "0.3.5";
   const HOURS_VERSION = "0.1.1";
-  const BOOKING_FORM_VERSION = "0.1.0";
+  const BOOKING_FORM_VERSION = "0.1.1";
+  function escapeRegExp(value) { return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
 
   function clean(value) {
     return String(value || "").replace(/\s+/g, " ").trim();
@@ -685,10 +686,15 @@
     return { slot_selection_performed: true, candidate_count: 1, target_matches: true };
   }
 
-  function submitBookingOnce(documentObject, locationObject, target) {
+  function submitBookingOnce(documentObject, locationObject, target, policyAcceptanceAcknowledged) {
+    if (policyAcceptanceAcknowledged !== true) {
+      const error = new Error("Explicit HKUL policy acknowledgment is required before Submit can be clicked.");
+      error.code = "LIBRARY_POLICY_ACK_REQUIRED";
+      throw error;
+    }
     const inspection = inspectBookingForm(documentObject, locationObject, target);
-    if (!inspection.ready_to_submit || !inspection.policy_notice_found) {
-      const error = new Error("The live form no longer matches the confirmed booking target; Submit was not clicked.");
+    if (!inspection.ready_to_submit) {
+      const error = new Error("The live form fields, selected session, or Submit control no longer matches the confirmed target; Submit was not clicked.");
       error.code = "LIBRARY_BOOKING_FORM_MISMATCH";
       throw error;
     }
@@ -703,6 +709,72 @@
     }
     buttons[0].click();
     return { submit_click_dispatched: true, submit_button_candidate_count: 1 };
+  }
+
+  function bookingConfirmationDialog(documentObject, locationObject, target) {
+    if (locationObject?.origin !== BOOKING_ORIGIN) {
+      const error = new Error("The HKUL booking confirmation is not on the verified booking origin.");
+      error.code = "WRONG_LIBRARY_BOOKING_PAGE";
+      throw error;
+    }
+    // HKUL's real confirmation uses an ASP.NET submit input, not a generic
+    // <button> or input[type=button]. Require the exact control identity.
+    const yesButtons = [...(documentObject.querySelectorAll?.("input#main_btnSubmitYes") || [])].filter((button) =>
+      clean(button.type).toLowerCase() === "submit" &&
+      button.getAttribute?.("name") === "ctl00$main$btnSubmitYes" &&
+      /^yes$/i.test(clean(button.value)) && button.disabled !== true
+    );
+    if (yesButtons.length !== 1) return { dialog_found: false, dialog_candidate_count: 0, yes_button_candidate_count: yesButtons.length, exact_target_matches: false };
+    const yes = yesButtons[0];
+    const visible = (node) => node?.getAttribute?.("aria-hidden") !== "true" &&
+      (typeof node?.getClientRects !== "function" || node.getClientRects().length > 0);
+    if (!visible(yes)) return { dialog_found: false, dialog_candidate_count: 0, yes_button_candidate_count: 1, exact_target_matches: false };
+    let dialog = yes.parentElement;
+    while (dialog && dialog !== documentObject.body && dialog !== documentObject.documentElement) {
+      const candidateText = clean(dialog.innerText || dialog.textContent);
+      if (/submit booking/i.test(candidateText) && /please confirm the following booking/i.test(candidateText)) break;
+      dialog = dialog.parentElement;
+    }
+    if (!dialog || dialog === documentObject.body || dialog === documentObject.documentElement || !visible(dialog)) {
+      return { dialog_found: false, dialog_candidate_count: 0, yes_button_candidate_count: 1, exact_target_matches: false };
+    }
+    const text = clean(dialog.innerText || dialog.textContent);
+    const values = bookingTargetValues(target);
+    const fields = {
+      facility_type: values.facilityType,
+      facility: values.facility,
+      date: values.date,
+      session: `${values.start} - ${values.end}`
+    };
+    const labels = ["Facility Type", "Facility", "Date", "Session"];
+    const expected = [fields.facility_type, fields.facility, fields.date, fields.session];
+    const exact = /please confirm the following booking/i.test(text) && expected.every((value, index) => {
+      if (!value) return false;
+      const next = labels[index + 1];
+      const label = labels[index].replace(/ /g, "\\s*");
+      const expectedValue = escapeRegExp(value).replace(/ /g, "\\s*");
+      const pattern = new RegExp(`\\b${label}\\s*:\\s*${expectedValue}${index === 2 ? "(?:\\s+\\([A-Za-z]{3,9}\\))?" : ""}${next ? `(?=\\s+${next.replace(/ /g, "\\s*")}\\s*:)` : "(?:\\s|$)"}`, "i");
+      return pattern.test(text);
+    });
+    return {
+      dialog_found: true,
+      dialog_candidate_count: 1,
+      exact_target_matches: exact,
+      yes_button_candidate_count: 1,
+      ready_to_confirm: exact
+    };
+  }
+
+  function acceptExactBookingConfirmation(documentObject, locationObject, target) {
+    const inspection = bookingConfirmationDialog(documentObject, locationObject, target);
+    if (!inspection.ready_to_confirm) {
+      const error = new Error("The HKUL Yes confirmation did not uniquely match the exact reservation; Yes was not clicked.");
+      error.code = "LIBRARY_BOOKING_CONFIRMATION_MISMATCH";
+      throw error;
+    }
+    const yes = documentObject.querySelectorAll("input#main_btnSubmitYes")[0];
+    yes.click();
+    return { confirmation_yes_click_dispatched: true, exact_target_matched: true };
   }
 
   function openBookingRecord(documentObject, locationObject) {
@@ -756,7 +828,10 @@
         matchingCount += 1;
       }
     }
-    const isRecordPage = /my booking record|booking record|my bookings/i.test(bodyText) && rows.length > 0;
+    // The New Booking page also has a "My Booking Record" navigation link;
+    // its presence alone is not evidence that the booking was recorded.
+    const isRecordPage = /bookingrecord/i.test(String(locationObject.pathname || "")) &&
+      /my booking record|booking record|my bookings/i.test(bodyText) && rows.length > 0;
     return {
       origin: BOOKING_ORIGIN,
       logged_in: true,
@@ -1155,6 +1230,6 @@
     };
   }
 
-  root.HKULibraryParser = { parseResearch, parseResearchDetail, parseSpaceAvailability, configureSpaceAvailability, selectSpaceResultPage, parseHoursAndLocations, safeDetailUrl, clickExactAvailableSlot, inspectBookingForm, configureBookingForm, submitBookingOnce, openBookingRecord, verifyBookingRecord };
+  root.HKULibraryParser = { parseResearch, parseResearchDetail, parseSpaceAvailability, configureSpaceAvailability, selectSpaceResultPage, parseHoursAndLocations, safeDetailUrl, clickExactAvailableSlot, inspectBookingForm, configureBookingForm, submitBookingOnce, bookingConfirmationDialog, acceptExactBookingConfirmation, openBookingRecord, verifyBookingRecord };
   if (typeof module !== "undefined" && module.exports) module.exports = root.HKULibraryParser;
 })(typeof self !== "undefined" ? self : this);

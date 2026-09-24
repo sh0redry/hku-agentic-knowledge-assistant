@@ -85,7 +85,7 @@ return an authentication URL.
 | `library.spaces.list_facilities` | `hku_library_list_facilities` | none | local verified policy catalog; no browser interaction |
 | `library.spaces.search_availability` | `hku_library_space_availability` | one supported facility type plus exact `YYYY-MM-DD` date | exact allow-listed Location/Facility Type/Date filters, Search, and complete visible availability read; no slot selection or booking form |
 | `library.spaces.booking_preview` | `hku_library_space_booking_preview` | exact date, room, time, optional floor, and self-declared eligibility category | fresh availability match plus short-lived policy preview for single study rooms, editing rooms, study tables, Chi Wah study rooms, and Main Library discussion rooms; no selection, form, authorization, or booking |
-| `library.spaces.book` | not exposed to Harness; local GUI only | one process-issued `preview_digest` plus `policy_acceptance_acknowledged: true` | high-risk two-phase confirmation; when `LIBRARY_BOOKING_WRITES_ENABLED=true`, rechecks and submits exactly one Main Library single-study-room target, then verifies one My Booking Record row |
+| `library.spaces.book` | not exposed to Harness; local GUI only | one process-issued `preview_digest` plus explicit policy acknowledgment; discussion rooms also require rule attestation | high-risk two-phase confirmation; when `LIBRARY_BOOKING_WRITES_ENABLED=true`, rechecks and submits exactly one Main Library single-study-room or discussion-room target, accepts only an exact matching HKUL confirmation dialog, then verifies one My Booking Record row |
 | `library.hours_and_locations` | `hku_library_hours_and_locations` | none | official public hours page; visible location/time-period rows only |
 
 Availability supports the 14 Main Library facility categories visible in the
@@ -105,8 +105,7 @@ The read-only booking preview additionally supports Main Library Discussion
 Rooms. It enforces the published one-hour interval and reports that the daily
 limit, interleaving rule, minimum group size, and account eligibility cannot
 be verified from the availability matrix. A live interval that conflicts with
-the published session duration is rejected without issuing a preview. F2
-submission remains restricted to Main Library single study rooms.
+the published session duration is rejected without issuing a preview.
 
 The F2 action envelope stores fresh previews only in process memory, binds the
 action draft to the exact target/policy/eligibility facts, rejects expired,
@@ -114,8 +113,10 @@ unissued, or previously consumed digests, and uses the platform's one-time
 confirmation token. Exact room/date/time values are returned for review but
 redacted from persistent action-draft storage. `LIBRARY_BOOKING_WRITES_ENABLED`
 defaults to `false`. When enabled by the operator, F2 is available only through
-the local GUI, only for Main Library single study rooms, and only after a fresh
-availability check and exact form verification. Other facility types require
+the local GUI, for Main Library single study rooms and discussion rooms, and
+only after a fresh availability check and exact form verification. Discussion
+rooms additionally require a user attestation to the two-patron minimum and
+daily/interleaving rules. Other facility types require
 separate eligibility/policy review, synthetic form fixtures, read-only live
 preview acceptance, then an individually scoped F2 live acceptance before
 being added. The backend also refuses F2

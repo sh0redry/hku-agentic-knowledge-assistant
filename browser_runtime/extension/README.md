@@ -11,15 +11,22 @@ Portal News has a separate read-only structured parser in Phase D. Library Phase
 adds bounded Find@HKUL result reading and authenticated Book a Space availability
 reading. Phase F2 adds a separate high-risk, one-shot booking command gated by
 `LIBRARY_BOOKING_WRITES_ENABLED`, exact F1 preview provenance, the GUI's one-time
-confirmation, and a post-submit record check. It is limited to policy-verified
-Main Library single study rooms; it has no arbitrary selector, URL, script, or
-form execution command. It cannot open licensed content or cancel bookings. The diagnostic command returns markers and aggregate
+confirmation, and a post-submit record check. It supports policy-verified Main
+Library single study rooms and discussion rooms; discussion rooms require an
+additional user attestation for the two-patron minimum and daily/interleaving
+limits. The extension has no arbitrary selector, URL, script, or
+form execution command. During the explicit F2 submit command, the extension
+checks HKUL's in-page **Submit Booking** dialog against the exact facility type,
+room, date, and session, then clicks Yes at most once. It does not navigate away
+while that confirmation or the site's submission is pending. A scoped main-world
+hook also guards a native confirmation if HKUL uses one. It adds no debugger or
+scripting permission. It cannot open licensed content or cancel bookings. The diagnostic command returns markers and aggregate
 counts only. The course command returns structured course identity. The upcoming
 assignment command returns only machine-dated Timeline/Upcoming rows and never
 opens their activity pages or reads grades, participants, messages, submissions,
-submission status, or full HTML. The extension never
-enters credentials, reads cookies, searches courses, enters Step 2/3, or submits
-forms.
+submission status, or full HTML. SIS commands never enter credentials, read
+cookies, search courses, enter Step 2/3, or submit enrollment forms. Library F2
+is a separate, opt-in, one-reservation submission path described above.
 
 ## Install for local development
 
@@ -56,8 +63,8 @@ forms.
     Main Library selector categories plus the verified Chi Wah Study Room and
     requires an exact date. The bridge selects the allow-listed Location,
     Facility Type, and Date and presses only the non-writing Search control.
-    Newly added categories are availability-only; preview and F2 write scope
-    remain narrower until their policies and forms are separately accepted.
+    Newly added categories are availability-only except the separately
+    policy-verified discussion-room preview/F2 route.
     Availability and previews never select a green cell or open New Booking.
     If HKUL Authentication appears, complete it manually and rerun.
 12. For Phase F2, first follow the dedicated GUI procedure in

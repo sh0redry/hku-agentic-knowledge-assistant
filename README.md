@@ -28,7 +28,7 @@ not free-form browser automation.
 
 | Component | Version |
 |---|---:|
-| Browser Bridge extension | `0.17.7` |
+| Browser Bridge extension | `0.17.12` |
 | DeepSeek Harness plugin | `0.18.0` |
 | Integration API | `v1` |
 | Library research parser | `0.2.2` |
@@ -53,8 +53,8 @@ opening hours.
 | Portal notices and daily briefing | Complete | Complete | Notice details are not opened |
 | Find@HKUL research | Complete | Complete | Licensed full text and account actions are not opened |
 | Library availability and hours | Complete | Complete | Availability is read-only; no slot selection or booking |
-| Library exact booking preview | Complete | Pending | Short-lived read-only preview; no write authority |
-| Library supervised booking | Complete | GUI live acceptance pending | One exact Main Library single-study-room write, behind an off-by-default gate; requires post-submit record check and manual cancellation |
+| Library exact booking preview | Complete | Partial | Live exact Discussion Room preview passed; other preview targets still need per-facility live acceptance |
+| Library supervised booking | Complete | GUI live acceptance pending | One exact Main Library single-study-room or discussion-room write, behind an off-by-default gate; discussion rooms require extra policy attestation and post-submit record check |
 
 This table is a release summary, not a substitute for the evidence checklist in
 [the live acceptance runbook](docs/LIVE_ACCEPTANCE.md).
@@ -119,14 +119,19 @@ opens or submits an activity.
   one-hour session rule are rejected; account-dependent limits remain warnings.
 - When the operator temporarily enables the write gate, use the local GUI's
   two-phase confirmation to submit exactly one refreshed Main Library single
-  study-room booking and verify one matching My Booking Record entry.
+  study-room or discussion-room booking and verify one matching My Booking
+  Record entry. Discussion rooms additionally require an explicit user
+  attestation for the two-patron minimum and per-day/interleaving limits.
 - Read locations and visible time-period rows from the official HKUL current
   hours page.
 
 Availability and preview tools never select a slot or open a booking form.
 The optional F2 booking tool is a separate high-risk exception: disabled by
 default, local-GUI-only, and limited to one explicitly confirmed Main Library
-single-study-room booking. A discussion-room preview does not enable F2. No
+single-study-room or discussion-room booking. Discussion-room F2 requires a
+separate user attestation for at least two patrons and the account holder's
+per-day/interleaving limits; those account-dependent facts are not verified by
+the tool. No
 Library tool requests an item, saves a favorite, cancels a booking, or opens
 licensed full text. The hours contract
 distinguishes explicit `Closed` values from HKUL's “not available yet” state;
@@ -220,9 +225,9 @@ as “fully booked.”
 The current allowlist covers the Main Library categories visible in the
 facility selector and the verified Chi Wah Study Room route. Availability-only
 support is broader than booking support: exact preview currently covers five
-facility categories, while supervised F2 submission remains limited to Main
-Library single study rooms until the other facility-specific eligibility,
-policy, session, and form contracts are verified one by one.
+facility categories, while supervised F2 submission supports policy-verified
+Main Library single study rooms and discussion rooms. Other facility-specific
+eligibility, policy, session, and form contracts still require verification.
 
 An exact read-only booking preview is available after the availability read.
 F2 is a separate, high-risk action: the operator must enable
@@ -231,9 +236,10 @@ exact preview, acknowledge the policy, revalidate it, confirm it, then press
 **Execute exactly once** in the Library GUI. The bridge refreshes the slot,
 checks the exact booking form, sends one Submit, and verifies exactly one
 matching My Booking Record row. If the outcome is ambiguous, inspect the record
-manually and never retry. The first release is limited to policy-verified Main
-Library single study rooms. The extension has no automated cancellation; live
-acceptance is pending a user-performed booking and safe manual cancellation.
+manually and never retry. Discussion-room actions additionally bind a required
+attestation for the minimum group size and daily/interleaving limits. The
+extension has no automated cancellation; live acceptance is pending a
+user-performed booking and safe manual cancellation.
 See the F2 procedure in [the live acceptance runbook](docs/LIVE_ACCEPTANCE.md).
 
 ## Safety model
@@ -343,7 +349,7 @@ Open:
 1. Open `chrome://extensions`.
 2. Enable **Developer mode**.
 3. Choose **Load unpacked** and select `browser_runtime/extension`.
-4. Confirm extension version `0.17.7`.
+4. Confirm extension version `0.17.12`.
 5. Log into HKU Portal manually and complete password/MFA prompts yourself.
 6. Copy the browser pairing token from the GUI **Connections** tab into the
    extension popup.
@@ -485,8 +491,8 @@ HKU_AGENTS_INTEGRATION_PLAN.md   Roadmap and acceptance history
   not a guaranteed weekly schedule.
 - Library database/guide discovery, Reading Lists, digital collections,
   Scholars Hub, and research-support routing are the next Phase E2 work.
-- Slot selection, booking-form access, and every Library write remain future
-  separately governed phases; the current booking preview is read-only.
+- F2 slot selection and booking-form access are a separate high-risk flow; the
+  live write gate remains off by default and requires an explicit user action.
 
 See [HKU_AGENTS_INTEGRATION_PLAN.md](HKU_AGENTS_INTEGRATION_PLAN.md) for the full
 roadmap and completed live-acceptance checkpoints.
@@ -497,10 +503,11 @@ roadmap and completed live-acceptance checkpoints.
 |---|---|
 | `BROWSER_NOT_CONNECTED` | Start HKU AGENTS, open the extension popup, and inspect its retry state. |
 | `PAIRING_TOKEN_REJECTED` | Make `BROWSER_PAIRING_TOKEN` match the value stored by the extension, or pair again. |
+| F2 reports `BROWSER_TIMEOUT` while preparing the form | Restart HKU AGENTS to load the longer F2-only command window, then recheck the exact target before starting a fresh confirmation flow. |
 | `PAGE_SCRIPT_UNAVAILABLE` | Reload the unpacked extension and refresh the relevant HKU page. |
 | `PORTAL_LOGIN_REQUIRED` / `SIS_LOGIN_REQUIRED` | Complete the visible HKU authentication flow manually, then retry. |
 | `SSO_MANUAL_ACTION_REQUIRED` | Complete the visible password, MFA, CAPTCHA, consent, or recovery step. |
-| Parser version mismatch | Reload the extension, refresh the page, and confirm version `0.17.7`. |
+| Parser version mismatch | Reload the extension, refresh the page, and confirm version `0.17.12`. |
 | Harness plugin install fails | Install `pnpm`; on Windows, enable Developer Mode or use an elevated shell if profile symlink creation fails. |
 | Harness receives `401` | Export the Integration API token, not the browser pairing token. |
 

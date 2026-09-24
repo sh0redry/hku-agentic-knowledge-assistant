@@ -1,7 +1,63 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const vm = require("node:vm");
 const parser = require("../browser_runtime/extension/library_parser.js");
+const { matchesBookingConfirmation } = require("../browser_runtime/extension/library_confirm_main.js");
+
+const exactConfirmationTarget = {
+  booking_facility_type: "Discussion Room",
+  room: "Discussion Room 18",
+  date: "2026-09-25",
+  start_time: "10:00",
+  end_time: "11:00"
+};
+const exactConfirmationText = "Please confirm the following booking.\nFacility Type : Discussion Room\nFacility : Discussion Room 18\nDate : 2026-09-25 (Fri)\nSession : 10:00 - 11:00";
+assert.equal(matchesBookingConfirmation(exactConfirmationText, exactConfirmationTarget), true);
+assert.equal(matchesBookingConfirmation(exactConfirmationText.replace("Discussion Room 18", "Discussion Room 19"), exactConfirmationTarget), false);
+assert.equal(matchesBookingConfirmation(exactConfirmationText.replace("2026-09-25", "2026-09-26"), exactConfirmationTarget), false);
+assert.equal(matchesBookingConfirmation(exactConfirmationText.replace("10:00 - 11:00", "11:00 - 12:00"), exactConfirmationTarget), false);
+assert.equal(matchesBookingConfirmation("Are you sure?", exactConfirmationTarget), false);
+
+const confirmDocumentListeners = new Map();
+const confirmWindowListeners = new Map();
+const confirmDocument = {
+  addEventListener(name, callback) { confirmDocumentListeners.set(name, callback); },
+  dispatchEvent(event) { confirmDocumentListeners.get(event.type)?.(event); return true; }
+};
+const confirmWindow = {
+  document: confirmDocument,
+  confirm() { throw new Error("Native confirmation must not be called by this exact-match handler test."); },
+  addEventListener(name, callback) { confirmWindowListeners.set(name, callback); },
+  removeEventListener(name) { confirmWindowListeners.delete(name); },
+  dispatchEvent(event) { confirmWindowListeners.get(event.type)?.(event); return true; },
+  setTimeout() { return 1; },
+  clearTimeout() {},
+  CustomEvent: class CustomEvent { constructor(type, options) { this.type = type; this.detail = options?.detail; } }
+};
+const nativeConfirm = confirmWindow.confirm;
+vm.runInNewContext(fs.readFileSync(require.resolve("../browser_runtime/extension/library_confirm_main.js"), "utf8"), confirmWindow);
+let confirmArmed = null;
+let confirmResult = null;
+confirmWindow.addEventListener("hku-agents:exact-library-confirm-armed-v1", event => { confirmArmed = JSON.parse(event.detail); });
+confirmWindow.addEventListener("hku-agents:exact-library-confirm-result-v1", event => { confirmResult = JSON.parse(event.detail); });
+confirmDocument.dispatchEvent(new confirmWindow.CustomEvent("hku-agents:arm-exact-library-confirm-v1", {
+  detail: JSON.stringify(exactConfirmationTarget)
+}));
+assert.equal(confirmArmed.armed, true);
+assert.equal(confirmWindow.confirm(exactConfirmationText), true);
+assert.deepEqual(confirmResult, { dialog_seen: true, accepted: true });
+assert.equal(confirmWindow.confirm === nativeConfirm, true);
+confirmArmed = null;
+confirmResult = null;
+confirmDocument.dispatchEvent(new confirmWindow.CustomEvent("hku-agents:arm-exact-library-confirm-v1", {
+  detail: JSON.stringify(exactConfirmationTarget)
+}));
+assert.equal(confirmArmed.armed, true);
+assert.equal(confirmWindow.confirm(exactConfirmationText.replace("Discussion Room 18", "Discussion Room 19")), false);
+assert.deepEqual(confirmResult, { dialog_seen: true, accepted: false });
+assert.equal(confirmWindow.confirm === nativeConfirm, true);
 
 function resultNode(id, title, href, text) {
   const anchor = {
@@ -593,7 +649,7 @@ const bookingSubmit = {
   click() { bookingSubmitClicks += 1; }
 };
 const bookingFormDocument = {
-  body: { innerText: "New Booking (By making a booking/application, you are deemed to accept the relevant policies governing the HKU Libraries.)" },
+  body: { innerText: "New Booking" },
   querySelectorAll(selector) {
     if (selector === "select") return bookingSelectsForForm;
     if (selector === "input[type='checkbox']") return [bookingCheckbox];
@@ -610,23 +666,100 @@ const bookingLocation = {
 assert.equal(parser.inspectBookingForm(bookingFormDocument, bookingLocation, bookingTarget).ready_to_submit, false);
 const configuredBookingForm = parser.configureBookingForm(bookingFormDocument, bookingLocation, bookingTarget);
 assert.equal(configuredBookingForm.ready_to_submit, true);
-assert.equal(configuredBookingForm.policy_notice_found, true);
+assert.equal(configuredBookingForm.policy_notice_found, false);
 assert.equal(configuredBookingForm.session.exact_session_selected, true);
 assert.equal(configuredBookingForm.session.other_selected_session_count, 0);
 assert.equal(bookingCheckboxChanges, 2);
 assert.deepEqual(bookingSelectsForForm.map((select) => select.value), [
   "Main Library", "4/F", "Single Study Room (3 sessions)", bookingTarget.room, "2026-09-23 (Wed)"
 ]);
-assert.deepEqual(parser.submitBookingOnce(bookingFormDocument, bookingLocation, bookingTarget), {
+assert.throws(
+  () => parser.submitBookingOnce(bookingFormDocument, bookingLocation, bookingTarget, false),
+  error => error.code === "LIBRARY_POLICY_ACK_REQUIRED"
+);
+assert.equal(bookingSubmitClicks, 0);
+assert.deepEqual(parser.submitBookingOnce(bookingFormDocument, bookingLocation, bookingTarget, true), {
   submit_click_dispatched: true,
   submit_button_candidate_count: 1
 });
 assert.equal(bookingSubmitClicks, 1);
 assert.throws(
-  () => parser.submitBookingOnce(bookingFormDocument, bookingLocation, { ...bookingTarget, date: "2026-09-24" }),
+  () => parser.submitBookingOnce(bookingFormDocument, bookingLocation, { ...bookingTarget, date: "2026-09-24" }, true),
   error => error.code === "LIBRARY_BOOKING_FORM_MISMATCH"
 );
 assert.equal(bookingSubmitClicks, 1);
+
+const discussionBookingTarget = {
+  location: "Main Library",
+  floor: "Level 3",
+  booking_facility_type: "Discussion Room",
+  room: "Discussion Room 2",
+  date: "2026-09-25",
+  start_time: "10:00",
+  end_time: "11:00"
+};
+const discussionSelects = [
+  labeledSelect("location", "Location", ["Main Library"]),
+  labeledSelect("floor", "Floor", ["Level 3"]),
+  labeledSelect("facilityType", "Facility Type", ["Discussion Room"]),
+  labeledSelect("facility", "Facility", ["Discussion Room 2"]),
+  labeledSelect("date", "Date", ["2026-09-25 (Fri)"])
+];
+const discussionCheckboxRow = { innerText: "10:00 - 11:00" };
+const discussionCheckbox = {
+  checked: false,
+  disabled: false,
+  value: "10:00 - 11:00",
+  closest: () => discussionCheckboxRow,
+  dispatchEvent() {},
+  ownerDocument: { defaultView: { Event: class Event {} } }
+};
+let discussionSubmitClicks = 0;
+const discussionSubmit = { innerText: "Submit", disabled: false, click() { discussionSubmitClicks += 1; } };
+const discussionBookingFormDocument = {
+  body: { innerText: "New Booking" },
+  querySelectorAll(selector) {
+    if (selector === "select") return discussionSelects;
+    if (selector === "input[type='checkbox']") return [discussionCheckbox];
+    if (selector === "button, input[type='submit'], input[type='button']") return [discussionSubmit];
+    if (selector === "label") return [];
+    return [];
+  }
+};
+assert.equal(parser.configureBookingForm(discussionBookingFormDocument, bookingLocation, discussionBookingTarget).ready_to_submit, true);
+assert.equal(parser.submitBookingOnce(discussionBookingFormDocument, bookingLocation, discussionBookingTarget, true).submit_click_dispatched, true);
+assert.equal(discussionSubmitClicks, 1);
+
+let yesClicks = 0;
+const confirmationText = "Submit Booking Please confirm the following booking. Facility Type : Discussion Room Facility : Discussion Room 2 Date : 2026-09-25 (Fri) Session : 10:00 - 11:00 Yes No";
+const confirmationDialog = {
+  innerText: confirmationText,
+  getAttribute() { return null; }
+};
+const yesButton = {
+  id: "main_btnSubmitYes", type: "submit", value: "Yes", disabled: false,
+  parentElement: confirmationDialog,
+  getAttribute(name) { return name === "name" ? "ctl00$main$btnSubmitYes" : null; },
+  getClientRects() { return [{}]; },
+  click() { yesClicks += 1; }
+};
+const confirmationDocument = { querySelectorAll(selector) { return selector === "input#main_btnSubmitYes" ? [yesButton] : []; } };
+assert.equal(parser.bookingConfirmationDialog(confirmationDocument, bookingLocation, discussionBookingTarget).ready_to_confirm, true);
+assert.throws(
+  () => parser.acceptExactBookingConfirmation(confirmationDocument, bookingLocation, { ...discussionBookingTarget, room: "Discussion Room 3" }),
+  error => error.code === "LIBRARY_BOOKING_CONFIRMATION_MISMATCH"
+);
+assert.equal(yesClicks, 0);
+assert.equal(parser.acceptExactBookingConfirmation(confirmationDocument, bookingLocation, discussionBookingTarget).confirmation_yes_click_dispatched, true);
+assert.equal(yesClicks, 1);
+yesButton.getClientRects = () => [];
+assert.equal(parser.bookingConfirmationDialog(confirmationDocument, bookingLocation, discussionBookingTarget).ready_to_confirm, undefined);
+yesButton.getClientRects = () => [{}];
+assert.throws(
+  () => parser.submitBookingOnce(discussionBookingFormDocument, bookingLocation, { ...discussionBookingTarget, end_time: "12:00" }, true),
+  error => error.code === "LIBRARY_BOOKING_FORM_MISMATCH"
+);
+assert.equal(discussionSubmitClicks, 1);
 
 let bookingRecordLinkClicks = 0;
 const bookingRecordLink = {
@@ -639,6 +772,7 @@ assert.deepEqual(parser.openBookingRecord({ querySelectorAll: selector => select
 });
 assert.equal(bookingRecordLinkClicks, 1);
 const exactRecordText = "2026-09-23 4/F Single Study Room (3 sessions) Room 424 13:00 17:00";
+const recordLocation = { ...bookingLocation, pathname: "/Secure/BookingRecord.aspx" };
 const bookingRecord = parser.verifyBookingRecord({
   body: { innerText: "My Booking Record" },
   querySelectorAll(selector) {
@@ -648,7 +782,7 @@ const bookingRecord = parser.verifyBookingRecord({
       { innerText: `${exactRecordText} Cancelled` }
     ];
   }
-}, bookingLocation, bookingTarget);
+}, recordLocation, bookingTarget);
 assert.equal(bookingRecord.record_page_marker_found, true);
 assert.equal(bookingRecord.exact_target_match_count, 1);
 assert.equal(bookingRecord.verified_exactly_once, true);
@@ -659,8 +793,12 @@ const duplicateBookingRecord = parser.verifyBookingRecord({
       ? [{ innerText: exactRecordText }, { innerText: exactRecordText }]
       : [];
   }
-}, bookingLocation, bookingTarget);
+}, recordLocation, bookingTarget);
 assert.equal(duplicateBookingRecord.exact_target_match_count, 2);
 assert.equal(duplicateBookingRecord.verified_exactly_once, false);
+assert.equal(parser.verifyBookingRecord({
+  body: { innerText: "New Booking My Booking Record" },
+  querySelectorAll(selector) { return selector === "table tr" ? [{ innerText: exactRecordText }] : []; }
+}, bookingLocation, bookingTarget).verified_exactly_once, false);
 
 console.log("HKU Library parser synthetic tests passed.");

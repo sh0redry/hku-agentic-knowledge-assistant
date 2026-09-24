@@ -384,7 +384,9 @@ def create_gradio_ui(container):
         except Exception as exc:
             return _pretty({"ok": False, "read_only": True, "message": str(exc)}), ""
 
-    def library_booking_draft_handler(preview_digest, accept_policy):
+    def library_booking_draft_handler(
+        preview_digest, accept_policy, discussion_room_rules_acknowledged, selected_facility_type
+    ):
         try:
             if not preview_digest:
                 raise ValueError("Create a fresh exact-slot preview first.")
@@ -395,31 +397,44 @@ def create_gradio_ui(container):
                 {
                     "preview_digest": preview_digest,
                     "policy_acceptance_acknowledged": True,
+                    "discussion_room_rules_acknowledged": (
+                        True
+                        if selected_facility_type == "discussion_room"
+                        and discussion_room_rules_acknowledged is True
+                        else None
+                    ),
                 },
             )
-            return _pretty(draft), draft["id"], draft["preview_digest"], ""
+            facility_type = ((draft.get("preview") or {}).get("exact_target") or {}).get("facility_type", "")
+            return _pretty(draft), draft["id"], draft["preview_digest"], "", facility_type
         except Exception as exc:
-            return _pretty({"ok": False, "message": str(exc)}), "", "", ""
+            return _pretty({"ok": False, "message": str(exc)}), "", "", "", ""
 
-    def library_booking_validate_handler(draft_id):
+    def library_booking_validate_handler(draft_id, facility_type):
         try:
             if not draft_id:
                 raise ValueError("Prepare an action draft first.")
             draft = api_client.action_validate(draft_id)
-            return _pretty(draft), draft["id"], draft["preview_digest"], ""
+            verified_facility_type = ((draft.get("preview") or {}).get("exact_target") or {}).get("facility_type", facility_type)
+            return _pretty(draft), draft["id"], draft["preview_digest"], "", verified_facility_type
         except Exception as exc:
-            return _pretty({"ok": False, "message": str(exc)}), draft_id or "", "", ""
+            return _pretty({"ok": False, "message": str(exc)}), draft_id or "", "", "", facility_type or ""
 
-    def library_booking_confirm_handler(draft_id, preview_digest, accept_policy):
+    def library_booking_confirm_handler(
+        draft_id, preview_digest, accept_policy, discussion_rules_ack, facility_type
+    ):
         try:
             if not draft_id or not preview_digest:
                 raise ValueError("Validate an action draft before confirmation.")
             if accept_policy is not True:
                 raise ValueError("The HKUL policy acknowledgment must remain checked at confirmation time.")
+            if facility_type == "discussion_room" and discussion_rules_ack is not True:
+                raise ValueError("The Discussion Room group-size and daily/interleaving attestation must remain checked at confirmation time.")
             confirmation = api_client.action_confirm(draft_id, preview_digest)
-            return _pretty(confirmation["draft"]), confirmation["draft"]["id"], confirmation["draft"]["preview_digest"], confirmation["confirmation_token"]
+            verified_facility_type = ((confirmation["draft"].get("preview") or {}).get("exact_target") or {}).get("facility_type", facility_type)
+            return _pretty(confirmation["draft"]), confirmation["draft"]["id"], confirmation["draft"]["preview_digest"], confirmation["confirmation_token"], verified_facility_type
         except Exception as exc:
-            return _pretty({"ok": False, "message": str(exc)}), draft_id or "", preview_digest or "", ""
+            return _pretty({"ok": False, "message": str(exc)}), draft_id or "", preview_digest or "", "", facility_type or ""
 
     async def library_booking_execute_handler(draft_id, confirmation_token):
         try:
@@ -966,7 +981,7 @@ def create_gradio_ui(container):
                 "bibliographic results. It does not open licensed full text or save/request "
                 "items. Space availability is read-only. A separate supervised one-shot booking "
                 "flow is available below only when its local write gate is deliberately enabled; "
-                "its current live-submit scope is Main Library single study rooms only."
+                "its current live-submit scope is Main Library single study rooms and discussion rooms."
             )
             library_query = gr.Textbox(value="artificial intelligence", label="Research query")
             with gr.Row():
@@ -1128,8 +1143,11 @@ def create_gradio_ui(container):
             )
             gr.Markdown(
                 "### F2 — supervised one-shot booking\n"
-                "F2 live submission currently supports Main Library single study rooms only; "
-                "other categories are availability-only pending separate policy/form acceptance. "
+                "F2 live submission supports Main Library single study rooms and discussion rooms. "
+                "For a discussion room, the extra attestation below is mandatory: you must confirm "
+                "at least two patrons, no more than two sessions/120 minutes for that day, "
+                "and compliance with the interleaving rule. HKUL account bookings and group size "
+                "are not independently verified by this tool. "
                 "The action re-reads the exact slot, selects only that slot, checks every "
                 "booking-form field, and verifies one matching My Booking Record row. It will "
                 "never retry an ambiguous Submit. Preparation, validation, and confirmation "
@@ -1141,33 +1159,42 @@ def create_gradio_ui(container):
                 value=False,
                 label="I reviewed the exact target above and accept the displayed HKUL booking policy for this one reservation.",
             )
+            library_discussion_rules_ack = gr.Checkbox(
+                value=False,
+                label=(
+                    "Discussion rooms only: I confirm at least two patrons will use the room, "
+                    "and my bookings for that day will comply with the two-session/120-minute limit "
+                    "and the interleaving rule."
+                ),
+            )
             library_f2_output = gr.Code(
                 value="No booking action draft prepared.", language="json", label="F2 action review / outcome"
             )
             library_f2_draft_id = gr.State("")
             library_f2_preview_digest = gr.State("")
             library_f2_confirmation_token = gr.State("")
+            library_f2_facility_type = gr.State("")
             library_f2_prepare_button = gr.Button("1. Prepare one-shot action (no booking yet)")
             library_f2_prepare_button.click(
                 library_booking_draft_handler,
-                inputs=[library_preview_digest, library_policy_ack],
-                outputs=[library_f2_output, library_f2_draft_id, library_f2_preview_digest, library_f2_confirmation_token],
+                inputs=[library_preview_digest, library_policy_ack, library_discussion_rules_ack, library_preview_facility],
+                outputs=[library_f2_output, library_f2_draft_id, library_f2_preview_digest, library_f2_confirmation_token, library_f2_facility_type],
                 show_progress="minimal",
                 queue=False,
             )
             library_f2_validate_button = gr.Button("2. Revalidate action preview")
             library_f2_validate_button.click(
                 library_booking_validate_handler,
-                inputs=library_f2_draft_id,
-                outputs=[library_f2_output, library_f2_draft_id, library_f2_preview_digest, library_f2_confirmation_token],
+                inputs=[library_f2_draft_id, library_f2_facility_type],
+                outputs=[library_f2_output, library_f2_draft_id, library_f2_preview_digest, library_f2_confirmation_token, library_f2_facility_type],
                 show_progress="minimal",
                 queue=False,
             )
             library_f2_confirm_button = gr.Button("3. Confirm exact reservation")
             library_f2_confirm_button.click(
                 library_booking_confirm_handler,
-                inputs=[library_f2_draft_id, library_f2_preview_digest, library_policy_ack],
-                outputs=[library_f2_output, library_f2_draft_id, library_f2_preview_digest, library_f2_confirmation_token],
+                inputs=[library_f2_draft_id, library_f2_preview_digest, library_policy_ack, library_discussion_rules_ack, library_f2_facility_type],
+                outputs=[library_f2_output, library_f2_draft_id, library_f2_preview_digest, library_f2_confirmation_token, library_f2_facility_type],
                 show_progress="minimal",
                 queue=False,
             )

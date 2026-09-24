@@ -891,6 +891,37 @@ class SafetyFrameworkTests(unittest.TestCase):
 
         asyncio.run(scenario())
 
+    def test_f2_browser_commands_use_operation_specific_timeouts(self):
+        bridge = BrowserBridgeService(
+            command_timeout=35,
+            booking_prepare_timeout=75,
+            booking_submit_timeout=60,
+        )
+        self.assertEqual(
+            bridge._timeout_for(
+                BrowserCommand(
+                    command=BrowserCommandName.BOOK_LIBRARY_SPACE_ONCE,
+                    payload={"operation": "prepare"},
+                )
+            ),
+            75,
+        )
+        self.assertEqual(
+            bridge._timeout_for(
+                BrowserCommand(
+                    command=BrowserCommandName.BOOK_LIBRARY_SPACE_ONCE,
+                    payload={"operation": "submit"},
+                )
+            ),
+            60,
+        )
+        self.assertEqual(
+            bridge._timeout_for(
+                BrowserCommand(command=BrowserCommandName.INSPECT_PAGE)
+            ),
+            35,
+        )
+
     def test_browser_bridge_routes_gui_requests_to_the_websocket_event_loop(self):
         class ThreadSafeWebSocket:
             def __init__(self):
@@ -1046,8 +1077,14 @@ class SafetyFrameworkTests(unittest.TestCase):
                 "https://julac-hku.primo.exlibrisgroup.com/*",
                 "https://lib.hku.hk/*",
                 "https://booking.lib.hku.hk/*",
+                "https://booking.lib.hku.hk/Secure/*",
             },
         )
+        main_world_confirmation = next(
+            item for item in manifest["content_scripts"] if item.get("world") == "MAIN"
+        )
+        self.assertEqual(main_world_confirmation["run_at"], "document_start")
+        self.assertEqual(main_world_confirmation["js"], ["library_confirm_main.js"])
         sis_content_script = next(
             item
             for item in manifest["content_scripts"]
@@ -1068,7 +1105,7 @@ class SafetyFrameworkTests(unittest.TestCase):
                 "http://127.0.0.1/*",
             ],
         )
-        self.assertEqual(manifest["version"], "0.17.7")
+        self.assertEqual(manifest["version"], "0.17.12")
 
         node = shutil.which("node")
         if node is None:
