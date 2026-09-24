@@ -8,6 +8,8 @@ from browser_bridge.models import (
     LibraryResearchNavigationResult,
     LibraryResearchItemNavigationResult,
     LibraryHoursNavigationResult,
+    LibraryBookingPreparationResult,
+    LibraryBookingExecutionResult,
     LibrarySpaceNavigationResult,
     PortalPageSnapshot,
     PortalNoticeListSnapshot,
@@ -22,7 +24,7 @@ from connectors.sis.protocol import BrowserCommand, BrowserCommandName
 
 
 class BrowserSISConnector(BaseConnector):
-    """Deterministic read-only adapter for the paired local extension."""
+    """Deterministic adapter for named, bounded workflows in the local extension."""
 
     id = "sis_browser"
 
@@ -104,6 +106,20 @@ class BrowserSISConnector(BaseConnector):
             BrowserCommandName.SEARCH_LIBRARY_SPACE_AVAILABILITY, payload
         )
         return LibrarySpaceNavigationResult.model_validate(data).model_dump(mode="json")
+
+    async def prepare_library_space_booking(self, payload: dict) -> dict:
+        data = await self._command(
+            BrowserCommandName.BOOK_LIBRARY_SPACE_ONCE,
+            {**payload, "operation": "prepare"},
+        )
+        return LibraryBookingPreparationResult.model_validate(data).model_dump(mode="json")
+
+    async def submit_library_space_booking(self, payload: dict) -> dict:
+        data = await self._command(
+            BrowserCommandName.BOOK_LIBRARY_SPACE_ONCE,
+            {**payload, "operation": "submit"},
+        )
+        return LibraryBookingExecutionResult.model_validate(data).model_dump(mode="json")
 
     async def read_library_hours_and_locations(self) -> dict:
         data = await self._command(BrowserCommandName.READ_LIBRARY_HOURS_AND_LOCATIONS)

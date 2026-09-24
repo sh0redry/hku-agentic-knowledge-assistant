@@ -328,13 +328,19 @@ export function apply(ctx, config) {
     }));
     ctx.tools.register(defineTool({
         name: 'hku_library_space_availability',
-        description: 'For the supported facilities, accept only today or tomorrow in Asia/Hong_Kong; reject other dates before opening HKUL. Open the fixed Facilities Booking System, set the allowlisted Location and Facility Type and exact date, click Search, and read every numbered result page. Never click a green Select cell, open a booking form, check a session, enter a description, or submit a reservation.',
+        description: 'For an allowlisted Main Library facility visible in the current HKUL selector (or the separately verified Chi Wah Study Room), accept only today or tomorrow in Asia/Hong_Kong; reject other dates before opening HKUL. Open the fixed Facilities Booking System, set the exact allowlisted Location and Facility Type and date, click Search, and read every numbered result page. This is read-only discovery: never click a green Select cell, open a booking form, check a session, enter a description, or submit a reservation. Availability support does not mean booking preview or automated booking is enabled for that facility.',
         parameters: {
             facility_type: {
                 type: 'string',
                 required: true,
-                enum: ['single_study_room', 'studio_editing_room', 'study_table', 'study_room'],
-                description: 'Supported allowlisted HKUL facility class. study_room means Chi Wah Learning Commons Study Room.',
+                enum: [
+                    'single_study_room', 'av_group_viewing_room', 'communal_virtual_pc',
+                    'computer', 'computer_in_lic', 'engraving_cutting_computer',
+                    'concept_and_creation_room', 'discussion_room', 'microform_scanner',
+                    'overhead_scanner', 'research_desk', 'studio_editing_room',
+                    'study_table', 'study_table_deep_quiet', 'study_room',
+                ],
+                description: 'Allowlisted facility category. Main Library categories are based on the visible selector; study_room means Chi Wah Learning Commons Study Room.',
             },
             date: {
                 type: 'string',
@@ -350,13 +356,13 @@ export function apply(ctx, config) {
     }));
     ctx.tools.register(defineTool({
         name: 'hku_library_space_booking_preview',
-        description: 'Re-read one supported HKUL Book a Space page and create a short-lived read-only preview for one exact date, room, and time returned by hku_library_space_availability. Call availability first and copy all four exact fields; never pass an empty date or invent a target. This checks published eligibility and policy metadata but does not verify account status, click a slot, open a booking form, authorize a write, or submit a reservation. A successful preview is not a booking.',
+        description: 'Re-read one supported HKUL Book a Space page and create a short-lived read-only preview for one exact date, room, and time returned by hku_library_space_availability. Call availability first and copy all four exact fields; never pass an empty date or invent a target. Discussion Room previews enforce the published one-hour interval and warn that group size and existing daily bookings are not verified. This checks published eligibility and policy metadata but does not verify account status, click a slot, open a booking form, authorize a write, or submit a reservation. A successful preview is not a booking.',
         parameters: {
             facility_type: {
                 type: 'string',
                 required: true,
-                enum: ['single_study_room', 'studio_editing_room', 'study_table', 'study_room'],
-                description: 'Supported fixed HKUL facility route.',
+                enum: ['single_study_room', 'studio_editing_room', 'study_table', 'study_room', 'discussion_room'],
+                description: 'Facilities currently supported by the exact read-only preview. Other Main Library availability categories are not yet preview-enabled. Discussion Room F2 submission remains disabled.',
             },
             date: {
                 type: 'string',

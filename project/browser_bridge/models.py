@@ -568,6 +568,64 @@ class LibrarySpaceSlot(StrictMessage):
     start_time: str = Field(pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
     end_time: str = Field(pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
     status: Literal["available"]
+    page_number: int = Field(default=1, ge=1, le=100)
+
+
+class LibraryBookingFormSnapshot(StrictMessage):
+    origin: Literal["https://booking.lib.hku.hk"]
+    logged_in: Literal[True]
+    page_kind: Literal["new_booking"]
+    ready_to_submit: bool
+    exact_target_matches: dict[str, bool]
+    selected_fields: dict[str, str]
+    session: dict[str, int | str | bool | None]
+    policy_notice_found: bool
+    submit_button_candidate_count: int = Field(ge=0, le=20)
+    diagnostics: dict
+
+
+class LibraryBookingRecordSnapshot(StrictMessage):
+    origin: Literal["https://booking.lib.hku.hk"]
+    logged_in: Literal[True]
+    page_kind: Literal["booking_record", "booking_outcome_pending"]
+    record_page_marker_found: bool
+    exact_target_match_count: int = Field(ge=0, le=100)
+    verified_exactly_once: bool
+    diagnostics: dict
+
+
+class LibraryBookingPreparationResult(StrictMessage):
+    read_only: Literal[True]
+    navigation_interactions_performed: Literal[True]
+    domain_writes_performed: Literal[0]
+    library_writes_performed: Literal[0]
+    booking_writes_performed: Literal[0]
+    slot_selection_performed: Literal[True]
+    booking_form_opened: Literal[True]
+    ready_to_submit: Literal[True]
+    exact_target_verified: Literal[True]
+    policy_notice_found: Literal[True]
+    prepared_tab_id: int = Field(ge=0)
+    form_snapshot: LibraryBookingFormSnapshot
+    diagnostics: dict
+
+
+class LibraryBookingExecutionResult(StrictMessage):
+    read_only: Literal[False]
+    systems_contacted: list[Literal["hkul_booking"]] = Field(min_length=1, max_length=1)
+    navigation_interactions_performed: Literal[True]
+    data_reads_performed: Literal[2]
+    domain_writes_performed: Literal[1]
+    library_writes_performed: Literal[1]
+    booking_writes_performed: Literal[1]
+    slot_selection_performed: Literal[True]
+    booking_form_opened: Literal[True]
+    submit_clicks_dispatched: Literal[1]
+    outcome: Literal["confirmed"]
+    exact_target_verified_in_booking_record: Literal[True]
+    record_match_count: Literal[1]
+    policy_acceptance_acknowledged: Literal[True]
+    diagnostics: dict
 
 
 class LibrarySpaceUnknownCellShape(StrictMessage):
@@ -642,7 +700,13 @@ class LibrarySpaceNavigationResult(StrictMessage):
     navigation_interactions_performed: bool
     target_origin: Literal["https://booking.lib.hku.hk"]
     target_page_kind: Literal["space_availability"]
-    facility_type: Literal["single_study_room", "studio_editing_room", "study_table", "study_room"]
+    facility_type: Literal[
+        "single_study_room", "av_group_viewing_room", "communal_virtual_pc",
+        "computer", "computer_in_lic", "engraving_cutting_computer",
+        "concept_and_creation_room", "discussion_room", "microform_scanner",
+        "overhead_scanner", "research_desk", "studio_editing_room",
+        "study_table", "study_table_deep_quiet", "study_room"
+    ]
     location: str = Field(min_length=1, max_length=160)
     booking_facility_type: str = Field(min_length=1, max_length=160)
     date: datetime_module.date

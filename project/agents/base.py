@@ -26,6 +26,10 @@ class BaseCapability(ABC):
     def persisted_input(self, validated_input: BaseModel) -> dict[str, Any]:
         return validated_input.model_dump(mode="json")
 
+    def persisted_preview(self, preview: dict[str, Any]) -> dict[str, Any]:
+        """Return the preview representation safe to keep in persistent storage."""
+        return preview
+
     def persisted_result(self, result: dict[str, Any]) -> dict[str, Any]:
         return result
 

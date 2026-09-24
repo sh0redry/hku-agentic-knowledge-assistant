@@ -219,6 +219,7 @@ class SQLiteStore:
         self,
         draft: ActionDraft,
         token_hash: str | None = None,
+        persisted_preview: dict | None = None,
     ) -> None:
         with self._connection() as db:
             db.execute(
@@ -231,7 +232,7 @@ class SQLiteStore:
                     draft.capability,
                     draft.status.value,
                     _json(draft.input),
-                    _json(draft.preview),
+                    _json(draft.preview if persisted_preview is None else persisted_preview),
                     draft.preview_digest,
                     token_hash,
                     draft.confirmation_expires_at.isoformat() if draft.confirmation_expires_at else None,

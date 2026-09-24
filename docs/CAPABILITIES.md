@@ -84,27 +84,44 @@ return an authentication URL.
 |---|---|---|---|
 | `library.spaces.list_facilities` | `hku_library_list_facilities` | none | local verified policy catalog; no browser interaction |
 | `library.spaces.search_availability` | `hku_library_space_availability` | one supported facility type plus exact `YYYY-MM-DD` date | exact allow-listed Location/Facility Type/Date filters, Search, and complete visible availability read; no slot selection or booking form |
-| `library.spaces.booking_preview` | `hku_library_space_booking_preview` | exact date, room, time, optional floor, and self-declared eligibility category | fresh availability match plus short-lived policy preview; no selection, form, authorization, or booking |
-| `library.spaces.book` | not exposed to Harness | one process-issued `preview_digest` | high-risk two-phase action envelope; external submission remains hard-disabled pending F2 live-write acceptance |
+| `library.spaces.booking_preview` | `hku_library_space_booking_preview` | exact date, room, time, optional floor, and self-declared eligibility category | fresh availability match plus short-lived policy preview for single study rooms, editing rooms, study tables, Chi Wah study rooms, and Main Library discussion rooms; no selection, form, authorization, or booking |
+| `library.spaces.book` | not exposed to Harness; local GUI only | one process-issued `preview_digest` plus `policy_acceptance_acknowledged: true` | high-risk two-phase confirmation; when `LIBRARY_BOOKING_WRITES_ENABLED=true`, rechecks and submits exactly one Main Library single-study-room target, then verifies one My Booking Record row |
 | `library.hours_and_locations` | `hku_library_hours_and_locations` | none | official public hours page; visible location/time-period rows only |
 
-Supported availability targets currently include `single_study_room`,
-`studio_editing_room`, `study_table`, and the live-verified Chi Wah Learning
-Commons `study_room`. Results expose the selected booking labels, displayed
-date, source update timestamp when visible, and result-set completeness. For
-the supported routes, dates are limited to today or tomorrow in Hong Kong time
-before browser navigation. The bridge reads up to ten numbered result pages,
-checks the filters on each page, and fails closed if a page cannot be verified
-or the filters change. Listing a facility
-does not establish current eligibility or availability.
+Availability supports the 14 Main Library facility categories visible in the
+user-provided selector screenshot, plus the live-verified Chi Wah Learning
+Commons `study_room`. Newly added Main Library routes are allowlisted for
+read-only availability only until exact labels and facility-specific booking
+contracts are verified, except Discussion Room which now also supports a
+read-only policy preview. Results expose the selected booking labels,
+displayed date, source update timestamp when visible, and result-set
+completeness. Dates are limited to today or tomorrow in Hong Kong time before
+browser navigation. The bridge reads up to ten numbered result pages, checks
+the filters on each page, and fails closed if a page cannot be verified or the
+filters change. Listing a facility does not establish current eligibility or
+availability.
+
+The read-only booking preview additionally supports Main Library Discussion
+Rooms. It enforces the published one-hour interval and reports that the daily
+limit, interleaving rule, minimum group size, and account eligibility cannot
+be verified from the availability matrix. A live interval that conflicts with
+the published session duration is rejected without issuing a preview. F2
+submission remains restricted to Main Library single study rooms.
 
 The F2 action envelope stores fresh previews only in process memory, binds the
 action draft to the exact target/policy/eligibility facts, rejects expired,
 unissued, or previously consumed digests, and uses the platform's one-time
-confirmation token. `LIBRARY_BOOKING_WRITES_ENABLED` defaults to `false`; even
-when changed, the current implementation stops with
-`LIBRARY_BOOKING_SUBMIT_NOT_IMPLEMENTED` before any browser write. This is an
-intentional development gate, not a usable booking endpoint.
+confirmation token. Exact room/date/time values are returned for review but
+redacted from persistent action-draft storage. `LIBRARY_BOOKING_WRITES_ENABLED`
+defaults to `false`. When enabled by the operator, F2 is available only through
+the local GUI, only for Main Library single study rooms, and only after a fresh
+availability check and exact form verification. Other facility types require
+separate eligibility/policy review, synthetic form fixtures, read-only live
+preview acceptance, then an individually scoped F2 live acceptance before
+being added. The backend also refuses F2
+drafts and execution unless `APP_HOST` is bound to a loopback address. The extension arms a persistent
+one-shot execution ID before Submit; an uncertain outcome is terminal and must
+be resolved by manually inspecting My Booking Record, never by retrying.
 
 ## Host examples
 

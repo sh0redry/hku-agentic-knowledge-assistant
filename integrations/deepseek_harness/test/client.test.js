@@ -220,15 +220,19 @@ test('Library tools forward only bounded structured search, record, and facility
           { facility_type: 'single_study_room', date: '2026-09-20' },
           { signal: new AbortController().signal },
         )
+        await tools.find(tool => tool.name === 'hku_library_space_availability').execute(
+          { facility_type: 'discussion_room', date: '2026-09-20' },
+          { signal: new AbortController().signal },
+        )
         await tools.find(tool => tool.name === 'hku_library_space_booking_preview').execute(
           {
-            facility_type: 'single_study_room',
+            facility_type: 'discussion_room',
             date: '2026-09-20',
-            floor: '4/F',
-            room: 'Study Room A',
-            start_time: '09:00',
-            end_time: '10:30',
-            eligibility_category: 'current_hku_students',
+            floor: 'Level 3',
+            room: 'Discussion Room 1',
+            start_time: '10:00',
+            end_time: '11:00',
+            eligibility_category: 'current_hku_space_students',
           },
           { signal: new AbortController().signal },
         )
@@ -258,15 +262,19 @@ test('Library tools forward only bounded structured search, record, and facility
             body: { facility_type: 'single_study_room', date: '2026-09-20' },
           },
           {
+            url: '/api/v1/integration/library/spaces/search-availability',
+            body: { facility_type: 'discussion_room', date: '2026-09-20' },
+          },
+          {
             url: '/api/v1/integration/library/spaces/booking-preview',
             body: {
-              facility_type: 'single_study_room',
+              facility_type: 'discussion_room',
               date: '2026-09-20',
-              floor: '4/F',
-              room: 'Study Room A',
-              start_time: '09:00',
-              end_time: '10:30',
-              eligibility_category: 'current_hku_students',
+              floor: 'Level 3',
+              room: 'Discussion Room 1',
+              start_time: '10:00',
+              end_time: '11:00',
+              eligibility_category: 'current_hku_space_students',
             },
           },
           {

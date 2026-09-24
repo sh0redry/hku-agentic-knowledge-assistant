@@ -9,7 +9,7 @@
   <body>
     <main>
       <h1>HKU AGENTS</h1>
-      <p class="muted">Restricted navigation + read-only HKU system discovery</p>
+      <p class="muted">Restricted HKU navigation and discovery</p>
       <label for="port">Local app port</label>
       <input id="port" type="number" min="1024" max="65535" value="7860">
       <label for="token">Pairing token</label>
@@ -19,7 +19,7 @@
       <button id="bind" class="secondary" type="button">Bind active HKU tab</button>
       <div id="status" role="status">Checking status…</div>
       <div id="targets" class="targets" aria-label="Detected HKU systems"></div>
-      <p class="notice">Only fixed Portal/SIS/Moodle navigation targets are allowed. Moodle reads are limited to Dashboard diagnostics, visible course membership, and machine-dated upcoming activities. Library is discovery-only. This extension cannot submit forms and has no cookie permission.</p>
+      <p class="notice">Only named, bounded HKU workflows are allowed. Library booking submission is unavailable unless the local operator enables its gate and a user confirms one exact reservation. There is no generic form, URL, or script execution command, and no cookie permission.</p>
     </main>
     <script src="popup.js"></script>
   </body>

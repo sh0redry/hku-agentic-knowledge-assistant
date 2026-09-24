@@ -1,2 +1,1 @@
-"""Authenticated local bridge for the read-only browser extension."""
-
+"""Authenticated local bridge for restricted, named browser workflows."""

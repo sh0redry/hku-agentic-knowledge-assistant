@@ -180,18 +180,18 @@ class BrowserBridgeService:
         if lifecycle_state == "token_rejected":
             return "The extension presented an invalid pairing token. Update it in the extension popup."
         if lifecycle_state == "portal_bound":
-            return "Read-only extension paired and bound to HKU Portal."
+            return "Restricted extension paired and bound to HKU Portal."
         if lifecycle_state == "sis_bound":
-            return "Read-only extension paired and bound to HKU SIS."
+            return "Restricted extension paired and bound to HKU SIS."
         if lifecycle_state == "timetable_bound":
-            return "Read-only extension paired and bound to HKU My Weekly Schedule."
+            return "Restricted extension paired and bound to HKU My Weekly Schedule."
         if lifecycle_state == "moodle_bound":
-            return "Read-only extension paired and bound to HKU Moodle Dashboard."
+            return "Restricted extension paired and bound to HKU Moodle Dashboard."
         if lifecycle_state == "paired":
-            return "Read-only extension connected. No domain write commands are available."
+            return "Restricted extension connected. Only explicitly named and locally gated workflows are available."
         if status == "stale":
             return "Extension heartbeat is stale; reopen its popup or reload the extension."
-        return "Install and pair the local read-only HKU browser extension."
+        return "Install and pair the local restricted HKU browser extension."
 
     def _extension_id_from_origin(self, origin: str | None) -> str | None:
         match = EXTENSION_ORIGIN_PATTERN.fullmatch(origin or "")
@@ -346,7 +346,7 @@ class BrowserBridgeService:
                 )
             raise BrowserBridgeError(
                 "BROWSER_NOT_CONNECTED",
-                "The read-only browser extension is not connected. Open its popup to inspect retry status.",
+                "The restricted browser extension is not connected. Open its popup to inspect retry status.",
             )
 
         current_loop = asyncio.get_running_loop()

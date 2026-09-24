@@ -73,8 +73,14 @@ to the booking system.
 
 `library.spaces.search_availability` may change the Location, Facility Type,
 and Date filters and press the non-writing `Search` control. These are reported
-as navigation interactions, not booking writes. The bridge has no command for
-the green `Select` cells, session checkboxes, booking `Submit`, or cancellation.
+as navigation interactions, not booking writes. A separate F2 command can
+select one exact green `Select` cell and prepare the matching session checkbox;
+only the local GUI's one-time confirmation can authorize one `Submit`, and only
+when `LIBRARY_BOOKING_WRITES_ENABLED=true`. It is limited to Main Library single
+study rooms and never provides arbitrary selectors, URLs, scripts, or form
+execution. It verifies one matching My Booking Record row and has no automated
+cancellation command. Ambiguous post-submit results are terminal and must not
+be retried.
 
 ## Fail-closed parsing
 
@@ -94,17 +100,22 @@ Examples:
 ## Extension permissions
 
 The extension intentionally omits cookies, debugger, webRequest, downloads,
-clipboard, broad scripting, and form-execution privileges. Host permissions are
+clipboard, and the general-purpose scripting API. It uses fixed content-script
+handlers for approved pages; F2's single form action is named, locally gated,
+and structurally tied to one confirmed booking target. Host permissions are
 limited to approved HKU origins and loopback communication.
 
 ## Write governance
 
-Current HKU integrations perform no domain writes. The registered
-`library.spaces.book` F2 envelope is a separate high-risk capability, but its
-external submission path is hard-disabled and is not exposed to Harness. It
-accepts only a fresh process-issued preview digest and requires the platform's
-one-time two-phase confirmation. A future enabled write must additionally
-satisfy all of the following:
+All integrations other than the optional F2 reservation remain read-only. The
+`library.spaces.book` F2 capability is high-risk, local-GUI-only, and disabled
+by default; it is additionally unavailable unless `APP_HOST` is loopback
+(`localhost`, `127.0.0.0/8`, or `::1`). It accepts only a fresh process-issued preview digest and requires
+the platform's one-time two-phase confirmation. Its exact target is redacted
+from persistent action-draft storage. Before Submit, it refreshes availability
+and verifies the complete booking form; a persistent one-shot execution ID is
+armed before the exact Submit click, and the result must appear exactly once in
+My Booking Record. This bounded path satisfies:
 
 1. exact structured target;
 2. fresh read-only precondition check;
@@ -113,8 +124,9 @@ satisfy all of the following:
 5. expiry of unused confirmation;
 6. idempotency protection where feasible;
 7. post-condition verification;
-8. immutable sanitized audit event;
-9. no generic click/script/URL escape hatch.
+8. sanitized audit event;
+9. no generic click/script/URL escape hatch;
+10. fail-closed handling of uncertain outcomes, with no automatic retry.
 
 Enrollment, payment, application submission, identity or bank-account changes,
 password/PIN handling, CAPTCHA, and MFA remain separately restricted even if

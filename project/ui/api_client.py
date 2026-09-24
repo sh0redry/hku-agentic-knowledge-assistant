@@ -82,6 +82,29 @@ class HKUAgentsAPIClient:
     def tasks(self) -> dict:
         return self._request("GET", "/api/v1/tasks")
 
+    def task(self, task_id: str) -> dict:
+        return self._request("GET", f"/api/v1/tasks/{task_id}")
+
+    def action_draft(self, capability: str, payload: dict) -> dict:
+        return self._request(
+            "POST", "/api/v1/actions/draft", json={"capability": capability, "input": payload}
+        )
+
+    def action_validate(self, draft_id: str) -> dict:
+        return self._request("POST", f"/api/v1/actions/{draft_id}/validate", json={})
+
+    def action_confirm(self, draft_id: str, preview_digest: str) -> dict:
+        return self._request(
+            "POST", f"/api/v1/actions/{draft_id}/confirm", json={"preview_digest": preview_digest}
+        )
+
+    def action_execute(self, draft_id: str, confirmation_token: str, session_id: str) -> dict:
+        return self._request(
+            "POST",
+            f"/api/v1/actions/{draft_id}/execute",
+            json={"confirmation_token": confirmation_token, "session_id": session_id},
+        )
+
     def chat(self, message: str, history: list, session_id: str) -> dict:
         normalized_history = [item for item in history if isinstance(item, dict)]
         return self._request(

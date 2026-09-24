@@ -9,7 +9,11 @@ route, and a validated Portal Moodle entry. Moodle has a diagnostic parser plus
 separately scoped visible-course-membership and upcoming-assignment commands in Phase C.
 Portal News has a separate read-only structured parser in Phase D. Library Phase E1
 adds bounded Find@HKUL result reading and authenticated Book a Space availability
-reading; it cannot open licensed content, select a slot, or submit a booking. The diagnostic command returns markers and aggregate
+reading. Phase F2 adds a separate high-risk, one-shot booking command gated by
+`LIBRARY_BOOKING_WRITES_ENABLED`, exact F1 preview provenance, the GUI's one-time
+confirmation, and a post-submit record check. It is limited to policy-verified
+Main Library single study rooms; it has no arbitrary selector, URL, script, or
+form execution command. It cannot open licensed content or cancel bookings. The diagnostic command returns markers and aggregate
 counts only. The course command returns structured course identity. The upcoming
 assignment command returns only machine-dated Timeline/Upcoming rows and never
 opens their activity pages or reads grades, participants, messages, submissions,
@@ -48,11 +52,18 @@ forms.
     **Read visible Portal notices**. The bridge reads structured visible cards,
     performs no navigation, and never opens a notice detail page.
 11. To test Library Phase E1/F1.1, use the GUI **Library** tab. Find@HKUL
-    searches use a fixed Primo route. Book a Space availability requires a
-    supported facility type and exact date. The bridge selects the allow-listed
-    Location, Facility Type, and Date and presses only the non-writing Search
-    control. It never presses a green Select cell or opens/submits New Booking.
-    If HKUL Authentication appears, complete it manually and rerun the check.
+    searches use a fixed Primo route. Book a Space availability supports the
+    Main Library selector categories plus the verified Chi Wah Study Room and
+    requires an exact date. The bridge selects the allow-listed Location,
+    Facility Type, and Date and presses only the non-writing Search control.
+    Newly added categories are availability-only; preview and F2 write scope
+    remain narrower until their policies and forms are separately accepted.
+    Availability and previews never select a green cell or open New Booking.
+    If HKUL Authentication appears, complete it manually and rerun.
+12. For Phase F2, first follow the dedicated GUI procedure in
+    `docs/LIVE_ACCEPTANCE.md`. Keep the write gate false for the dry run. Enable
+    it only for a user-approved single reservation that can be manually checked
+    and cancelled; the extension never retries a possibly submitted booking.
 
 When the unpacked extension receives a new ID, restart HKU AGENTS to clear the
 in-memory development pin, or set `BROWSER_EXTENSION_IDS` explicitly in

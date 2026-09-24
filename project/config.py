@@ -34,8 +34,8 @@ CONFIRMATION_TTL_SECONDS = int(os.environ.get("CONFIRMATION_TTL_SECONDS", "300")
 LIBRARY_BOOKING_PREVIEW_TTL_SECONDS = int(
     os.environ.get("LIBRARY_BOOKING_PREVIEW_TTL_SECONDS", "120")
 )
-# F2 external submission remains fail-closed until the exact live form and
-# authoritative post-condition have passed supervised acceptance.
+# F2 external submission is opt-in and must remain off except during an
+# explicitly supervised, exact-target acceptance run.
 LIBRARY_BOOKING_WRITES_ENABLED = (
     os.environ.get("LIBRARY_BOOKING_WRITES_ENABLED", "false").lower() == "true"
 )

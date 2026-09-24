@@ -59,7 +59,7 @@ class ActionService:
             created_at=now,
             updated_at=now,
         )
-        self.store.save_draft(draft)
+        self.store.save_draft(draft, persisted_preview=capability.persisted_preview(preview))
         self.store.add_audit_event(
             capability_id,
             "action.drafted",
@@ -80,7 +80,11 @@ class ActionService:
             )
         draft.preview = preview
         draft.updated_at = utc_now()
-        self.store.save_draft(draft, token_hash)
+        self.store.save_draft(
+            draft,
+            token_hash,
+            persisted_preview=capability.persisted_preview(preview),
+        )
         return draft
 
     def confirm(self, draft_id: str, preview_digest: str) -> tuple[ActionDraft, str]:
@@ -101,7 +105,11 @@ class ActionService:
         draft.status = TaskStatus.QUEUED
         draft.confirmation_expires_at = now + timedelta(seconds=config.CONFIRMATION_TTL_SECONDS)
         draft.updated_at = now
-        self.store.save_draft(draft, _token_hash(token))
+        self.store.save_draft(
+            draft,
+            _token_hash(token),
+            persisted_preview=capability.persisted_preview(draft.preview),
+        )
         self.store.add_audit_event(
             draft.capability,
             "action.confirmed",
@@ -136,7 +144,11 @@ class ActionService:
             raise PolicyDeniedError("DRAFT_ALREADY_USED", "This action draft has already been executed.")
         draft.status = TaskStatus.RUNNING
         draft.updated_at = utc_now()
-        self.store.save_draft(draft, None)
+        self.store.save_draft(
+            draft,
+            None,
+            persisted_preview=capability.persisted_preview(draft.preview),
+        )
         task = self.tasks.create(draft.capability, draft.input, correlation_id)
         self.tasks.start(task.id, session_id)
         self.store.add_audit_event(

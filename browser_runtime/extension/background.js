@@ -43,9 +43,13 @@ const ALLOWED_COMMANDS = new Set([
   "library.research.item",
   "library.research.access_options",
   "library.hours_and_locations",
-  "library.spaces.search_availability"
+  "library.spaces.search_availability",
+  "library.spaces.book_exact_once"
 ]);
 const NAVIGATION_DEADLINE_MS = 30000;
+// Keep the persistent anti-replay ledger below Chrome's local storage quota.
+// Entries are never evicted: a full ledger fails closed.
+const MAX_RECORDED_BOOKING_ATTEMPTS = 10000;
 
 let socket = null;
 let reconnectTimer = null;
@@ -252,8 +256,19 @@ function libraryResearchDetailUrl(payload) {
 
 const SPACE_ROUTES = Object.freeze({
   single_study_room: { location: "Main Library", booking_facility_type: "Single Study Room (3 sessions)" },
-  studio_editing_room: { location: "Main Library", booking_facility_type: "Studio and Editing Rooms" },
+  av_group_viewing_room: { location: "Main Library", booking_facility_type: "AV Group Viewing Room" },
+  communal_virtual_pc: { location: "Main Library", booking_facility_type: "Communal Virtual PC" },
+  computer: { location: "Main Library", booking_facility_type: "Computer" },
+  computer_in_lic: { location: "Main Library", booking_facility_type: "Computer in LIC" },
+  engraving_cutting_computer: { location: "Main Library", booking_facility_type: "computer-controlled machines for engraving/cutting" },
+  concept_and_creation_room: { location: "Main Library", booking_facility_type: "Concept and Creation Room" },
+  discussion_room: { location: "Main Library", booking_facility_type: "Discussion Room" },
+  microform_scanner: { location: "Main Library", booking_facility_type: "Special Collections - Microform Scanner" },
+  overhead_scanner: { location: "Main Library", booking_facility_type: "Special Collections - Overhead Scanner" },
+  research_desk: { location: "Main Library", booking_facility_type: "Special Collections - Research Desk" },
+  studio_editing_room: { location: "Main Library", booking_facility_type: "Studio and Editing Room" },
   study_table: { location: "Main Library", booking_facility_type: "Study Table" },
+  study_table_deep_quiet: { location: "Main Library", booking_facility_type: "Study Table (Deep Quiet)" },
   study_room: { location: "Chi Wah Learning Commons", booking_facility_type: "Study Room" }
 });
 const SPACE_AVAILABILITY_URL = "https://booking.lib.hku.hk/Secure/FacilityStatusDate.aspx";
@@ -346,7 +361,7 @@ async function readLibraryResearchDetail(payload, mode) {
   };
 }
 
-async function searchLibrarySpaceAvailability(payload) {
+async function searchLibrarySpaceAvailability(payload, options = {}) {
   const facilityType = String(payload?.facility_type || "");
   const target = SPACE_ROUTES[facilityType];
   const date = String(payload?.date || "");
@@ -417,7 +432,10 @@ async function searchLibrarySpaceAvailability(payload) {
     }
     pages.push(current);
   }
-  const slots = pages.flatMap((page) => page.available_slots);
+  const slots = pages.flatMap((page) => page.available_slots.map((slot) => ({
+    ...slot,
+    page_number: page.page_number
+  })));
   if (slots.length > 1000) {
     throw commandError("LIBRARY_SPACE_RESULTS_TOO_LARGE", "The HKUL result exceeded the bounded slot limit.");
   }
@@ -447,7 +465,7 @@ async function searchLibrarySpaceAvailability(payload) {
     available_slots: slots,
     diagnostics
   };
-  return {
+  const result = {
     read_only: true,
     navigation_only: true,
     library_write_requests_sent: 0,
@@ -465,6 +483,240 @@ async function searchLibrarySpaceAvailability(payload) {
     steps: ["library_fixed_route_to_space_availability", "library_set_exact_availability_filters"],
     snapshot
   };
+  if (options.includeTabId === true) result.tab_id = tab.id;
+  return result;
+}
+
+function exactSlotKey(slot) {
+  return `${String(slot?.floor || "").trim()}|${String(slot?.room || "").trim()}|${slot?.start_time || ""}|${slot?.end_time || ""}`;
+}
+
+async function waitForBookingForm(tabId, target, deadline) {
+  let prior = null;
+  while (Date.now() < deadline) {
+    try {
+      const form = await sendTabCommand(tabId, "library.spaces.configure_booking_form", { target });
+      if (form?.ready_to_submit === true && form.policy_notice_found === true) {
+        const signature = JSON.stringify([form.selected_fields, form.session, form.submit_button_candidate_count]);
+        if (signature === prior) return form;
+        prior = signature;
+      } else {
+        prior = null;
+      }
+    } catch (error) {
+      if (["WRONG_LIBRARY_SPACE_PAGE", "LIBRARY_BOOKING_FORM_MISMATCH", "INVALID_INPUT"].includes(error.code)) throw error;
+      prior = null;
+    }
+    await delay(350);
+  }
+  throw commandError("LIBRARY_BOOKING_FORM_NOT_READY", "The exact HKUL booking form did not become ready before the deadline.");
+}
+
+async function ensureBookingAttemptUnused(executionId) {
+  if (!/^[a-f0-9-]{36}$/i.test(String(executionId || ""))) {
+    throw commandError("INVALID_INPUT", "A unique action execution ID is required.");
+  }
+  const { libraryBookingAttempts = [] } = await chrome.storage.local.get({ libraryBookingAttempts: [] });
+  if (libraryBookingAttempts.some((attempt) => attempt?.execution_id === executionId)) {
+    throw commandError("LIBRARY_BOOKING_ALREADY_ATTEMPTED", "This one-time booking execution ID was already armed; it will not be submitted again.");
+  }
+  const next = [
+    ...libraryBookingAttempts.filter((attempt) => attempt && typeof attempt.execution_id === "string"),
+    { execution_id: executionId, phase: "armed", armed_at: new Date().toISOString() }
+  ];
+  if (next.length > MAX_RECORDED_BOOKING_ATTEMPTS) {
+    throw commandError("LIBRARY_BOOKING_ATTEMPT_STORE_FULL", "The bounded one-shot attempt ledger is full; no Submit was issued.");
+  }
+  await chrome.storage.local.set({ libraryBookingAttempts: next });
+}
+
+async function updateBookingAttempt(executionId, phase) {
+  const { libraryBookingAttempts = [] } = await chrome.storage.local.get({ libraryBookingAttempts: [] });
+  await chrome.storage.local.set({
+    libraryBookingAttempts: libraryBookingAttempts.map((attempt) => attempt?.execution_id === executionId
+      ? { ...attempt, phase, updated_at: new Date().toISOString() }
+      : attempt)
+  });
+}
+
+async function bookLibrarySpaceExactlyOnce(payload) {
+  const facilityType = String(payload?.facility_type || "");
+  const targetRoute = SPACE_ROUTES[facilityType];
+  const target = payload?.target || {};
+  if (payload?.operation === "submit") return submitPreparedLibraryBooking(payload);
+  if (facilityType !== "single_study_room") {
+    throw commandError(
+      "LIBRARY_BOOKING_FACILITY_NOT_ENABLED",
+      "F2 live submission is currently limited to Main Library single study rooms."
+    );
+  }
+  if (payload?.operation !== "prepare" || !targetRoute ||
+      target.facility_type !== facilityType || !target.date || !target.room || !target.floor ||
+      !target.start_time || !target.end_time) {
+    throw commandError("INVALID_INPUT", "A complete exact booking target is required for preparation.");
+  }
+  const availability = await searchLibrarySpaceAvailability(
+    { facility_type: facilityType, date: target.date },
+    { includeTabId: true }
+  );
+  const snapshot = availability.snapshot;
+  const diagnostics = snapshot.diagnostics || {};
+  if (snapshot.result_set_complete !== true || diagnostics.unclassified_status_cell_count > 0 ||
+      diagnostics.incomplete_available_slot_candidate_count > 0 || diagnostics.parser_version !== "0.3.5") {
+    throw commandError("LIBRARY_BOOKING_AVAILABILITY_INCOMPLETE", "The refreshed availability matrix was incomplete; no slot was selected.");
+  }
+  if (snapshot.location !== targetRoute.location || snapshot.booking_facility_type !== targetRoute.booking_facility_type || snapshot.date !== target.date) {
+    throw commandError("LIBRARY_BOOKING_FILTER_MISMATCH", "The refreshed availability filters did not match the confirmed target.");
+  }
+  const expectedSlot = {
+    floor: target.floor,
+    room: target.room,
+    start_time: target.start_time,
+    end_time: target.end_time
+  };
+  const matches = snapshot.available_slots.filter((slot) => exactSlotKey(slot) === exactSlotKey(expectedSlot));
+  if (matches.length !== 1) {
+    throw commandError(matches.length ? "LIBRARY_BOOKING_SLOT_AMBIGUOUS" : "LIBRARY_BOOKING_SLOT_STALE", "The exact slot was not uniquely available after the final refresh.");
+  }
+  const slot = matches[0];
+  let tab;
+  try { tab = await chrome.tabs.get(availability.tab_id); } catch (_error) { tab = null; }
+  if (!tab?.id || !String(tab.url || "").startsWith("https://booking.lib.hku.hk/")) {
+    throw commandError("LIBRARY_BOOKING_TAB_NOT_FOUND", "The refreshed HKUL availability tab is no longer available.");
+  }
+  const current = await sendTabCommand(tab.id, "library.spaces.read_availability");
+  if (current.page_number !== slot.page_number) {
+    await sendTabCommand(tab.id, "library.spaces.select_result_page", { page_number: slot.page_number });
+    const page = await waitForLibraryRead(tab.id, "library.spaces.read_availability", {}, Date.now() + NAVIGATION_DEADLINE_MS, slot.page_number, current.diagnostics?.matrix_signature || null);
+    if (page.location !== targetRoute.location || page.booking_facility_type !== targetRoute.booking_facility_type || page.date !== target.date) {
+      throw commandError("LIBRARY_BOOKING_FILTER_MISMATCH", "HKUL changed the exact availability filters before selection.");
+    }
+  }
+  const selection = await sendTabCommand(tab.id, "library.spaces.select_exact_slot", { target });
+  if (selection?.slot_selection_performed !== true || selection?.candidate_count !== 1) {
+    throw commandError("LIBRARY_BOOKING_SLOT_SELECT_FAILED", "The exact available Select control was not confirmed.");
+  }
+  const form = await waitForBookingForm(tab.id, target, Date.now() + NAVIGATION_DEADLINE_MS);
+  if (!form.ready_to_submit || !form.policy_notice_found) {
+    throw commandError("LIBRARY_BOOKING_FORM_MISMATCH", "The form fields, selected session, or policy notice did not match; Submit was not clicked.");
+  }
+
+  return {
+    read_only: true,
+    navigation_interactions_performed: true,
+    domain_writes_performed: 0,
+    library_writes_performed: 0,
+    booking_writes_performed: 0,
+    slot_selection_performed: true,
+    booking_form_opened: true,
+    ready_to_submit: true,
+    exact_target_verified: true,
+    policy_notice_found: true,
+    prepared_tab_id: tab.id,
+    form_snapshot: form,
+    diagnostics: {
+      parser_version: "0.1.0",
+      availability_matrix_complete: true,
+      exact_slot_candidate_count: matches.length,
+      submit_button_candidate_count: form.submit_button_candidate_count
+    }
+  };
+}
+
+async function submitPreparedLibraryBooking(payload) {
+  const target = payload?.target || {};
+  const executionId = String(payload?.execution_id || "");
+  const preparedTabId = Number(payload?.prepared_tab_id);
+  if (target.facility_type !== "single_study_room") {
+    throw commandError(
+      "LIBRARY_BOOKING_FACILITY_NOT_ENABLED",
+      "F2 live submission is currently limited to Main Library single study rooms."
+    );
+  }
+  if (payload?.policy_acceptance_acknowledged !== true || !target.facility_type ||
+      !target.location || !target.date || !target.floor || !target.room ||
+      !target.start_time || !target.end_time || !Number.isInteger(preparedTabId)) {
+    throw commandError("INVALID_INPUT", "The confirmed exact target and explicit HKUL policy acknowledgment are required.");
+  }
+  let tab;
+  try { tab = await chrome.tabs.get(preparedTabId); } catch (_error) { tab = null; }
+  if (!tab?.id || !String(tab.url || "").startsWith("https://booking.lib.hku.hk/")) {
+    throw commandError("LIBRARY_BOOKING_TAB_NOT_FOUND", "The prepared HKUL booking form is no longer available.");
+  }
+  const freshForm = await sendTabCommand(tab.id, "library.spaces.inspect_booking_form", { target });
+  if (!freshForm?.ready_to_submit || !freshForm?.policy_notice_found) {
+    throw commandError("LIBRARY_BOOKING_FORM_MISMATCH", "The live booking form no longer matches the confirmed action; Submit was not clicked.");
+  }
+  // Persist the one-shot key before dispatch. A worker restart or ambiguous
+  // response can never cause the same action to click Submit twice.
+  await ensureBookingAttemptUnused(executionId);
+  let submit;
+  try {
+    submit = await sendTabCommand(tab.id, "library.spaces.submit_booking_once", { target });
+    if (submit?.submit_click_dispatched !== true || submit?.submit_button_candidate_count !== 1) {
+      throw commandError("LIBRARY_BOOKING_SUBMIT_NOT_CONFIRMED", "The browser did not confirm exactly one Submit click.");
+    }
+  } catch (error) {
+    if (["LIBRARY_BOOKING_FORM_MISMATCH", "LIBRARY_BOOKING_SUBMIT_AMBIGUOUS", "LIBRARY_BOOKING_FORM_NOT_READY"].includes(error.code)) {
+      await updateBookingAttempt(executionId, "not_submitted");
+      throw error;
+    }
+    await updateBookingAttempt(executionId, "outcome_unknown");
+    throw commandError("LIBRARY_BOOKING_OUTCOME_UNKNOWN", "The Submit action may have reached HKUL; inspect My Booking Record manually and do not retry this booking.");
+  }
+  await updateBookingAttempt(executionId, "submit_dispatched");
+  try {
+    await sendTabCommand(tab.id, "library.spaces.open_booking_record");
+    let record = null;
+    let priorSignature = null;
+    const recordDeadline = Date.now() + NAVIGATION_DEADLINE_MS;
+    while (Date.now() < recordDeadline) {
+      try {
+        record = await sendTabCommand(tab.id, "library.spaces.read_booking_record", { target });
+        if (record?.record_page_marker_found) {
+          const signature = `${record.exact_target_match_count}|${record.verified_exactly_once}`;
+          if (signature === priorSignature) break;
+          priorSignature = signature;
+        }
+      } catch (_error) {
+        priorSignature = null;
+      }
+      await delay(350);
+    }
+    if (!record?.record_page_marker_found || record.exact_target_match_count !== 1 || record.verified_exactly_once !== true) {
+      await updateBookingAttempt(executionId, "record_not_verified");
+      throw commandError("LIBRARY_BOOKING_OUTCOME_UNKNOWN", "Submit was dispatched once, but the exact reservation could not be verified exactly once in My Booking Record. Do not retry; inspect the record manually.");
+    }
+    await updateBookingAttempt(executionId, "record_verified");
+    return {
+      read_only: false,
+      systems_contacted: ["hkul_booking"],
+      navigation_interactions_performed: true,
+      data_reads_performed: 2,
+      domain_writes_performed: 1,
+      library_writes_performed: 1,
+      booking_writes_performed: 1,
+      slot_selection_performed: true,
+      booking_form_opened: true,
+      submit_clicks_dispatched: 1,
+      outcome: "confirmed",
+      exact_target_verified_in_booking_record: true,
+      record_match_count: record.exact_target_match_count,
+      policy_acceptance_acknowledged: true,
+      diagnostics: {
+        parser_version: "0.1.0",
+        availability_matrix_refreshed_before_confirmation: true,
+        exact_target_rechecked_before_submit: true,
+        booking_form_ready: true,
+        submit_button_candidate_count: freshForm.submit_button_candidate_count,
+        record_diagnostics: record.diagnostics
+      }
+    };
+  } catch (error) {
+    await updateBookingAttempt(executionId, "outcome_unknown");
+    if (error.code === "LIBRARY_BOOKING_OUTCOME_UNKNOWN") throw error;
+    throw commandError("LIBRARY_BOOKING_OUTCOME_UNKNOWN", "Submit was dispatched once, but its outcome could not be verified. Inspect My Booking Record manually and do not retry.");
+  }
 }
 
 async function readLibraryHoursAndLocations() {
@@ -1278,7 +1530,7 @@ function commandError(code, message) {
 
 async function executeCommand(command, payload = {}) {
   if (!ALLOWED_COMMANDS.has(command)) {
-    throw commandError("COMMAND_NOT_ALLOWED", "This extension only accepts named read-only commands.");
+    throw commandError("COMMAND_NOT_ALLOWED", "This extension only accepts named, bounded commands; general-purpose browser execution is unavailable.");
   }
   if (command === "browser.health") {
     await refreshTargetRegistry();
@@ -1342,6 +1594,7 @@ async function executeCommand(command, payload = {}) {
   if (command === "library.research.item") return readLibraryResearchDetail(payload, "item");
   if (command === "library.research.access_options") return readLibraryResearchDetail(payload, "access_options");
   if (command === "library.spaces.search_availability") return searchLibrarySpaceAvailability(payload);
+  if (command === "library.spaces.book_exact_once") return bookLibrarySpaceExactlyOnce(payload);
   if (command === "library.hours_and_locations") return readLibraryHoursAndLocations();
   return inspectBoundSisTab(command);
 }

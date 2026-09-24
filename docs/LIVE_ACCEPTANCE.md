@@ -20,9 +20,10 @@ authorized browser session.
 | Daily briefing | ✅ | ✅ | timetable and Moodle caches verified; Portal cache supported |
 | Find@HKUL search | ✅ | ✅ | dynamic Primo result rendering verified |
 | Find@HKUL item/access options | ✅ | ✅ | stable record and sanitized labels verified |
-| Book a Space availability | ✅ | ✅ | color matrix and zero booking writes verified |
-| Book a Space exact booking preview | ✅ | Pending | read-only F1 contract implemented; live exact-slot match required |
-| Library facility catalog | ✅ | ✅ | four supported policy summaries; Chi Wah Study Room added in F1.1 |
+| Book a Space availability | ✅ | Partial | Main Library Discussion Room full two-page result read verified; remaining facility routes await per-type live acceptance |
+| Book a Space exact booking preview | ✅ | Partial | read-only F1 now supports Discussion Rooms; live exact-slot preview still required |
+| Book a Space supervised F2 booking | ✅ | GUI live acceptance pending | opt-in one-shot path; real submission and record/cancellation check require an operator |
+| Library facility catalog | ✅ | Partial | 15 allowlisted availability targets; booking preview covers five and F2 writes remain single-room only |
 | HKUL hours and locations | ✅ | ✅ | 14 unique live locations; duplicate DOM candidates counted |
 
 ## Standard procedure
@@ -99,7 +100,11 @@ For Book a Space, call availability with an exact facility type and
 match the requested allow-listed target; visible green cells correspond exactly
 to returned floor/room/time rows; `result_set_complete` is true; and no slot was
 selected. Compare `source_last_updated_at` with the visible page when present.
-For the currently supported facility types, a date beyond tomorrow in
+The allowlist now includes the Main Library facility types visible in the
+user-provided selector screenshot plus the previously verified Chi Wah Study
+Room route. Newly added Main Library choices are availability-only until their
+live selector labels, eligibility, booking policies, and form behavior are
+accepted. A date beyond tomorrow in
 `Asia/Hong_Kong` must return `LIBRARY_SPACE_DATE_OUT_OF_WINDOW` before a
 booking tab opens. Repeat around Hong Kong midnight to verify the window rolls
 over with the local date.
@@ -119,11 +124,62 @@ For `library.spaces.booking_preview`, copy one exact returned slot and confirm
 zero. Repeat with a mismatched date and unavailable room; both must return
 `ready: false` without creating a preview or performing a write.
 
-F2 must remain disabled during this read-only acceptance. After a successful
-preview, an action draft for `library.spaces.book` may be inspected to verify
-that it reproduces the exact target, eligibility basis, policy digest, observed
-time, and expiry. Do not enable `LIBRARY_BOOKING_WRITES_ENABLED`; the current
-executor intentionally stops before any slot selection or Submit action.
+### F2 supervised one-shot GUI test
+
+The F2 implementation exists, but live write acceptance is still pending. This
+test creates a real reservation. Do not run it unless you have chosen a slot you
+genuinely intend to use or have first confirmed that the booking can be safely
+cancelled through the official **My Booking Record** page. F2 currently accepts
+only policy-verified Main Library single study rooms. Eligibility is
+self-declared, not checked against account data.
+
+1. Install/reload Browser Bridge `0.17.7`, restart HKU AGENTS, pair the
+   extension, and log into the official HKUL booking system in Chrome. Keep
+   `APP_HOST` on loopback (`127.0.0.1` by default); F2 refuses drafts otherwise.
+2. Keep `LIBRARY_BOOKING_WRITES_ENABLED=false`. In GUI **Library**, search
+   availability for `single_study_room` and an exact date equal to today or
+   tomorrow in `Asia/Hong_Kong`. Create a booking preview from one exact result
+   (floor, room, start, and end). Check that the preview is ready, fresh, and
+   exact; its counters must show no selection, form, or booking write.
+3. Check the one-reservation policy acknowledgment. Click **1. Prepare one-shot
+   action** and confirm its displayed exact target and
+   `external_submission_enabled` value. This only creates a GUI action draft;
+   it does not yet navigate the booking page or select a slot. Click **2.
+   Revalidate action preview**, then read the target and expiry again. Click
+   **3. Confirm exact reservation** only after checking those values.
+   Revalidation and confirmation do not contact the booking page.
+4. For a dry gate test, leave the environment value `false`, then click **4.
+   Execute exactly once**. Expected result:
+   `LIBRARY_BOOKING_WRITE_DISABLED`, zero browser selection, and zero writes.
+   This consumes that action draft; start again with a fresh availability
+   preview for any further test.
+5. Only for the real supervised test, set
+   `LIBRARY_BOOKING_WRITES_ENABLED=true` in the local ignored `project/.env`,
+   restart the service, and repeat steps 2-3 to create a fresh preview and
+   confirmed draft. Verify the displayed action says
+   `external_submission_enabled: true`. Before the last click, verify the exact
+   room, date, session, your eligibility category, and policy acknowledgment.
+   Clicking **4. Execute exactly once** starts restricted browser interactions:
+   it refreshes availability, selects only the exact slot, opens/configures the
+   New Booking form, rechecks the target and policy notice, then issues one
+   Submit. Click it only if you intend to make that reservation.
+6. A successful result must report exactly one Submit, one booking write, and
+   `exact_target_verified_in_booking_record: true` with
+   `record_match_count: 1`. Open **My Booking Record** yourself and confirm the
+   exact row. If the result is `unknown`, the browser disconnects after Submit,
+   or the task times out, inspect the record manually and do not retry.
+7. Manually cancel the test reservation through HKUL if the official page
+   permits it, then verify its cancelled state. F2 does not automate
+   cancellation. If cancellation is unavailable or unclear, do not create a
+   test reservation; ask for guidance instead.
+8. Set `LIBRARY_BOOKING_WRITES_ENABLED=false` again and restart HKU AGENTS.
+   The gate should remain off during normal operation.
+
+Retain only the task/correlation IDs, extension version, exact counter values,
+record-match verdict, and whether manual cancellation succeeded. Do not paste
+pairing tokens, complete authenticated URLs, account identifiers, or raw page
+HTML. The F2 action preview returned to the GUI is full for review, but its
+exact room/date/time are redacted from persistent action-draft storage.
 
 For hours, compare every returned location with the current official page. A
 live `Today` view must remain described as visible time-period data, not as a

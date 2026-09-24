@@ -368,7 +368,7 @@ def create_gradio_ui(container):
         facility_type, date, floor, room, start_time, end_time, eligibility_category
     ):
         try:
-            return _pretty(await asyncio.to_thread(
+            response = await asyncio.to_thread(
                 api_client.library_space_booking_preview,
                 facility_type,
                 date,
@@ -377,9 +377,89 @@ def create_gradio_ui(container):
                 start_time,
                 end_time,
                 eligibility_category,
-            ))
+            )
+            digest = ((response.get("result") or {}).get("preview_digest")
+                      if isinstance(response, dict) else None)
+            return _pretty(response), digest or ""
         except Exception as exc:
-            return _pretty({"ok": False, "read_only": True, "message": str(exc)})
+            return _pretty({"ok": False, "read_only": True, "message": str(exc)}), ""
+
+    def library_booking_draft_handler(preview_digest, accept_policy):
+        try:
+            if not preview_digest:
+                raise ValueError("Create a fresh exact-slot preview first.")
+            if accept_policy is not True:
+                raise ValueError("Review the exact target and check the HKUL policy acknowledgment before preparing the action.")
+            draft = api_client.action_draft(
+                "library.spaces.book",
+                {
+                    "preview_digest": preview_digest,
+                    "policy_acceptance_acknowledged": True,
+                },
+            )
+            return _pretty(draft), draft["id"], draft["preview_digest"], ""
+        except Exception as exc:
+            return _pretty({"ok": False, "message": str(exc)}), "", "", ""
+
+    def library_booking_validate_handler(draft_id):
+        try:
+            if not draft_id:
+                raise ValueError("Prepare an action draft first.")
+            draft = api_client.action_validate(draft_id)
+            return _pretty(draft), draft["id"], draft["preview_digest"], ""
+        except Exception as exc:
+            return _pretty({"ok": False, "message": str(exc)}), draft_id or "", "", ""
+
+    def library_booking_confirm_handler(draft_id, preview_digest, accept_policy):
+        try:
+            if not draft_id or not preview_digest:
+                raise ValueError("Validate an action draft before confirmation.")
+            if accept_policy is not True:
+                raise ValueError("The HKUL policy acknowledgment must remain checked at confirmation time.")
+            confirmation = api_client.action_confirm(draft_id, preview_digest)
+            return _pretty(confirmation["draft"]), confirmation["draft"]["id"], confirmation["draft"]["preview_digest"], confirmation["confirmation_token"]
+        except Exception as exc:
+            return _pretty({"ok": False, "message": str(exc)}), draft_id or "", preview_digest or "", ""
+
+    async def library_booking_execute_handler(draft_id, confirmation_token):
+        try:
+            if not draft_id or not confirmation_token:
+                raise ValueError("Confirm the exact action preview before execution.")
+            accepted = await asyncio.to_thread(
+                api_client.action_execute,
+                draft_id,
+                confirmation_token,
+                "library-f2-gui",
+            )
+            task_id = accepted["id"]
+            latest = None
+            for _ in range(210):
+                latest = await asyncio.to_thread(api_client.task, task_id)
+                if latest.get("status") in {"completed", "failed", "unknown", "cancelled"}:
+                    break
+                await asyncio.sleep(1)
+            status = (latest or {}).get("status")
+            note = (
+                "If status is unknown, inspect My Booking Record manually and do not retry the booking."
+                if status == "unknown"
+                else "If the task is still running, refresh Tasks and inspect My Booking Record before taking any further action."
+                if status not in {"completed", "failed", "cancelled"}
+                else "The one-time confirmation token was discarded after this execution attempt."
+            )
+            return (
+                _pretty({"task_id": task_id, **(latest or {}), "gui_note": note}),
+                "",
+                "",
+                "",
+            )
+        except Exception as exc:
+            return (
+                _pretty({"ok": False, "message": str(exc),
+                         "gui_note": "If the browser reported a disconnected/unknown result after Submit, inspect My Booking Record and do not retry."}),
+                "",
+                "",
+                "",
+            )
 
     async def library_facilities_handler():
         try:
@@ -881,11 +961,12 @@ def create_gradio_ui(container):
 
         with gr.Tab("Library"):
             gr.Markdown(
-                "## HKU Libraries (read-only)\n"
+                "## HKU Libraries\n"
                 "Research search opens only the fixed Find@HKUL route and reads visible "
                 "bibliographic results. It does not open licensed full text or save/request "
-                "items. Space availability may require manual HKUL authentication; it never "
-                "selects a slot or submits a reservation."
+                "items. Space availability is read-only. A separate supervised one-shot booking "
+                "flow is available below only when its local write gate is deliberately enabled; "
+                "its current live-submit scope is Main Library single study rooms only."
             )
             library_query = gr.Textbox(value="artificial intelligence", label="Research query")
             with gr.Row():
@@ -957,11 +1038,30 @@ def create_gradio_ui(container):
                 queue=False,
             )
             gr.Markdown(
-                "The first availability run can open the HKUL authentication page. Complete "
-                "it manually in Chrome, then run the same check again."
+                "Availability covers the Main Library facility types shown below plus the "
+                "verified Chi Wah Study Room route. This is read-only: it does not select "
+                "a slot. Booking preview and F2 submission have narrower, separately "
+                "verified facility scopes. The first run can open HKUL authentication; "
+                "complete it manually in Chrome and retry."
             )
             library_facility = gr.Dropdown(
-                choices=["single_study_room", "studio_editing_room", "study_table", "study_room"],
+                choices=[
+                    ("Single Study Room (3 sessions) — Main Library", "single_study_room"),
+                    ("AV Group Viewing Room — Main Library", "av_group_viewing_room"),
+                    ("Communal Virtual PC — Main Library", "communal_virtual_pc"),
+                    ("Computer — Main Library", "computer"),
+                    ("Computer in LIC — Main Library", "computer_in_lic"),
+                    ("Engraving/cutting computer — Main Library", "engraving_cutting_computer"),
+                    ("Concept and Creation Room — Main Library", "concept_and_creation_room"),
+                    ("Discussion Room — Main Library", "discussion_room"),
+                    ("Microform Scanner — Special Collections", "microform_scanner"),
+                    ("Overhead Scanner — Special Collections", "overhead_scanner"),
+                    ("Research Desk — Special Collections", "research_desk"),
+                    ("Studio and Editing Room — Main Library", "studio_editing_room"),
+                    ("Study Table — Main Library", "study_table"),
+                    ("Study Table (Deep Quiet) — Main Library", "study_table_deep_quiet"),
+                    ("Study Room — Chi Wah Learning Commons", "study_room"),
+                ],
                 value="single_study_room",
                 label="Facility type",
             )
@@ -976,21 +1076,28 @@ def create_gradio_ui(container):
             )
             gr.Markdown(
                 "### Exact booking preview (Phase F1, read-only)\n"
+                "Current preview-enabled categories are single study rooms, Studio and Editing Room, "
+                "Study Table, Chi Wah Study Room, and Main Library Discussion Room. For Discussion "
+                "Rooms, the preview rejects intervals that conflict with the published one-hour session "
+                "rule and warns that per-day/interleaving limits and group size are not account-verified. "
+                "Other Main Library types remain availability-only until their rules are verified.\n"
                 "Copy one exact slot from the availability result. The preview re-reads the "
                 "live page, checks the displayed date and published eligibility category, "
                 "and expires quickly. Date is intentionally not defaulted: copy the returned "
                 "`date` value exactly. It does not click a slot or authorize a reservation."
             )
+            library_preview_facility = gr.Dropdown(
+                choices=["single_study_room", "studio_editing_room", "study_table", "study_room", "discussion_room"],
+                value="single_study_room",
+                label="Preview-enabled facility type",
+            )
             with gr.Row():
                 library_preview_date = gr.Textbox(value="", label="Date (YYYY-MM-DD)")
-                library_preview_floor = gr.Textbox(value="4/F", label="Floor (optional)")
-                library_preview_room = gr.Textbox(
-                    value="Single Study Room (3 sessions) Room 424",
-                    label="Exact room",
-                )
+                library_preview_floor = gr.Textbox(value="", label="Floor (optional)")
+                library_preview_room = gr.Textbox(value="", label="Exact room")
             with gr.Row():
-                library_preview_start = gr.Textbox(value="13:00", label="Start (HH:MM)")
-                library_preview_end = gr.Textbox(value="17:00", label="End (HH:MM)")
+                library_preview_start = gr.Textbox(value="", label="Start (HH:MM)")
+                library_preview_end = gr.Textbox(value="", label="End (HH:MM)")
                 library_preview_eligibility = gr.Dropdown(
                     choices=[
                         "current_hku_students",
@@ -1003,10 +1110,11 @@ def create_gradio_ui(container):
                     label="Self-declared eligibility category",
                 )
             library_preview_button = gr.Button("Create read-only booking preview")
+            library_preview_digest = gr.State("")
             library_preview_button.click(
                 library_booking_preview_handler,
                 inputs=[
-                    library_facility,
+                    library_preview_facility,
                     library_preview_date,
                     library_preview_floor,
                     library_preview_room,
@@ -1014,8 +1122,61 @@ def create_gradio_ui(container):
                     library_preview_end,
                     library_preview_eligibility,
                 ],
-                outputs=library_output,
+                outputs=[library_output, library_preview_digest],
                 show_progress="minimal",
+                queue=False,
+            )
+            gr.Markdown(
+                "### F2 — supervised one-shot booking\n"
+                "F2 live submission currently supports Main Library single study rooms only; "
+                "other categories are availability-only pending separate policy/form acceptance. "
+                "The action re-reads the exact slot, selects only that slot, checks every "
+                "booking-form field, and verifies one matching My Booking Record row. It will "
+                "never retry an ambiguous Submit. Preparation, validation, and confirmation "
+                "do not submit. The final Execute button sends the single external request. "
+                "Keep `LIBRARY_BOOKING_WRITES_ENABLED=false` for dry tests; only enable it "
+                "temporarily for an explicitly approved low-impact live test."
+            )
+            library_policy_ack = gr.Checkbox(
+                value=False,
+                label="I reviewed the exact target above and accept the displayed HKUL booking policy for this one reservation.",
+            )
+            library_f2_output = gr.Code(
+                value="No booking action draft prepared.", language="json", label="F2 action review / outcome"
+            )
+            library_f2_draft_id = gr.State("")
+            library_f2_preview_digest = gr.State("")
+            library_f2_confirmation_token = gr.State("")
+            library_f2_prepare_button = gr.Button("1. Prepare one-shot action (no booking yet)")
+            library_f2_prepare_button.click(
+                library_booking_draft_handler,
+                inputs=[library_preview_digest, library_policy_ack],
+                outputs=[library_f2_output, library_f2_draft_id, library_f2_preview_digest, library_f2_confirmation_token],
+                show_progress="minimal",
+                queue=False,
+            )
+            library_f2_validate_button = gr.Button("2. Revalidate action preview")
+            library_f2_validate_button.click(
+                library_booking_validate_handler,
+                inputs=library_f2_draft_id,
+                outputs=[library_f2_output, library_f2_draft_id, library_f2_preview_digest, library_f2_confirmation_token],
+                show_progress="minimal",
+                queue=False,
+            )
+            library_f2_confirm_button = gr.Button("3. Confirm exact reservation")
+            library_f2_confirm_button.click(
+                library_booking_confirm_handler,
+                inputs=[library_f2_draft_id, library_f2_preview_digest, library_policy_ack],
+                outputs=[library_f2_output, library_f2_draft_id, library_f2_preview_digest, library_f2_confirmation_token],
+                show_progress="minimal",
+                queue=False,
+            )
+            library_f2_execute_button = gr.Button("4. Execute exactly once", variant="stop")
+            library_f2_execute_button.click(
+                library_booking_execute_handler,
+                inputs=[library_f2_draft_id, library_f2_confirmation_token],
+                outputs=[library_f2_output, library_f2_draft_id, library_f2_preview_digest, library_f2_confirmation_token],
+                show_progress="full",
                 queue=False,
             )
 
@@ -1030,7 +1191,7 @@ def create_gradio_ui(container):
 
         with gr.Tab("Connections"):
             gr.Markdown(
-                "## Pair the read-only extension\n"
+                "## Pair the restricted browser extension\n"
                 "Load `browser_runtime/extension` as an unpacked Chrome extension, then copy "
                 "this local token into its popup once. Configure `BROWSER_PAIRING_TOKEN` in "
                 "the ignored `project/.env` file to preserve pairing across app restarts. "

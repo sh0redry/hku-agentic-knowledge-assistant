@@ -74,7 +74,7 @@ Core endpoints:
 | `POST /api/v1/browser/pairing/rotate` | Invalidate the current browser token and connection |
 | `POST /api/v1/browser/pairing/revoke` | Invalidate the token, disconnect, and clear the dynamic extension pin |
 | `GET /api/v1/browser/targets` | Sanitized Portal/SIS/Moodle/Library discovery, auth state, and freshness |
-| `POST /api/v1/browser/sis/bind` | Bind an open SIS tab through the read-only extension |
+| `POST /api/v1/browser/sis/bind` | Bind an open SIS tab through the restricted browser extension |
 | `POST /api/v1/browser/hku/bind` | Bind the active verified HKU Portal or SIS tab |
 | `POST /api/v1/browser/hku/open-sis` | Follow the fixed Portal SIS entry after manual login/MFA |
 | `POST /api/v1/browser/hku/open-moodle` | Follow the validated Portal Moodle entry after manual login/MFA |

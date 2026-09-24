@@ -6,6 +6,7 @@
   const BOOKING_ORIGIN = "https://booking.lib.hku.hk";
   const VERSION = "0.3.5";
   const HOURS_VERSION = "0.1.1";
+  const BOOKING_FORM_VERSION = "0.1.0";
 
   function clean(value) {
     return String(value || "").replace(/\s+/g, " ").trim();
@@ -432,6 +433,346 @@
     };
   }
 
+  function formControls(documentObject) {
+    const selects = [...(documentObject.querySelectorAll?.("select") || [])];
+    const checkboxes = [...(documentObject.querySelectorAll?.("input[type='checkbox']") || [])];
+    const buttons = [...(documentObject.querySelectorAll?.("button, input[type='submit'], input[type='button']") || [])];
+    const labelFor = (control) => {
+      const id = clean(control?.id);
+      const labels = [...(documentObject.querySelectorAll?.("label") || [])]
+        .filter((label) => (label.control === control) || (id && (label.htmlFor || label.getAttribute?.("for")) === id));
+      if (labels.length === 1) return clean(labels[0].innerText || labels[0].textContent);
+      const row = control?.closest?.("tr");
+      const firstCell = row ? cellsOf(row)[0] : null;
+      return clean(firstCell?.innerText || firstCell?.textContent);
+    };
+    const descriptor = (control) => clean([
+      control?.id, control?.name, control?.getAttribute?.("aria-label"),
+      control?.getAttribute?.("title"), labelFor(control)
+    ].join(" ")).toLowerCase();
+    return { selects, checkboxes, buttons, descriptor, labelFor };
+  }
+
+  function exactControl(form, candidates, pattern, label) {
+    const matches = candidates.filter((control) => pattern.test(form.descriptor(control)));
+    if (matches.length !== 1) {
+      const error = new Error(`The exact ${label} control was not uniquely available.`);
+      error.code = matches.length ? "LIBRARY_BOOKING_FORM_AMBIGUOUS" : "LIBRARY_BOOKING_FORM_INCOMPLETE";
+      throw error;
+    }
+    return matches[0];
+  }
+
+  function bookingFormPage(documentObject, locationObject) {
+    const bodyText = clean(documentObject?.body?.innerText || documentObject?.body?.textContent);
+    return locationObject?.origin === BOOKING_ORIGIN && /\bnew booking\b/i.test(bodyText);
+  }
+
+  function bookingTargetValues(target) {
+    return {
+      location: clean(target?.location),
+      floor: clean(target?.floor),
+      facilityType: clean(target?.booking_facility_type),
+      facility: clean(target?.room),
+      date: clean(target?.date),
+      start: clean(target?.start_time),
+      end: clean(target?.end_time)
+    };
+  }
+
+  function sessionRange(value) {
+    const range = timeRange(value);
+    if (range) return range;
+    const match = clean(value).match(/\b([01]?\d|2[0-3]):([0-5]\d)\s*-\s*([01]?\d|2[0-3]):([0-5]\d)\b/);
+    return match ? { start: `${match[1].padStart(2, "0")}:${match[2]}`, end: `${match[3].padStart(2, "0")}:${match[4]}` } : null;
+  }
+
+  function inspectBookingForm(documentObject, locationObject, target) {
+    if (!bookingFormPage(documentObject, locationObject)) {
+      const error = new Error("The authenticated HKUL New Booking form is not open.");
+      error.code = "LIBRARY_BOOKING_FORM_NOT_READY";
+      throw error;
+    }
+    const values = bookingTargetValues(target);
+    if (Object.values(values).some((value) => !value)) {
+      const error = new Error("The exact target is incomplete; all booking form fields and session times are required.");
+      error.code = "INVALID_INPUT";
+      throw error;
+    }
+    const controls = formControls(documentObject);
+    const fieldPatterns = {
+      location: /(?:^|\b)location\b/,
+      floor: /(?:^|\b)floor\b/,
+      facility_type: /facility\s*type|type\s*of\s*facility/,
+      facility: /(?:^|\b)facility\b(?!\s*type)/,
+      date: /(?:^|\b)date\b/
+    };
+    const selected = {};
+    const fieldCounts = {};
+    for (const [field, pattern] of Object.entries(fieldPatterns)) {
+      const matches = controls.selects.filter((select) => pattern.test(controls.descriptor(select)));
+      fieldCounts[field] = matches.length;
+      if (matches.length === 1) selected[field] = optionText(matches[0]);
+    }
+    const sessionCandidates = controls.checkboxes.map((checkbox) => {
+      const associated = [...(documentObject.querySelectorAll?.("label") || [])]
+        .filter((label) => label.control === checkbox || (checkbox.id && (label.htmlFor || label.getAttribute?.("for")) === checkbox.id));
+      const row = checkbox.closest?.("tr");
+      const label = clean([
+        ...associated.map((node) => node.innerText || node.textContent),
+        checkbox.getAttribute?.("aria-label"), checkbox.value,
+        row?.innerText || row?.textContent,
+        checkbox.parentElement?.innerText || checkbox.parentElement?.textContent
+      ].join(" "));
+      const range = sessionRange(label);
+      return { checkbox, label, range };
+    }).filter((item) => item.range);
+    const matchingSession = sessionCandidates.filter((item) =>
+      item.range.start === values.start && item.range.end === values.end
+    );
+    const submitButtons = controls.buttons.filter((button) =>
+      /^submit$/i.test(clean(button.innerText || button.textContent || button.value))
+    );
+    const selectedDate = clean(selected.date || "");
+    const dateMatches = selectedDate.toLowerCase().startsWith(values.date.toLowerCase());
+    const exactSessionSelected = matchingSession.length === 1 && matchingSession[0].checkbox.checked === true;
+    const otherSessionsSelected = sessionCandidates.filter((item) => item.checkbox.checked &&
+      !(item.range.start === values.start && item.range.end === values.end)).length;
+    const bodyText = clean(documentObject.body?.innerText || documentObject.body?.textContent);
+    const expectedFields = {
+      location: selected.location === values.location,
+      floor: selected.floor === values.floor,
+      facility_type: selected.facility_type === values.facilityType,
+      facility: selected.facility === values.facility,
+      date: dateMatches
+    };
+    const ready = Object.values(expectedFields).every(Boolean) && exactSessionSelected &&
+      otherSessionsSelected === 0 && submitButtons.length === 1 && submitButtons[0].disabled !== true;
+    return {
+      origin: BOOKING_ORIGIN,
+      logged_in: true,
+      page_kind: "new_booking",
+      ready_to_submit: ready,
+      exact_target_matches: expectedFields,
+      selected_fields: selected,
+      session: {
+        start_time: matchingSession.length === 1 ? matchingSession[0].range.start : null,
+        end_time: matchingSession.length === 1 ? matchingSession[0].range.end : null,
+        exact_candidate_count: matchingSession.length,
+        exact_session_selected: exactSessionSelected,
+        other_selected_session_count: otherSessionsSelected
+      },
+      policy_notice_found: /deemed to accept the relevant policies|accept the relevant policies/i.test(bodyText),
+      submit_button_candidate_count: submitButtons.length,
+      diagnostics: {
+        parser_version: BOOKING_FORM_VERSION,
+        booking_form_marker_found: /new booking/i.test(bodyText),
+        selected_field_candidate_counts: fieldCounts,
+        session_candidate_count: sessionCandidates.length,
+        exact_session_candidate_count: matchingSession.length
+      }
+    };
+  }
+
+  function configureBookingForm(documentObject, locationObject, target) {
+    if (!bookingFormPage(documentObject, locationObject)) {
+      const error = new Error("The authenticated HKUL New Booking form is not open.");
+      error.code = "LIBRARY_BOOKING_FORM_NOT_READY";
+      throw error;
+    }
+    const values = bookingTargetValues(target);
+    const controls = formControls(documentObject);
+    const stages = [
+      [/\bLocation\b/i, values.location, false, "Location"],
+      [/\bFloor\b/i, values.floor, false, "Floor"],
+      [/facility\s*type|type\s*of\s*facility/i, values.facilityType, false, "Facility Type"],
+      [/\bFacility\b(?!\s*Type)/i, values.facility, false, "Facility"],
+      [/\bDate\b/i, values.date, true, "Date"]
+    ];
+    for (const [pattern, expected, dateMode, label] of stages) {
+      const select = exactControl(controls, controls.selects, pattern, label);
+      selectExact(select, expected, dateMode);
+    }
+    const inspection = inspectBookingForm(documentObject, locationObject, target);
+    if (!inspection.session.exact_session_selected) {
+      const sessionControls = controls.checkboxes.map((checkbox) => {
+        const labels = [...(documentObject.querySelectorAll?.("label") || [])]
+          .filter((label) => label.control === checkbox || (checkbox.id && (label.htmlFor || label.getAttribute?.("for")) === checkbox.id));
+        const row = checkbox.closest?.("tr");
+        const label = clean([
+          ...labels.map((node) => node.innerText || node.textContent),
+          checkbox.getAttribute?.("aria-label"), checkbox.value,
+          row?.innerText || row?.textContent,
+          checkbox.parentElement?.innerText || checkbox.parentElement?.textContent
+        ].join(" "));
+        const range = sessionRange(label);
+        return { checkbox, range };
+      }).filter((item) => item.range);
+      const exact = sessionControls.filter((item) => item.range.start === values.start && item.range.end === values.end);
+      const selectedOthers = sessionControls.filter((item) => item.checkbox.checked &&
+        !(item.range.start === values.start && item.range.end === values.end));
+      if (exact.length !== 1 || exact[0].checkbox.disabled || selectedOthers.length > 0) {
+        const error = new Error("The exact session checkbox is not uniquely selectable without altering another selected session.");
+        error.code = "LIBRARY_BOOKING_SESSION_MISMATCH";
+        throw error;
+      }
+      exact[0].checkbox.checked = true;
+      const EventConstructor = exact[0].checkbox?.ownerDocument?.defaultView?.Event || globalThis.Event;
+      if (typeof exact[0].checkbox.dispatchEvent === "function" && EventConstructor) {
+        exact[0].checkbox.dispatchEvent(new EventConstructor("input", { bubbles: true }));
+        exact[0].checkbox.dispatchEvent(new EventConstructor("change", { bubbles: true }));
+      }
+    }
+    return inspectBookingForm(documentObject, locationObject, target);
+  }
+
+  function clickExactAvailableSlot(documentObject, locationObject, target) {
+    if (locationObject?.origin !== BOOKING_ORIGIN) {
+      const error = new Error("Open the verified HKUL availability matrix first.");
+      error.code = "WRONG_LIBRARY_SPACE_PAGE";
+      throw error;
+    }
+    const values = bookingTargetValues(target);
+    const availability = parseSpaceAvailability(documentObject, locationObject);
+    if (availability.location !== values.location || availability.booking_facility_type !== values.facilityType ||
+        availability.date !== values.date) {
+      const error = new Error("Live HKUL availability filters do not match the confirmed booking target.");
+      error.code = "LIBRARY_BOOKING_FILTER_MISMATCH";
+      throw error;
+    }
+    const slotMatches = availability.available_slots.filter((slot) =>
+      slot.room === values.facility && slot.floor === values.floor &&
+      slot.start_time === values.start && slot.end_time === values.end
+    );
+    if (slotMatches.length !== 1) {
+      const error = new Error("The exact available slot is not uniquely present in the refreshed HKUL matrix.");
+      error.code = slotMatches.length ? "LIBRARY_BOOKING_SLOT_AMBIGUOUS" : "LIBRARY_BOOKING_SLOT_STALE";
+      throw error;
+    }
+    const rows = [...(documentObject.querySelectorAll?.("table tr") || [])];
+    let columns = new Map();
+    for (const row of rows) {
+      const ranges = new Map();
+      cellsOf(row).forEach((cell, index) => {
+        const range = timeRange(cell.innerText || cell.textContent);
+        if (range) ranges.set(index, range);
+      });
+      if (ranges.size > columns.size) columns = ranges;
+    }
+    const candidates = [];
+    for (const row of rows) {
+      const cells = cellsOf(row);
+      const floor = clean(cells[0]?.innerText || cells[0]?.textContent);
+      const room = clean(cells[1]?.innerText || cells[1]?.textContent);
+      if (floor !== values.floor || room !== values.facility) continue;
+      for (const [index, range] of columns) {
+        if (range.start !== values.start || range.end !== values.end) continue;
+        const cell = cells[index];
+        if (!cell || colorStatus(cell, /\bAvailable\b/i.test(clean(documentObject.body?.innerText || documentObject.body?.textContent)) &&
+            /\bBooked\b/i.test(clean(documentObject.body?.innerText || documentObject.body?.textContent))) !== "available") continue;
+        const descendants = [...(cell.querySelectorAll?.("a,button,input,[role='button'],[onclick]") || [])];
+        const clickable = (descendants.length ? descendants : (interactiveCell(cell) ? [cell] : []))
+          .filter((node) => /^select$/i.test(clean(node.innerText || node.textContent || node.value || node.getAttribute?.("aria-label"))));
+        if (clickable.length === 1) candidates.push(clickable[0]);
+      }
+    }
+    if (candidates.length !== 1) {
+      const error = new Error("The exact green Select control was not uniquely identified.");
+      error.code = candidates.length ? "LIBRARY_BOOKING_SELECT_AMBIGUOUS" : "LIBRARY_BOOKING_SELECT_UNAVAILABLE";
+      throw error;
+    }
+    candidates[0].click();
+    return { slot_selection_performed: true, candidate_count: 1, target_matches: true };
+  }
+
+  function submitBookingOnce(documentObject, locationObject, target) {
+    const inspection = inspectBookingForm(documentObject, locationObject, target);
+    if (!inspection.ready_to_submit || !inspection.policy_notice_found) {
+      const error = new Error("The live form no longer matches the confirmed booking target; Submit was not clicked.");
+      error.code = "LIBRARY_BOOKING_FORM_MISMATCH";
+      throw error;
+    }
+    const controls = formControls(documentObject);
+    const buttons = controls.buttons.filter((button) =>
+      /^submit$/i.test(clean(button.innerText || button.textContent || button.value)) && button.disabled !== true
+    );
+    if (buttons.length !== 1) {
+      const error = new Error("The exact booking Submit control was not uniquely available.");
+      error.code = "LIBRARY_BOOKING_SUBMIT_AMBIGUOUS";
+      throw error;
+    }
+    buttons[0].click();
+    return { submit_click_dispatched: true, submit_button_candidate_count: 1 };
+  }
+
+  function openBookingRecord(documentObject, locationObject) {
+    if (locationObject?.origin !== BOOKING_ORIGIN) {
+      const error = new Error("Open the authenticated HKUL booking system first.");
+      error.code = "WRONG_LIBRARY_BOOKING_PAGE";
+      throw error;
+    }
+    const links = [...(documentObject.querySelectorAll?.("a") || [])].filter((node) =>
+      /^my booking record$/i.test(clean(node.innerText || node.textContent))
+    );
+    if (links.length !== 1) {
+      const error = new Error("The My Booking Record link was not uniquely available.");
+      error.code = links.length ? "LIBRARY_BOOKING_RECORD_LINK_AMBIGUOUS" : "LIBRARY_BOOKING_RECORD_NOT_READY";
+      throw error;
+    }
+    const href = links[0].getAttribute?.("href") || "";
+    let url;
+    try { url = new URL(href, locationObject.href); } catch (_error) { url = null; }
+    if (!url || url.origin !== BOOKING_ORIGIN || !url.pathname.startsWith("/")) {
+      const error = new Error("The My Booking Record destination is not on the fixed HKUL booking origin.");
+      error.code = "UNSAFE_LIBRARY_BOOKING_RECORD_ROUTE";
+      throw error;
+    }
+    links[0].click();
+    return { navigation_started: true };
+  }
+
+  function verifyBookingRecord(documentObject, locationObject, target) {
+    if (locationObject?.origin !== BOOKING_ORIGIN) {
+      const error = new Error("The booking record did not remain on the HKUL booking origin.");
+      error.code = "WRONG_LIBRARY_BOOKING_PAGE";
+      throw error;
+    }
+    const values = bookingTargetValues(target);
+    const bodyText = clean(documentObject.body?.innerText || documentObject.body?.textContent).toLowerCase();
+    const rows = [...(documentObject.querySelectorAll?.("table tr") || [])];
+    const [year, month, day] = values.date.split("-");
+    const dateNeedles = [values.date.toLowerCase(), `${day}/${month}/${year}`, `${day}-${month}-${year}`];
+    const roomNumber = values.facility.match(/\bRoom\s*([A-Za-z0-9-]+)\s*$/i)?.[1]?.toLowerCase() || null;
+    const roomNeedle = values.facility.toLowerCase();
+    let matchingCount = 0;
+    for (const row of rows) {
+      const text = clean(row.innerText || row.textContent).toLowerCase();
+      const hasDate = dateNeedles.some((needle) => text.includes(needle));
+      const hasRoom = text.includes(roomNeedle) || (roomNumber && new RegExp(`\\broom\\s*${roomNumber}\\b`, "i").test(text));
+      const hasTimes = text.includes(values.start.toLowerCase()) && text.includes(values.end.toLowerCase());
+      if (hasDate && hasRoom && hasTimes && !/\b(?:cancelled|canceled|rejected|expired)\b/i.test(text)) {
+        // Count each visible active row. Text-deduplicating here could hide
+        // two genuinely distinct reservations for the same target.
+        matchingCount += 1;
+      }
+    }
+    const isRecordPage = /my booking record|booking record|my bookings/i.test(bodyText) && rows.length > 0;
+    return {
+      origin: BOOKING_ORIGIN,
+      logged_in: true,
+      page_kind: isRecordPage ? "booking_record" : "booking_outcome_pending",
+      record_page_marker_found: isRecordPage,
+      exact_target_match_count: matchingCount,
+      verified_exactly_once: isRecordPage && matchingCount === 1,
+      diagnostics: {
+        parser_version: BOOKING_FORM_VERSION,
+        record_marker_found: isRecordPage,
+        record_row_count: rows.length,
+        exact_target_candidate_count: matchingCount
+      }
+    };
+  }
+
   function timeRange(value) {
     const match = clean(value).match(/\b([01]?\d|2[0-3]):([0-5]\d)\s*(?:-|\u2013|\u2014|to)\s*([01]?\d|2[0-3]):([0-5]\d)\b/i);
     return match ? {
@@ -778,6 +1119,7 @@
     const pageNumber = Number(optionText(pageSelect) || 1);
     const pageCount = Math.max(1, pageOptions.length || 1);
     const parsedDate = selectedDateText.match(/\b20\d{2}-[01]\d-[0-3]\d\b/)?.[0] || bookingDate(documentObject);
+    for (const slot of slots) slot.page_number = pageNumber;
     return {
       origin: BOOKING_ORIGIN,
       logged_in: true,
@@ -813,6 +1155,6 @@
     };
   }
 
-  root.HKULibraryParser = { parseResearch, parseResearchDetail, parseSpaceAvailability, configureSpaceAvailability, selectSpaceResultPage, parseHoursAndLocations, safeDetailUrl };
+  root.HKULibraryParser = { parseResearch, parseResearchDetail, parseSpaceAvailability, configureSpaceAvailability, selectSpaceResultPage, parseHoursAndLocations, safeDetailUrl, clickExactAvailableSlot, inspectBookingForm, configureBookingForm, submitBookingOnce, openBookingRecord, verifyBookingRecord };
   if (typeof module !== "undefined" && module.exports) module.exports = root.HKULibraryParser;
 })(typeof self !== "undefined" ? self : this);

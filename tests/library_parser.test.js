@@ -220,7 +220,8 @@ assert.deepEqual(spaces.available_slots[0], {
   room: "Single Study Room 422",
   start_time: "09:00",
   end_time: "10:30",
-  status: "available"
+  status: "available",
+  page_number: 1
 });
 assert.equal(spaces.diagnostics.table_matrix_found, true);
 assert.equal(spaces.diagnostics.slot_candidate_count, 2);
@@ -552,5 +553,114 @@ const unavailableHours = parser.parseHoursAndLocations({
 assert.equal(unavailableHours.hours_available, false);
 assert.equal(unavailableHours.diagnostics.empty_state_found, true);
 assert.equal(unavailableHours.diagnostics.placeholder_location_count, 1);
+
+const bookingTarget = {
+  location: "Main Library",
+  floor: "4/F",
+  booking_facility_type: "Single Study Room (3 sessions)",
+  room: "Single Study Room (3 sessions) Room 424",
+  date: "2026-09-23",
+  start_time: "13:00",
+  end_time: "17:00"
+};
+function labeledSelect(id, label, values, selectedIndex = 0) {
+  const select = filterSelect(values, selectedIndex);
+  select.id = id;
+  select.closest = () => ({ querySelectorAll: () => [cell(label)] });
+  return select;
+}
+const bookingSelectsForForm = [
+  labeledSelect("location", "Location", ["Chi Wah Learning Commons", "Main Library"]),
+  labeledSelect("floor", "Floor", ["3/F", "4/F"]),
+  labeledSelect("facilityType", "Facility Type", ["Study Room", "Single Study Room (3 sessions)"]),
+  labeledSelect("facility", "Facility", ["Room 422", bookingTarget.room]),
+  labeledSelect("date", "Date", ["2026-09-22 (Tue)", "2026-09-23 (Wed)"])
+];
+const bookingCheckboxRow = { innerText: "13:00 - 17:00" };
+let bookingCheckboxChanges = 0;
+const bookingCheckbox = {
+  checked: false,
+  disabled: false,
+  value: "13:00 - 17:00",
+  closest: () => bookingCheckboxRow,
+  dispatchEvent() { bookingCheckboxChanges += 1; },
+  ownerDocument: { defaultView: { Event: class Event {} } }
+};
+let bookingSubmitClicks = 0;
+const bookingSubmit = {
+  innerText: "Submit",
+  disabled: false,
+  click() { bookingSubmitClicks += 1; }
+};
+const bookingFormDocument = {
+  body: { innerText: "New Booking (By making a booking/application, you are deemed to accept the relevant policies governing the HKU Libraries.)" },
+  querySelectorAll(selector) {
+    if (selector === "select") return bookingSelectsForForm;
+    if (selector === "input[type='checkbox']") return [bookingCheckbox];
+    if (selector === "button, input[type='submit'], input[type='button']") return [bookingSubmit];
+    if (selector === "label") return [];
+    return [];
+  }
+};
+const bookingLocation = {
+  origin: "https://booking.lib.hku.hk",
+  href: "https://booking.lib.hku.hk/Secure/NewBooking.aspx",
+  pathname: "/Secure/NewBooking.aspx"
+};
+assert.equal(parser.inspectBookingForm(bookingFormDocument, bookingLocation, bookingTarget).ready_to_submit, false);
+const configuredBookingForm = parser.configureBookingForm(bookingFormDocument, bookingLocation, bookingTarget);
+assert.equal(configuredBookingForm.ready_to_submit, true);
+assert.equal(configuredBookingForm.policy_notice_found, true);
+assert.equal(configuredBookingForm.session.exact_session_selected, true);
+assert.equal(configuredBookingForm.session.other_selected_session_count, 0);
+assert.equal(bookingCheckboxChanges, 2);
+assert.deepEqual(bookingSelectsForForm.map((select) => select.value), [
+  "Main Library", "4/F", "Single Study Room (3 sessions)", bookingTarget.room, "2026-09-23 (Wed)"
+]);
+assert.deepEqual(parser.submitBookingOnce(bookingFormDocument, bookingLocation, bookingTarget), {
+  submit_click_dispatched: true,
+  submit_button_candidate_count: 1
+});
+assert.equal(bookingSubmitClicks, 1);
+assert.throws(
+  () => parser.submitBookingOnce(bookingFormDocument, bookingLocation, { ...bookingTarget, date: "2026-09-24" }),
+  error => error.code === "LIBRARY_BOOKING_FORM_MISMATCH"
+);
+assert.equal(bookingSubmitClicks, 1);
+
+let bookingRecordLinkClicks = 0;
+const bookingRecordLink = {
+  innerText: "My Booking Record",
+  getAttribute(name) { return name === "href" ? "/Secure/BookingRecord.aspx" : null; },
+  click() { bookingRecordLinkClicks += 1; }
+};
+assert.deepEqual(parser.openBookingRecord({ querySelectorAll: selector => selector === "a" ? [bookingRecordLink] : [] }, bookingLocation), {
+  navigation_started: true
+});
+assert.equal(bookingRecordLinkClicks, 1);
+const exactRecordText = "2026-09-23 4/F Single Study Room (3 sessions) Room 424 13:00 17:00";
+const bookingRecord = parser.verifyBookingRecord({
+  body: { innerText: "My Booking Record" },
+  querySelectorAll(selector) {
+    if (selector !== "table tr") return [];
+    return [
+      { innerText: exactRecordText },
+      { innerText: `${exactRecordText} Cancelled` }
+    ];
+  }
+}, bookingLocation, bookingTarget);
+assert.equal(bookingRecord.record_page_marker_found, true);
+assert.equal(bookingRecord.exact_target_match_count, 1);
+assert.equal(bookingRecord.verified_exactly_once, true);
+const duplicateBookingRecord = parser.verifyBookingRecord({
+  body: { innerText: "My Booking Record" },
+  querySelectorAll(selector) {
+    return selector === "table tr"
+      ? [{ innerText: exactRecordText }, { innerText: exactRecordText }]
+      : [];
+  }
+}, bookingLocation, bookingTarget);
+assert.equal(duplicateBookingRecord.exact_target_match_count, 2);
+assert.equal(duplicateBookingRecord.verified_exactly_once, false);
 
 console.log("HKU Library parser synthetic tests passed.");

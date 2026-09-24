@@ -9,6 +9,9 @@ let openedTabs = 0;
 let currentPage = 1;
 let pageSelections = 0;
 let stalePageReads = 0;
+let activeLocation = "Main Library";
+let activeFacilityType = "Single Study Room (3 sessions)";
+const configuredTargets = [];
 const dateParts = new Intl.DateTimeFormat("en-GB", {
   timeZone: "Asia/Hong_Kong", year: "numeric", month: "2-digit", day: "2-digit"
 }).formatToParts(new Date());
@@ -21,8 +24,8 @@ function snapshot(page) {
     origin: "https://booking.lib.hku.hk",
     logged_in: true,
     page_kind: "space_availability",
-    location: "Main Library",
-    booking_facility_type: "Single Study Room (3 sessions)",
+    location: activeLocation,
+    booking_facility_type: activeFacilityType,
     date: today,
     source_last_updated_at: null,
     page_number: page,
@@ -77,6 +80,14 @@ const context = {
       async create() { openedTabs += 1; return { id: 42 }; },
       async sendMessage(_tabId, message) {
         if (message.command === "library.spaces.configure_availability") {
+          activeLocation = message.payload.location;
+          activeFacilityType = message.payload.booking_facility_type;
+          currentPage = 1;
+          configuredTargets.push({
+            facility_type: activeFacilityType,
+            location: activeLocation,
+            date: message.payload.date
+          });
           return { ok: true, data: { navigation_started: false, availability_search_submitted: true } };
         }
         if (message.command === "library.spaces.select_result_page") {
@@ -108,6 +119,15 @@ vm.runInContext(source, context);
     error => error.code === "LIBRARY_SPACE_DATE_OUT_OF_WINDOW"
   );
   assert.equal(openedTabs, 0);
+  await assert.rejects(
+    vm.runInContext(`bookLibrarySpaceExactlyOnce({operation:"prepare",facility_type:"discussion_room",target:{facility_type:"discussion_room",date:"${today}",floor:"Level 3",room:"Discussion Room 1",start_time:"13:00",end_time:"14:00"}})`, context),
+    error => error.code === "LIBRARY_BOOKING_FACILITY_NOT_ENABLED"
+  );
+  await assert.rejects(
+    vm.runInContext(`submitPreparedLibraryBooking({target:{facility_type:"discussion_room"}})`, context),
+    error => error.code === "LIBRARY_BOOKING_FACILITY_NOT_ENABLED"
+  );
+  assert.equal(openedTabs, 0);
 
   const result = await vm.runInContext(`searchLibrarySpaceAvailability({facility_type:"single_study_room",date:"${today}"})`, context);
   assert.equal(openedTabs, 1);
@@ -121,6 +141,34 @@ vm.runInContext(source, context);
   assert.equal(result.snapshot.diagnostics.neutral_nonselectable_cell_count, 1);
   assert.equal(result.snapshot.diagnostics.unclassified_cell_shapes[0].page_number, 2);
   assert.equal(result.booking_writes_performed, 0);
+
+  const additionalRoutes = [
+    ["av_group_viewing_room", "AV Group Viewing Room"],
+    ["communal_virtual_pc", "Communal Virtual PC"],
+    ["computer", "Computer"],
+    ["computer_in_lic", "Computer in LIC"],
+    ["engraving_cutting_computer", "computer-controlled machines for engraving/cutting"],
+    ["concept_and_creation_room", "Concept and Creation Room"],
+    ["discussion_room", "Discussion Room"],
+    ["microform_scanner", "Special Collections - Microform Scanner"],
+    ["overhead_scanner", "Special Collections - Overhead Scanner"],
+    ["research_desk", "Special Collections - Research Desk"],
+    ["studio_editing_room", "Studio and Editing Room"],
+    ["study_table", "Study Table"],
+    ["study_table_deep_quiet", "Study Table (Deep Quiet)"],
+    ["study_room", "Study Room"]
+  ];
+  for (const [facility_type, booking_facility_type] of additionalRoutes) {
+    const route = await vm.runInContext(
+      `searchLibrarySpaceAvailability({facility_type:${JSON.stringify(facility_type)},date:${JSON.stringify(today)}})`,
+      context
+    );
+    assert.equal(route.booking_facility_type, booking_facility_type);
+    assert.equal(route.location, facility_type === "study_room" ? "Chi Wah Learning Commons" : "Main Library");
+    assert.equal(route.snapshot.result_set_complete, true);
+    assert.equal(route.booking_writes_performed, 0);
+  }
+  assert.equal(configuredTargets.length, additionalRoutes.length + 1);
   console.log("HKUL background date and pagination tests passed.");
 })().catch((error) => {
   console.error(error);

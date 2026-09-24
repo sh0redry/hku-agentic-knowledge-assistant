@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 from datetime import date as date_type, datetime, timedelta
 from typing import Literal
@@ -10,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 import config
 from agents.base import BaseCapability
-from agents.errors import CapabilityError, PolicyDeniedError
+from agents.errors import CapabilityError, ExecutionUnknownError, PolicyDeniedError
 from agents.models import (
     CapabilityManifest,
     CapabilityMode,
@@ -22,6 +23,29 @@ from agents.models import (
 from browser_bridge.service import BrowserBridgeError
 from connectors.sis.browser import BrowserSISConnector
 from services.library_booking import LibraryBookingPreviewRegistry
+
+
+MAIN_LIBRARY_AVAILABILITY_TARGETS = [
+    {"facility_type": "single_study_room", "location": "Main Library", "booking_facility_type": "Single Study Room (3 sessions)"},
+    {"facility_type": "av_group_viewing_room", "location": "Main Library", "booking_facility_type": "AV Group Viewing Room"},
+    {"facility_type": "communal_virtual_pc", "location": "Main Library", "booking_facility_type": "Communal Virtual PC"},
+    {"facility_type": "computer", "location": "Main Library", "booking_facility_type": "Computer"},
+    {"facility_type": "computer_in_lic", "location": "Main Library", "booking_facility_type": "Computer in LIC"},
+    {"facility_type": "engraving_cutting_computer", "location": "Main Library", "booking_facility_type": "computer-controlled machines for engraving/cutting"},
+    {"facility_type": "concept_and_creation_room", "location": "Main Library", "booking_facility_type": "Concept and Creation Room"},
+    {"facility_type": "discussion_room", "location": "Main Library", "booking_facility_type": "Discussion Room"},
+    {"facility_type": "microform_scanner", "location": "Main Library", "booking_facility_type": "Special Collections - Microform Scanner"},
+    {"facility_type": "overhead_scanner", "location": "Main Library", "booking_facility_type": "Special Collections - Overhead Scanner"},
+    {"facility_type": "research_desk", "location": "Main Library", "booking_facility_type": "Special Collections - Research Desk"},
+    {"facility_type": "studio_editing_room", "location": "Main Library", "booking_facility_type": "Studio and Editing Room"},
+    {"facility_type": "study_table", "location": "Main Library", "booking_facility_type": "Study Table"},
+    {"facility_type": "study_table_deep_quiet", "location": "Main Library", "booking_facility_type": "Study Table (Deep Quiet)"},
+    {"facility_type": "study_room", "location": "Chi Wah Learning Commons", "booking_facility_type": "Study Room"},
+]
+BOOKING_PREVIEW_FACILITY_TYPES = frozenset({
+    "single_study_room", "studio_editing_room", "study_table", "study_room",
+    "discussion_room",
+})
 
 
 class LibraryResearchSearchRequest(BaseModel):
@@ -45,7 +69,11 @@ class LibrarySpaceAvailabilityRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     facility_type: Literal[
-        "single_study_room", "studio_editing_room", "study_table", "study_room"
+        "single_study_room", "av_group_viewing_room", "communal_virtual_pc",
+        "computer", "computer_in_lic", "engraving_cutting_computer",
+        "concept_and_creation_room", "discussion_room", "microform_scanner",
+        "overhead_scanner", "research_desk", "studio_editing_room",
+        "study_table", "study_table_deep_quiet", "study_room"
     ]
     date: date_type
 
@@ -54,7 +82,8 @@ class LibrarySpaceBookingPreviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     facility_type: Literal[
-        "single_study_room", "studio_editing_room", "study_table", "study_room"
+        "single_study_room", "studio_editing_room", "study_table", "study_room",
+        "discussion_room",
     ]
     date: date_type
     floor: str | None = Field(default=None, min_length=1, max_length=80)
@@ -90,6 +119,7 @@ class LibrarySpaceBookRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     preview_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
+    policy_acceptance_acknowledged: Literal[True]
 
 
 class LibraryFacilityListRequest(BaseModel):
@@ -110,7 +140,7 @@ def _translate_browser_error(exc: BrowserBridgeError) -> CapabilityError:
     if exc.code in {"COMMAND_NOT_ALLOWED", "PAGE_SCRIPT_UNAVAILABLE"}:
         return CapabilityError(
             "EXTENSION_UPDATE_REQUIRED",
-            "Reload HKU AGENTS Browser Bridge 0.17.5 before using HKUL tools.",
+            "Reload HKU AGENTS Browser Bridge 0.17.7 before using HKUL tools.",
         )
     return CapabilityError(exc.code, str(exc))
 
@@ -129,6 +159,17 @@ def require_supported_booking_date(requested: date_type) -> None:
             f"HKUL availability for the supported facilities can be searched for {today} or {tomorrow} (Hong Kong time); requested {requested}.",
             {"requested_date": requested.isoformat(), "today": today.isoformat(), "tomorrow": tomorrow.isoformat()},
         )
+
+
+def library_booking_host_is_loopback(host: str | None = None) -> bool:
+    """F2 writes are allowed only when the application binds to loopback."""
+    value = (host if host is not None else config.APP_HOST).strip().strip("[]")
+    if value.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(value).is_loopback
+    except ValueError:
+        return False
 
 
 class LibraryResearchSearchCapability(BaseCapability):
@@ -150,7 +191,7 @@ class LibraryResearchSearchCapability(BaseCapability):
         availability="local_browser_public_read_only",
         input_schema="LibraryResearchSearchRequest",
         output_schema="LibraryResearchSearchResult",
-        timeout_seconds=35,
+            timeout_seconds=35,
     )
 
     def __init__(self, connector: BrowserSISConnector):
@@ -182,7 +223,7 @@ class LibraryResearchSearchCapability(BaseCapability):
         snapshot = navigation["snapshot"]
         diagnostics = snapshot["diagnostics"]
         if diagnostics["parser_version"] != "0.2.2":
-            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.17.5.")
+            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.17.7.")
         if diagnostics["incomplete_result_candidate_count"] or diagnostics["unsafe_result_url_candidate_count"]:
             raise CapabilityError(
                 "LIBRARY_RESEARCH_PARSE_INCOMPLETE",
@@ -227,7 +268,7 @@ class LibraryResearchItemCapability(BaseCapability):
         availability="local_browser_public_read_only",
         input_schema="LibraryResearchRecordRequest",
         output_schema="LibraryResearchItemResult",
-        timeout_seconds=35,
+            timeout_seconds=35,
     )
 
     def __init__(self, connector: BrowserSISConnector):
@@ -252,7 +293,7 @@ class LibraryResearchItemCapability(BaseCapability):
         snapshot = navigation["snapshot"]
         diagnostics = snapshot["diagnostics"]
         if diagnostics["parser_version"] != "0.2.2":
-            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.17.5.")
+            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.17.7.")
         if not diagnostics["detail_marker_found"] or not diagnostics["record_id_found"] or not diagnostics["title_found"]:
             raise CapabilityError(
                 "LIBRARY_ITEM_PARSE_INCOMPLETE",
@@ -321,7 +362,7 @@ class LibraryResearchAccessOptionsCapability(BaseCapability):
         snapshot = navigation["snapshot"]
         diagnostics = snapshot["diagnostics"]
         if diagnostics["parser_version"] != "0.2.2":
-            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.17.5.")
+            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.17.7.")
         if not diagnostics["detail_marker_found"] or not diagnostics["record_id_found"] or not diagnostics["title_found"]:
             raise CapabilityError(
                 "LIBRARY_ACCESS_PARSE_INCOMPLETE",
@@ -403,7 +444,7 @@ class LibraryFacilityListCapability(BaseCapability):
             "name": "Editing Rooms & Computers (Library Innovation Centre)",
             "location": "Main Library, Library Innovation Centre, 2/F",
             "booking_location": "Main Library",
-            "booking_facility_type": "Studio and Editing Rooms",
+            "booking_facility_type": "Studio and Editing Room",
             "capacity": None,
             "equipment": ["editing_computer"],
             "eligibility": ["current_hku_students", "current_hku_staff"],
@@ -462,17 +503,62 @@ class LibraryFacilityListCapability(BaseCapability):
                 ],
             },
         },
+        {
+            "facility_type": "discussion_room",
+            "name": "Discussion Rooms",
+            "location": "Tin Ka Ping Education Library, Main Library, Level 3",
+            "booking_location": "Main Library",
+            "booking_facility_type": "Discussion Room",
+            "capacity": None,
+            "equipment": [
+                "commercial_grade_tv_panel",
+                "webcam_with_builtin_microphone",
+                "kvm_switch",
+            ],
+            "eligibility": [
+                "current_hku_students",
+                "current_hku_staff",
+                "current_hku_space_students",
+                "current_hku_space_staff",
+            ],
+            "availability_search_supported": True,
+            "booking_policy": {
+                "session_duration_minutes": 60,
+                "maximum_sessions_per_day": 2,
+                "maximum_minutes_per_day": 120,
+                "minimum_patron_count": 2,
+                "interleaving_rule": (
+                    "Two bookings by the same patron cannot have exactly one unbooked "
+                    "session between them; two or more unbooked sessions are allowed."
+                ),
+                "advance_booking": "one_day_in_advance",
+                "check_in_required": True,
+                "release_after_minutes": 15,
+                "session_windows": [],
+                "seasonal_notes": [],
+            },
+        },
     ]
 
     def persisted_result(self, result: dict) -> dict:
         return {
             "read_only": True,
             "facility_count": result.get("facility_count", 0),
+            "availability_target_count": result.get("availability_target_count", 0),
             "policy_verified_on": result.get("policy_verified_on"),
             "domain_writes_performed": 0,
         }
 
     async def execute(self, validated_input: LibraryFacilityListRequest, context: ExecutionContext) -> dict:
+        availability_targets = [
+            {
+                **target,
+                "availability_search_supported": True,
+                "booking_preview_supported": target["facility_type"] in BOOKING_PREVIEW_FACILITY_TYPES,
+                "supervised_booking_supported": target["facility_type"] == "single_study_room",
+            }
+            for target in MAIN_LIBRARY_AVAILABILITY_TARGETS
+        ]
         return {
             "read_only": True,
             "derived_locally": True,
@@ -485,12 +571,15 @@ class LibraryFacilityListCapability(BaseCapability):
             "slot_selection_performed": False,
             "booking_form_opened": False,
             "facility_count": len(self.FACILITIES),
-            "catalog_scope": "availability_search_supported_facilities",
+            "availability_target_count": len(availability_targets),
+            "availability_targets": availability_targets,
+            "catalog_scope": "allowlisted_availability_targets_and_policy_summaries",
             "facilities": self.FACILITIES,
-            "policy_verified_on": "2026-09-22",
+            "policy_verified_on": "2026-09-24",
             "policy_sources": [
                 {"title": "HKUL Book A Space", "url": "https://lib.hku.hk/general/e-form/book-a-space.html"},
                 {"title": "HKUL Booking Policy", "url": "https://lib.hku.hk/general/e-form/L3_booking_policy.html"},
+                {"title": "HKUL Main Library Level 3", "url": "https://lib.hku.hk/level3/zones.html"},
             ],
             "warnings": [
                 "Facility availability and booking policies can change; re-check the cited official policy before acting.",
@@ -541,7 +630,7 @@ class LibraryHoursAndLocationsCapability(BaseCapability):
         snapshot = navigation["snapshot"]
         diagnostics = snapshot["diagnostics"]
         if diagnostics["parser_version"] != "0.1.1":
-            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.17.5.")
+            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.17.7.")
         if not diagnostics["hours_marker_found"]:
             raise CapabilityError("LIBRARY_HOURS_NOT_READY", "The official HKUL opening-hours view is not ready.")
         if not snapshot["hours_available"] and not diagnostics["empty_state_found"]:
@@ -622,7 +711,7 @@ class LibrarySpaceAvailabilityCapability(BaseCapability):
         snapshot = navigation["snapshot"]
         diagnostics = snapshot["diagnostics"]
         if diagnostics["parser_version"] != "0.3.5":
-            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.17.5.")
+            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.17.7.")
         if not snapshot["result_set_complete"]:
             raise CapabilityError(
                 "LIBRARY_SPACE_RESULTS_PAGINATED",
@@ -704,7 +793,7 @@ class LibrarySpaceBookingPreviewCapability(BaseCapability):
         timeout_seconds=35,
     )
 
-    POLICY_VERIFIED_ON = "2026-09-22"
+    POLICY_VERIFIED_ON = "2026-09-24"
     POLICY_SOURCES = [
         {
             "title": "HKUL Book A Space",
@@ -713,6 +802,10 @@ class LibrarySpaceBookingPreviewCapability(BaseCapability):
         {
             "title": "HKUL Booking Policy",
             "url": "https://lib.hku.hk/general/e-form/L3_booking_policy.html",
+        },
+        {
+            "title": "HKUL Main Library Level 3",
+            "url": "https://lib.hku.hk/level3/zones.html",
         },
     ]
 
@@ -739,6 +832,12 @@ class LibrarySpaceBookingPreviewCapability(BaseCapability):
         if value is None:
             return None
         return " ".join(value.split()).casefold()
+
+    @staticmethod
+    def _slot_duration_minutes(slot: dict) -> int:
+        start = datetime.strptime(slot["start_time"], "%H:%M")
+        end = datetime.strptime(slot["end_time"], "%H:%M")
+        return int((end - start).total_seconds() // 60)
 
     @classmethod
     def _facility(cls, facility_type: str) -> dict:
@@ -848,7 +947,7 @@ class LibrarySpaceBookingPreviewCapability(BaseCapability):
         if diagnostics["parser_version"] != "0.3.5":
             raise CapabilityError(
                 "EXTENSION_UPDATE_REQUIRED",
-                "Reload HKU AGENTS Browser Bridge 0.17.5.",
+                "Reload HKU AGENTS Browser Bridge 0.17.7.",
             )
         if not snapshot["result_set_complete"]:
             raise CapabilityError(
@@ -987,12 +1086,58 @@ class LibrarySpaceBookingPreviewCapability(BaseCapability):
                 "navigation": navigation_summary,
             }
 
+        required_duration = facility["booking_policy"].get("session_duration_minutes")
+        observed_duration = self._slot_duration_minutes(matched[0])
+        if required_duration is not None and observed_duration != required_duration:
+            return {
+                **common,
+                "ready": False,
+                "reason": "published_session_duration_mismatch",
+                "systems_contacted": ["hkul_booking"],
+                "navigation_interactions_performed": navigation[
+                    "navigation_interactions_performed"
+                ],
+                "data_reads_performed": 1,
+                "availability_observed_at": observed_at.isoformat(),
+                "source_last_updated_at": source_last_updated_at,
+                "observed_date": observed_date,
+                "observed_slot_duration_minutes": observed_duration,
+                "published_session_duration_minutes": required_duration,
+                "preview": None,
+                "preview_digest": None,
+                "preview_expires_at": None,
+                "diagnostics": diagnostics,
+                "warnings": [
+                    "The exact live availability interval conflicts with the published session duration; no preview was issued."
+                ],
+                "navigation": navigation_summary,
+            }
+
         exact_target = {
             **target,
             "floor": matched[0].get("floor"),
             "room": matched[0].get("room"),
+            "result_page_number": matched[0].get("page_number", 1),
             "status": "available",
         }
+        if not exact_target["floor"]:
+            return {
+                **common,
+                "ready": False,
+                "reason": "floor_unverifiable",
+                "systems_contacted": ["hkul_booking"],
+                "navigation_interactions_performed": navigation["navigation_interactions_performed"],
+                "data_reads_performed": 1,
+                "availability_observed_at": observed_at.isoformat(),
+                "source_last_updated_at": source_last_updated_at,
+                "observed_date": observed_date,
+                "preview": None,
+                "preview_digest": None,
+                "preview_expires_at": None,
+                "diagnostics": diagnostics,
+                "warnings": ["The live availability row did not expose a verifiable floor; no booking preview was issued."],
+                "navigation": navigation_summary,
+            }
         ttl_seconds = max(
             30,
             min(config.LIBRARY_BOOKING_PREVIEW_TTL_SECONDS, 300),
@@ -1033,13 +1178,15 @@ class LibrarySpaceBookingPreviewCapability(BaseCapability):
             "warnings": [
                 "Eligibility is checked only against the published category list and is not verified from Library account data.",
                 "This preview is read-only, expires quickly, and does not authorize or perform a booking.",
-            ],
+            ] + ([
+                "Discussion-room daily limits, the interleaving rule, and the minimum group size cannot be verified from the availability matrix or this preview; check them before booking."
+            ] if validated_input.facility_type == "discussion_room" else []),
             "navigation": navigation_summary,
         }
 
 
 class LibrarySpaceBookCapability(BaseCapability):
-    """F2 safety envelope. External submission intentionally remains gated."""
+    """Supervised one-shot reservation behind two-phase user confirmation."""
 
     input_model = LibrarySpaceBookRequest
     manifest = CapabilityManifest(
@@ -1048,18 +1195,22 @@ class LibrarySpaceBookCapability(BaseCapability):
         agent="library",
         title="Book one exact HKUL space",
         description=(
-            "Consume one fresh process-issued booking preview under a separate, "
-            "one-time two-phase confirmation. The external Submit path remains "
-            "disabled until supervised live-write acceptance is complete."
+            "Re-read one exact slot, open and verify its HKUL booking form, then "
+            "dispatch exactly one Submit after explicit policy acknowledgment and "
+            "one-time two-phase confirmation. Verify the exact reservation in My Booking Record."
         ),
         mode=CapabilityMode.WRITE,
         risk=RiskLevel.HIGH,
         confirmation=ConfirmationMode.EXPLICIT_TWO_PHASE,
         required_connections=["sis_browser"],
-        availability="disabled_pending_f2_live_write_acceptance",
+        availability=(
+            "supervised_one_shot_confirmation"
+            if config.LIBRARY_BOOKING_WRITES_ENABLED and library_booking_host_is_loopback()
+            else "disabled_pending_operator_enablement"
+        ),
         input_schema="LibrarySpaceBookRequest",
         output_schema="LibrarySpaceBookResult",
-        timeout_seconds=35,
+        timeout_seconds=180,
     )
 
     def __init__(
@@ -1071,7 +1222,17 @@ class LibrarySpaceBookCapability(BaseCapability):
         self.preview_registry = preview_registry
 
     def preview(self, validated_input: LibrarySpaceBookRequest) -> dict:
+        if not library_booking_host_is_loopback():
+            raise PolicyDeniedError(
+                "LIBRARY_BOOKING_LOCAL_ONLY",
+                "HKUL booking is available only when HKU AGENTS is bound to a loopback host and used through the local GUI.",
+            )
         issued = self.preview_registry.require(validated_input.preview_digest)
+        if issued.get("target", {}).get("facility_type") != "single_study_room":
+            raise CapabilityError(
+                "LIBRARY_BOOKING_FACILITY_NOT_ENABLED",
+                "F2 live submission is currently limited to policy-verified Main Library single study rooms.",
+            )
         return {
             "capability": self.manifest.id,
             "capability_version": self.manifest.version,
@@ -1087,18 +1248,41 @@ class LibrarySpaceBookCapability(BaseCapability):
             "preview_expires_at": issued["expires_at"],
             "effect": "Submit exactly one HKUL facility booking and accept the displayed HKUL policy.",
             "external_submission_enabled": config.LIBRARY_BOOKING_WRITES_ENABLED,
+            "policy_acceptance_acknowledged": validated_input.policy_acceptance_acknowledged,
         }
 
     def persisted_input(self, validated_input: LibrarySpaceBookRequest) -> dict:
         return {
             "preview_digest": validated_input.preview_digest,
+            "policy_acceptance_acknowledged": True,
             "exact_target_bound": True,
+        }
+
+    def persisted_preview(self, preview: dict) -> dict:
+        """Keep exact room/date/time targets out of persistent action-draft storage."""
+        return {
+            "capability": preview.get("capability"),
+            "capability_version": preview.get("capability_version"),
+            "mode": preview.get("mode"),
+            "risk": preview.get("risk"),
+            "preview_digest": preview.get("preview_digest"),
+            "eligibility_basis": preview.get("eligibility_basis"),
+            "policy_digest": preview.get("policy_digest"),
+            "policy_verified_on": preview.get("policy_verified_on"),
+            "preview_expires_at": preview.get("preview_expires_at"),
+            "external_submission_enabled": preview.get("external_submission_enabled"),
+            "policy_acceptance_acknowledged": preview.get("policy_acceptance_acknowledged"),
+            "exact_target_persisted": False,
         }
 
     def persisted_result(self, result: dict) -> dict:
         return {
             "booking_writes_performed": result.get("booking_writes_performed", 0),
+            "submit_clicks_dispatched": result.get("submit_clicks_dispatched", 0),
             "outcome": result.get("outcome"),
+            "exact_target_verified_in_booking_record": result.get("exact_target_verified_in_booking_record", False),
+            "record_match_count": result.get("record_match_count", 0),
+            "private_target_persisted": False,
         }
 
     async def execute(
@@ -1106,9 +1290,15 @@ class LibrarySpaceBookCapability(BaseCapability):
         validated_input: LibrarySpaceBookRequest,
         context: ExecutionContext,
     ) -> dict:
-        # Re-check freshness/one-time status after confirmation. Do not consume
-        # the preview until immediately before a verified external submission.
-        self.preview_registry.require(validated_input.preview_digest)
+        # Re-check preview/process provenance after confirmation. Preparation
+        # performs the last read-only availability check and form comparison.
+        issued = self.preview_registry.require(validated_input.preview_digest)
+        if not library_booking_host_is_loopback():
+            raise PolicyDeniedError(
+                "LIBRARY_BOOKING_LOCAL_ONLY",
+                "HKUL booking is available only when HKU AGENTS is bound to a loopback host and used through the local GUI.",
+                {"booking_writes_performed": 0, "preview_consumed": False},
+            )
         if not config.LIBRARY_BOOKING_WRITES_ENABLED:
             raise PolicyDeniedError(
                 "LIBRARY_BOOKING_WRITE_DISABLED",
@@ -1116,14 +1306,70 @@ class LibrarySpaceBookCapability(BaseCapability):
                 {
                     "booking_writes_performed": 0,
                     "preview_consumed": False,
-                    "recovery": "Keep LIBRARY_BOOKING_WRITES_ENABLED=false until the exact submit and post-condition contracts are verified.",
+                    "recovery": "Set LIBRARY_BOOKING_WRITES_ENABLED=true only for a supervised low-impact test after reviewing the exact action preview.",
                 },
             )
-        raise PolicyDeniedError(
-            "LIBRARY_BOOKING_SUBMIT_NOT_IMPLEMENTED",
-            "The external HKUL Submit command and authoritative booking-record verification are not implemented yet.",
-            {
-                "booking_writes_performed": 0,
-                "preview_consumed": False,
-            },
-        )
+        target = issued.get("target") or {}
+        if target.get("result_page_number") is None:
+            raise CapabilityError("LIBRARY_BOOKING_PAGE_UNVERIFIABLE", "The exact availability result page is not verifiable.")
+        try:
+            prepared = await self.connector.prepare_library_space_booking(
+                {"facility_type": target["facility_type"], "target": target}
+            )
+        except BrowserBridgeError as exc:
+            raise _translate_browser_error(exc) from exc
+        if (prepared.get("ready_to_submit") is not True
+                or prepared.get("exact_target_verified") is not True
+                or prepared.get("policy_notice_found") is not True
+                or prepared.get("booking_writes_performed") != 0):
+            raise CapabilityError(
+                "LIBRARY_BOOKING_FORM_MISMATCH",
+                "The refreshed slot or live booking form did not match the confirmed preview; no Submit was issued.",
+                {"booking_writes_performed": 0, "slot_selection_performed": prepared.get("slot_selection_performed", False)},
+            )
+
+        # Consume the process-issued preview immediately before the one-shot
+        # Submit command. Any uncertain response is terminal and never retried.
+        self.preview_registry.consume(validated_input.preview_digest, context.task_id)
+        try:
+            result = await self.connector.submit_library_space_booking(
+                {
+                    "target": target,
+                    "execution_id": context.task_id,
+                    "prepared_tab_id": prepared.get("prepared_tab_id"),
+                    "policy_acceptance_acknowledged": True,
+                }
+            )
+        except BrowserBridgeError as exc:
+            # A disconnect can happen after the extension received the
+            # one-shot command; treat transport loss as ambiguous, not zero writes.
+            if exc.code in {"PAIRING_TOKEN_REJECTED", "COMMAND_NOT_ALLOWED", "LIBRARY_BOOKING_FORM_MISMATCH", "LIBRARY_BOOKING_SUBMIT_AMBIGUOUS", "LIBRARY_BOOKING_FORM_NOT_READY"}:
+                raise CapabilityError(
+                    exc.code,
+                    str(exc),
+                    {"booking_writes_performed": 0, "submit_clicks_dispatched": 0, "preview_consumed": True},
+                ) from exc
+            raise ExecutionUnknownError(
+                "LIBRARY_BOOKING_OUTCOME_UNKNOWN",
+                "The one-shot Submit may have reached HKUL, but no authoritative result was received. Inspect My Booking Record manually; do not retry.",
+                {"booking_writes_performed": "unknown", "submit_clicks_dispatched": "unknown", "preview_consumed": True},
+            ) from exc
+        except Exception as exc:
+            # The browser may already have dispatched Submit before a schema,
+            # transport, or response-processing error surfaced. Never retry.
+            raise ExecutionUnknownError(
+                "LIBRARY_BOOKING_OUTCOME_UNKNOWN",
+                "The one-shot Submit may have reached HKUL, but its response could not be verified. Inspect My Booking Record manually; do not retry.",
+                {"booking_writes_performed": "unknown", "submit_clicks_dispatched": "unknown", "preview_consumed": True},
+            ) from exc
+        if (result.get("outcome") != "confirmed"
+                or result.get("booking_writes_performed") != 1
+                or result.get("submit_clicks_dispatched") != 1
+                or result.get("exact_target_verified_in_booking_record") is not True
+                or result.get("record_match_count") != 1):
+            raise ExecutionUnknownError(
+                "LIBRARY_BOOKING_OUTCOME_UNKNOWN",
+                "Submit was dispatched, but the exact booking was not verified exactly once. Inspect My Booking Record manually; do not retry.",
+                {"booking_writes_performed": result.get("booking_writes_performed", "unknown"), "submit_clicks_dispatched": result.get("submit_clicks_dispatched", "unknown"), "record_match_count": result.get("record_match_count", 0)},
+            )
+        return result

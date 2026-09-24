@@ -1,6 +1,7 @@
 export type JsonValue = null | boolean | number | string | JsonValue[] | {
     [key: string]: JsonValue;
 };
+export type LibraryAvailabilityFacilityType = 'single_study_room' | 'av_group_viewing_room' | 'communal_virtual_pc' | 'computer' | 'computer_in_lic' | 'engraving_cutting_computer' | 'concept_and_creation_room' | 'discussion_room' | 'microform_scanner' | 'overhead_scanner' | 'research_desk' | 'studio_editing_room' | 'study_table' | 'study_table_deep_quiet' | 'study_room';
 export interface IntegrationError {
     [key: string]: JsonValue;
     code: string;
@@ -114,11 +115,11 @@ export declare class HKUAgentsClient {
         record_id: string;
     }, signal?: AbortSignal): Promise<IntegrationEnvelope>;
     searchLibrarySpaceAvailability(input: {
-        facility_type: 'single_study_room' | 'studio_editing_room' | 'study_table' | 'study_room';
+        facility_type: LibraryAvailabilityFacilityType;
         date: string;
     }, signal?: AbortSignal): Promise<IntegrationEnvelope>;
     previewLibrarySpaceBooking(input: {
-        facility_type: 'single_study_room' | 'studio_editing_room' | 'study_table' | 'study_room';
+        facility_type: 'single_study_room' | 'studio_editing_room' | 'study_table' | 'study_room' | 'discussion_room';
         date: string;
         floor?: string;
         room: string;

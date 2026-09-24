@@ -21,7 +21,7 @@ This package contributes twenty-two restricted HKU tools to DeepSeek Harness:
 - `hku_library_list_facilities` (local verified facility and booking-policy catalog; no browser interaction)
 - `hku_library_hours_and_locations` (official public visible hours; unpublished dates remain unknown)
 - `hku_library_space_availability` (authenticated visible slots; no booking)
-- `hku_library_space_booking_preview` (fresh exact-slot and policy preview; no selection or booking)
+- `hku_library_space_booking_preview` (fresh exact-slot and policy preview for five verified categories, including Main Library discussion rooms; no selection or booking)
 - `hku_library_research_item` (one fixed record; no full-text navigation)
 - `hku_library_research_access_options` (visible access labels; external links suppressed)
 
