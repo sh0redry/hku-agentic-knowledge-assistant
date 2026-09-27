@@ -63,6 +63,14 @@ Browser course-list synchronization and live preflight use the same authenticate
 Integration API contract used by the DeepSeek Harness adapter and intended for a
 future Hermes adapter. See `integrations/deepseek_harness/README.md` for setup.
 
+The Library tab includes F3's opt-in recurring shadow scheduler. It is local
+GUI-only, runs only when the service binds to loopback, and requires Windows
+current-user DPAPI so rule/slot details are encrypted in SQLite. F3 makes
+scheduled read-only availability checks and records suggestions plus optional
+one-time human comparison feedback. It cannot select slots, open booking forms,
+call the F2 action, or create/cancel an HKUL booking. See
+`docs/F3_SHADOW_SCHEDULER.md` for setup, operation, and live-acceptance status.
+
 Core endpoints:
 
 | Endpoint | Purpose |

@@ -28,11 +28,11 @@ not free-form browser automation.
 
 | Component | Version |
 |---|---:|
-| Browser Bridge extension | `0.17.13` |
+| Browser Bridge extension | `0.17.14` |
 | DeepSeek Harness plugin | `0.18.0` |
 | Integration API | `v1` |
 | Library research parser | `0.2.2` |
-| Library space parser | `0.3.5` |
+| Library space parser | `0.3.6` |
 | Library hours parser | `0.1.1` |
 
 Implementation and synthetic testing are complete for the capabilities below.
@@ -127,8 +127,9 @@ opens or submits an activity.
 
 Availability and preview tools never select a slot or open a booking form.
 The optional F2 booking tool is a separate high-risk exception: disabled by
-default, local-GUI-only, and limited to one explicitly confirmed Main Library
-single-study-room or discussion-room booking. Discussion-room F2 requires a
+default, local-GUI-only, and limited to one explicitly confirmed booking for
+an allowlisted facility type. Fifteen existing availability types are exposed;
+only Discussion Room has passed a reported live-write acceptance. Discussion-room F2 requires a
 separate user attestation for at least two patrons and the account holder's
 per-day/interleaving limits; those account-dependent facts are not verified by
 the tool. No
@@ -206,8 +207,8 @@ account.
 2. `library.spaces.search_availability` opens the fixed booking availability
    page, selects the exact allow-listed Location and Facility Type plus the
    required date, submits Search, and parses visible available slots.
-   For all allowlisted availability targets, the requested date must be
-   today or tomorrow in Hong Kong time; the check runs before opening a tab.
+   Read that facility's live Date options first. A broad 14-day Hong Kong-time
+   guard rejects distant dates locally; the exact live dropdown remains authoritative.
 3. The result must keep `slot_selection_performed: false`,
    `booking_form_opened: false`, and `booking_writes_performed: 0`.
 
@@ -224,10 +225,9 @@ as “fully booked.”
 
 The current allowlist covers the Main Library categories visible in the
 facility selector and the verified Chi Wah Study Room route. Availability-only
-support is broader than booking support: exact preview currently covers five
-facility categories, while supervised F2 submission supports policy-verified
-Main Library single study rooms and discussion rooms. Other facility-specific
-eligibility, policy, session, and form contracts still require verification.
+preview and supervised F2 now expose all 15 allowlisted types. This is not a
+claim that every facility has passed a live booking test: the exact live date,
+slot, form fields and required acknowledgments must pass before a write.
 
 An exact read-only booking preview is available after the availability read.
 F2 is a separate, high-risk action: the operator must enable
@@ -238,9 +238,30 @@ checks the exact booking form, sends one Submit, and verifies exactly one
 matching My Booking Record row. If the outcome is ambiguous, inspect the record
 manually and never retry. Discussion-room actions additionally bind a required
 attestation for the minimum group size and daily/interleaving limits. The
-extension has no automated cancellation; live acceptance is pending a
-user-performed booking and safe manual cancellation.
+extension has no automated cancellation. A Discussion Room booking was
+user-verified and manually cancelled; every newly exposed type still needs
+its own supervised live acceptance.
 See the F2 procedure in [the live acceptance runbook](docs/LIVE_ACCEPTANCE.md).
+
+### F3 shadow scheduler
+
+The Library GUI also provides an opt-in F3 shadow scheduler. A user previews and
+confirms a narrowly scoped recurring rule (facility type, target weekdays,
+observation time, ordered exact rooms/times, eligibility category, and a run
+limit). Each daily occurrence reads the selected facility's live Date options,
+then makes at most one F1 availability Search for an offered matching weekday,
+stores an encrypted suggestion, and waits for the user to record what they
+would actually choose. Rules can be paused or permanently revoked in the GUI.
+F3 cannot select a slot, open the booking form, invoke F2, or submit/cancel a
+booking. It is not a production unattended-booking feature or an F4 pilot.
+
+F3 runs only on Windows with current-user DPAPI available and a loopback-bound
+application. Rule and candidate details are encrypted at rest. The scheduler
+does not infer HKUL's release time, does not poll for newly released slots, and
+does not retry a failed/stale-session read. See the [F3 shadow scheduler
+guide](docs/F3_SHADOW_SCHEDULER.md). Live acceptance—including at least 20
+scheduled runs across the supported types and the required restart, revocation,
+authentication, no-slot, and policy-change cases—remains pending.
 
 ## Safety model
 
@@ -349,7 +370,7 @@ Open:
 1. Open `chrome://extensions`.
 2. Enable **Developer mode**.
 3. Choose **Load unpacked** and select `browser_runtime/extension`.
-4. Confirm extension version `0.17.13`.
+4. Confirm extension version `0.17.14`.
 5. Log into HKU Portal manually and complete password/MFA prompts yourself.
 6. Copy the browser pairing token from the GUI **Connections** tab into the
    extension popup.
@@ -507,7 +528,7 @@ roadmap and completed live-acceptance checkpoints.
 | `PAGE_SCRIPT_UNAVAILABLE` | Reload the unpacked extension and refresh the relevant HKU page. |
 | `PORTAL_LOGIN_REQUIRED` / `SIS_LOGIN_REQUIRED` | Complete the visible HKU authentication flow manually, then retry. |
 | `SSO_MANUAL_ACTION_REQUIRED` | Complete the visible password, MFA, CAPTCHA, consent, or recovery step. |
-| Parser version mismatch | Reload the extension, refresh the page, and confirm version `0.17.13`. |
+| Parser version mismatch | Reload the extension, refresh the page, and confirm version `0.17.14`. |
 | Harness plugin install fails | Install `pnpm`; on Windows, enable Developer Mode or use an elevated shell if profile symlink creation fails. |
 | Harness receives `401` | Export the Integration API token, not the browser pairing token. |
 

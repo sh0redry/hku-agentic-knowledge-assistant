@@ -107,7 +107,9 @@ limited to approved HKU origins and loopback communication.
 
 ## Write governance
 
-All integrations other than the optional F2 reservation remain read-only. The
+All integrations other than the optional F2 reservation remain read-only with
+respect to HKU domain state. F3 writes only encrypted local shadow-rule and
+comparison records; those local records do not grant booking authority. The
 `library.spaces.book` F2 capability is high-risk, local-GUI-only, and disabled
 by default; it is additionally unavailable unless `APP_HOST` is loopback
 (`localhost`, `127.0.0.0/8`, or `::1`). It accepts only a fresh process-issued preview digest and requires
@@ -127,6 +129,17 @@ My Booking Record. This bounded path satisfies:
 8. sanitized audit event;
 9. no generic click/script/URL escape hatch;
 10. fail-closed handling of uncertain outcomes, with no automatic retry.
+
+F3 is a separate local-only scheduler. Its endpoints reject non-loopback clients,
+and its worker starts only when `APP_HOST` is loopback-bound. Rule and run
+payloads are protected with Windows current-user DPAPI; if protection is
+unavailable, F3 is disabled. Each scheduled occurrence can invoke only the
+read-only `library.spaces.search_availability` capability once. It has no
+reference to or call path into `library.spaces.book` or the action executor.
+Pause/revoke applies to future runs, while any in-flight read is discarded if
+the rule is no longer active when it returns. F3's local encrypted records are
+not exposed through the LLM Integration API, and feedback is accepted once per
+completed comparable run.
 
 Enrollment, payment, application submission, identity or bank-account changes,
 password/PIN handling, CAPTCHA, and MFA remain separately restricted even if

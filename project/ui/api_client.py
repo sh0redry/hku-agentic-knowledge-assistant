@@ -202,6 +202,11 @@ class HKUAgentsAPIClient:
             json={"facility_type": facility_type, "date": normalized_date},
         )
 
+    def library_space_dates(self, facility_type: str) -> dict:
+        return self._integration_request(
+            "POST", "/library/spaces/list-dates", json={"facility_type": facility_type}
+        )
+
     def library_space_booking_preview(
         self,
         facility_type: str,
@@ -242,6 +247,55 @@ class HKUAgentsAPIClient:
             "POST",
             "/library/spaces/booking-preview",
             json=payload,
+        )
+
+    def library_shadow_status(self) -> dict:
+        return self._request("GET", "/api/v1/library/shadow/status")
+
+    def library_shadow_rule_preview(self, rule: dict) -> dict:
+        return self._request(
+            "POST", "/api/v1/library/shadow/rules/preview", json={"rule": rule}
+        )
+
+    def library_shadow_rule_create(
+        self, preview_digest: str, shadow_only_acknowledged: bool
+    ) -> dict:
+        return self._request(
+            "POST", "/api/v1/library/shadow/rules",
+            json={
+                "preview_digest": preview_digest,
+                "shadow_only_acknowledged": shadow_only_acknowledged,
+            },
+        )
+
+    def library_shadow_rules(self) -> dict:
+        return self._request("GET", "/api/v1/library/shadow/rules")
+
+    def library_shadow_rule_action(
+        self, rule_id: str, action: str, revoke_acknowledged: bool = False
+    ) -> dict:
+        if action not in {"pause", "resume", "revoke"}:
+            raise APIClientError("Unknown F3 shadow-rule action.")
+        return self._request(
+            "POST", f"/api/v1/library/shadow/rules/{rule_id}/{action}",
+            json={"revoke_acknowledged": revoke_acknowledged},
+        )
+
+    def library_shadow_runs(self, rule_id: str | None = None, limit: int = 100) -> dict:
+        params = {"limit": int(limit)}
+        if rule_id:
+            params["rule_id"] = rule_id
+        return self._request("GET", "/api/v1/library/shadow/runs", params=params)
+
+    def library_shadow_run_feedback(
+        self, run_id: str, candidate_id: str | None, no_slot_would_be_booked: bool
+    ) -> dict:
+        return self._request(
+            "POST", f"/api/v1/library/shadow/runs/{run_id}/feedback",
+            json={
+                "candidate_id": candidate_id,
+                "no_slot_would_be_booked": no_slot_would_be_booked,
+            },
         )
 
     def library_list_facilities(self) -> dict:

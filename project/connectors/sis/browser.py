@@ -11,6 +11,7 @@ from browser_bridge.models import (
     LibraryBookingPreparationResult,
     LibraryBookingExecutionResult,
     LibrarySpaceNavigationResult,
+    LibrarySpaceDateOptionsNavigationResult,
     PortalPageSnapshot,
     PortalNoticeListSnapshot,
     SISNavigationResult,
@@ -106,6 +107,10 @@ class BrowserSISConnector(BaseConnector):
             BrowserCommandName.SEARCH_LIBRARY_SPACE_AVAILABILITY, payload
         )
         return LibrarySpaceNavigationResult.model_validate(data).model_dump(mode="json")
+
+    async def list_library_space_dates(self, payload: dict) -> dict:
+        data = await self._command(BrowserCommandName.LIST_LIBRARY_SPACE_DATES, payload)
+        return LibrarySpaceDateOptionsNavigationResult.model_validate(data).model_dump(mode="json")
 
     async def prepare_library_space_booking(self, payload: dict) -> dict:
         data = await self._command(

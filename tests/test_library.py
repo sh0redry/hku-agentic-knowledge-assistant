@@ -202,7 +202,7 @@ class LibraryIntegrationTests(unittest.TestCase):
                 "available_slot_count": len(available_slots),
                 "available_slots": available_slots,
                 "diagnostics": {
-                    "parser_version": "0.3.5",
+                    "parser_version": "0.3.6",
                     "availability_marker_found": True,
                     "availability_legend_found": True,
                     "booked_legend_found": True,
@@ -275,11 +275,11 @@ class LibraryIntegrationTests(unittest.TestCase):
         self.assertTrue(result["derived_locally"])
         self.assertFalse(result["browser_interactions_performed"])
         self.assertEqual(result["booking_writes_performed"], 0)
-        self.assertEqual(result["facility_count"], 5)
+        self.assertEqual(result["facility_count"], 15)
         self.assertEqual(result["availability_target_count"], 15)
         self.assertEqual(
             {item["facility_type"] for item in result["facilities"]},
-            {"single_study_room", "studio_editing_room", "study_table", "study_room", "discussion_room"},
+            {item["facility_type"] for item in result["availability_targets"]},
         )
         self.assertTrue(all(item["availability_search_supported"] for item in result["facilities"]))
         discussion_room = next(
@@ -294,15 +294,65 @@ class LibraryIntegrationTests(unittest.TestCase):
             if item["facility_type"] == "single_study_room"
         )
         self.assertNotIn("sessions_per_day", single_room["booking_policy"])
-        self.assertEqual(
-            single_room["booking_policy"]["available_session_windows_per_weekday"], 3
-        )
+        self.assertEqual(single_room["booking_policy"]["available_session_windows_per_weekday"], 3)
         self.assertEqual(len(result["policy_sources"]), 3)
         stored = self.container.store.get_task(response["task"]["id"])
-        self.assertEqual(stored.result["facility_count"], 5)
+        self.assertEqual(stored.result["facility_count"], 15)
         self.assertEqual(stored.result["availability_target_count"], 15)
         self.assertNotIn("facilities", stored.result)
         self.assertNotIn("availability_targets", stored.result)
+
+    def test_live_date_options_are_facility_scoped_and_do_not_search(self):
+        connector = self.container.connectors["sis_browser"]
+        connector.list_library_space_dates = AsyncMock(return_value={
+            "read_only": True, "navigation_only": True,
+            "library_write_requests_sent": 0, "booking_writes_performed": 0,
+            "navigation_interactions_performed": True,
+            "target_origin": "https://booking.lib.hku.hk",
+            "target_page_kind": "space_date_options",
+            "facility_type": "discussion_room", "location": "Main Library",
+            "booking_facility_type": "Discussion Room",
+            "offered_dates": ["2026-09-25", "2026-09-27"],
+            "availability_search_submitted": False,
+            "steps": ["library_fixed_route_to_space_availability", "library_set_exact_availability_filters"],
+        })
+        response = self.client.post(
+            "/api/v1/integration/library/spaces/list-dates", headers=self.headers,
+            json={"facility_type": "discussion_room"},
+        ).json()
+        self.assertTrue(response["ok"])
+        self.assertEqual(response["result"]["offered_dates"], ["2026-09-25", "2026-09-27"])
+        self.assertFalse(response["result"]["availability_search_submitted"])
+        self.assertEqual(response["result"]["booking_writes_performed"], 0)
+        connector.list_library_space_dates.assert_awaited_once_with({"facility_type": "discussion_room"})
+
+    def test_additional_f2_facility_requires_rules_acknowledgment(self):
+        connector = self.container.connectors["sis_browser"]
+        connector.search_library_space_availability = AsyncMock(return_value=self.space_navigation(
+            facility_type="av_group_viewing_room", booking_facility_type="AV Group Viewing Room",
+            slots=[{"floor": "1/F", "room": "AV Group Viewing Room 1",
+                    "start_time": "10:00", "end_time": "11:00", "status": "available"}],
+        ))
+        response = self.client.post(
+            "/api/v1/integration/library/spaces/booking-preview", headers=self.headers,
+            json={"facility_type": "av_group_viewing_room", "date": "2026-09-20",
+                  "floor": "1/F", "room": "AV Group Viewing Room 1",
+                  "start_time": "10:00", "end_time": "11:00",
+                  "eligibility_category": "current_hku_students"},
+        ).json()
+        self.assertTrue(response["ok"])
+        self.assertTrue(response["result"]["ready"])
+        digest = response["result"]["preview_digest"]
+        with self.assertRaises(Exception):
+            self.container.actions.create_draft("library.spaces.book", {
+                "preview_digest": digest, "policy_acceptance_acknowledged": True,
+            })
+        draft = self.container.actions.create_draft("library.spaces.book", {
+            "preview_digest": digest, "policy_acceptance_acknowledged": True,
+            "facility_rules_acknowledged": True,
+        })
+        self.assertEqual(draft.preview["exact_target"]["facility_type"], "av_group_viewing_room")
+        self.assertFalse(draft.preview["external_submission_enabled"])
 
     def test_hours_and_locations_reads_public_page_without_persisting_rows(self):
         connector = self.container.connectors["sis_browser"]
@@ -418,11 +468,11 @@ class LibraryIntegrationTests(unittest.TestCase):
         response = self.client.post(
             "/api/v1/integration/library/spaces/search-availability",
             headers=self.headers,
-            json={"facility_type": "single_study_room", "date": "2026-09-22"},
+            json={"facility_type": "single_study_room", "date": "2026-10-06"},
         ).json()
         self.assertFalse(response["ok"])
         self.assertEqual(response["error"]["code"], "LIBRARY_SPACE_DATE_OUT_OF_WINDOW")
-        self.assertIn("2026-09-21", response["error"]["message"])
+        self.assertIn("2026-10-04", response["error"]["message"])
         connector.search_library_space_availability.assert_not_awaited()
 
     def test_space_availability_accepts_tomorrow_in_hong_kong(self):
@@ -678,7 +728,7 @@ class LibraryIntegrationTests(unittest.TestCase):
             headers=self.headers,
             json={
                 "facility_type": "single_study_room",
-                "date": "2026-09-22",
+                "date": "2026-10-06",
                 "room": "Study Room A",
                 "start_time": "09:00",
                 "end_time": "10:30",
@@ -818,6 +868,7 @@ class LibraryIntegrationTests(unittest.TestCase):
                 "booking_form_opened": True,
                 "submit_clicks_dispatched": 1,
                 "outcome": "confirmed",
+                "confirmation_source": "booking_record",
                 "exact_target_verified_in_booking_record": True,
                 "record_match_count": 1,
                 "policy_acceptance_acknowledged": True,
@@ -966,6 +1017,7 @@ class LibraryIntegrationTests(unittest.TestCase):
                 "booking_form_opened": True,
                 "submit_clicks_dispatched": 1,
                 "outcome": "confirmed",
+                "confirmation_source": "booking_record",
                 "exact_target_verified_in_booking_record": True,
                 "record_match_count": 1,
                 "policy_acceptance_acknowledged": True,

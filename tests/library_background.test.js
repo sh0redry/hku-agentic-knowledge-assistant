@@ -48,7 +48,7 @@ function snapshot(page) {
       status: "available"
     }],
     diagnostics: {
-      parser_version: "0.3.5",
+      parser_version: "0.3.6",
       availability_marker_found: true,
       availability_legend_found: true,
       booked_legend_found: true,
@@ -119,6 +119,14 @@ const context = {
             verified_exactly_once: bookingPhase === "record", diagnostics: {} } };
         }
         if (message.command === "library.spaces.configure_availability") {
+          if (message.payload.inspect_dates_only) {
+            return { ok: true, data: {
+              navigation_started: false, stage: "date_options_ready",
+              location: message.payload.location,
+              booking_facility_type: message.payload.booking_facility_type,
+              offered_dates: [today], availability_search_submitted: false
+            } };
+          }
           activeLocation = message.payload.location;
           activeFacilityType = message.payload.booking_facility_type;
           currentPage = 1;
@@ -164,12 +172,17 @@ vm.runInContext(source, context);
 
 (async () => {
   const invalid = new Date(`${today}T00:00:00Z`);
-  invalid.setUTCDate(invalid.getUTCDate() + 2);
+  invalid.setUTCDate(invalid.getUTCDate() + 15);
   await assert.rejects(
     vm.runInContext(`searchLibrarySpaceAvailability({facility_type:"single_study_room",date:"${invalid.toISOString().slice(0, 10)}"})`, context),
     error => error.code === "LIBRARY_SPACE_DATE_OUT_OF_WINDOW"
   );
   assert.equal(openedTabs, 0);
+  const dateOptions = await vm.runInContext('listLibrarySpaceDates({facility_type:"study_room"})', context);
+  assert.equal(dateOptions.location, "Chi Wah Learning Commons");
+  assert.deepEqual([...dateOptions.offered_dates], [today]);
+  assert.equal(dateOptions.availability_search_submitted, false);
+  assert.equal(openedTabs, 1);
   await assert.rejects(
     vm.runInContext(`bookLibrarySpaceExactlyOnce({operation:"prepare",facility_type:"discussion_room",target:{facility_type:"discussion_room",date:"${today}",floor:"Level 3",room:"Discussion Room 1",start_time:"13:00",end_time:"14:00"}})`, context),
     error => error.code === "LIBRARY_DISCUSSION_ROOM_RULES_ACK_REQUIRED"
@@ -178,7 +191,7 @@ vm.runInContext(source, context);
     vm.runInContext(`submitPreparedLibraryBooking({target:{facility_type:"discussion_room"}})`, context),
     error => error.code === "LIBRARY_DISCUSSION_ROOM_RULES_ACK_REQUIRED"
   );
-  assert.equal(openedTabs, 0);
+  assert.equal(openedTabs, 1);
 
   const discussionPreparation = await vm.runInContext(`bookLibrarySpaceExactlyOnce({
     operation:"prepare",
@@ -189,10 +202,10 @@ vm.runInContext(source, context);
   assert.equal(discussionPreparation.ready_to_submit, true);
   assert.equal(discussionPreparation.slot_selection_performed, true);
   assert.equal(discussionPreparation.booking_writes_performed, 0);
-  assert.equal(openedTabs, 1);
+  assert.equal(openedTabs, 2);
 
   const result = await vm.runInContext(`searchLibrarySpaceAvailability({facility_type:"single_study_room",date:"${today}"})`, context);
-  assert.equal(openedTabs, 2);
+  assert.equal(openedTabs, 3);
   assert.equal(pageSelections, 1);
   assert.equal(stalePageReads, 1);
   assert.equal(result.page_navigation_interactions_performed, true);

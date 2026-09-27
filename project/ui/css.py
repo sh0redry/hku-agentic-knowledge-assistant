@@ -148,7 +148,7 @@ p, label, span, .markdown-body, .prose {
     color: var(--text-muted) !important;
 }
 
-input,
+input:not([type="checkbox"]):not([type="radio"]),
 textarea,
 [data-testid="textbox"] textarea {
     background: #ffffff !important;
@@ -159,11 +159,44 @@ textarea,
     line-height: 1.55 !important;
 }
 
-input:focus,
+input:not([type="checkbox"]):not([type="radio"]):focus,
 textarea:focus {
     border-color: var(--accent) !important;
     box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14) !important;
     outline: none !important;
+}
+
+/* Keep text-field styling from hiding Gradio's checked indicators. */
+.gradio-container input[type="checkbox"],
+.gradio-container input[type="radio"] {
+    appearance: auto !important;
+    -webkit-appearance: auto !important;
+    accent-color: #2563eb !important;
+    width: 20px !important;
+    height: 20px !important;
+    min-width: 20px !important;
+    flex-shrink: 0 !important;
+    padding: 0 !important;
+    cursor: pointer;
+}
+
+.gradio-container input[type="checkbox"]:focus-visible,
+.gradio-container input[type="radio"]:focus-visible {
+    outline: 3px solid #2563eb !important;
+    outline-offset: 3px !important;
+}
+
+.gradio-container label:has(input[type="checkbox"]:checked),
+.gradio-container label:has(input[type="radio"]:checked) {
+    background-color: #eff6ff !important;
+    border-color: #2563eb !important;
+    color: #1e40af !important;
+}
+
+.gradio-container input[type="checkbox"]:disabled,
+.gradio-container input[type="radio"]:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
 }
 
 .file-preview,

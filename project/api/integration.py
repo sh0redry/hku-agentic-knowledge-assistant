@@ -20,6 +20,7 @@ from agents.library.agent import (
     LibraryResearchRecordRequest,
     LibraryResearchSearchRequest,
     LibrarySpaceAvailabilityRequest,
+    LibrarySpaceDateOptionsRequest,
     LibrarySpaceBookingPreviewRequest,
 )
 from api.schemas import IntegrationResponse, IntegrationTaskSummary
@@ -229,7 +230,7 @@ def create_integration_router(expected_token: str) -> APIRouter:
             }
             error_code = task_error.get("code", "TASK_FAILED")
             recovery = (
-                "Reload the unpacked HKU AGENTS Browser Bridge 0.17.13, then refresh HKU Portal and Moodle."
+                "Reload the unpacked HKU AGENTS Browser Bridge 0.17.14, then refresh HKU Portal and Moodle."
                 if error_code == "EXTENSION_UPDATE_REQUIRED"
                 else "Open HKU Portal and complete login/MFA, then retry the Moodle tool."
                 if error_code == "MOODLE_LOGIN_REQUIRED"
@@ -303,12 +304,14 @@ def create_integration_router(expected_token: str) -> APIRouter:
             task_error = record.error or {"code": "TASK_FAILED", "message": "The read-only HKUL task did not complete."}
             error_code = task_error.get("code", "TASK_FAILED")
             recovery = (
-                "Reload HKU AGENTS Browser Bridge 0.17.13, then retry."
+                "Reload HKU AGENTS Browser Bridge 0.17.14, then retry."
                 if error_code == "EXTENSION_UPDATE_REQUIRED"
                 else "Complete HKUL authentication in the visible Chrome tab, then retry; credentials and MFA remain manual."
                 if error_code == "LIBRARY_LOGIN_REQUIRED"
-                else "Use today's or tomorrow's date in Asia/Hong_Kong, then retry; the live HKUL date dropdown is authoritative."
+                else "Read this facility's live Date options and choose one of those exact dates, then retry."
                 if error_code == "LIBRARY_SPACE_DATE_OUT_OF_WINDOW"
+                else "Read this facility's live Date options; that date is not currently offered by HKUL."
+                if error_code == "LIBRARY_SPACE_DATE_NOT_OFFERED"
                 else "The result exceeded the supported page limit or a page was not completely read; report page_count and count-only parser diagnostics."
                 if error_code == "LIBRARY_SPACE_RESULTS_PAGINATED"
                 else "Keep the relevant Find@HKUL results or full-display page open and retry; if it persists, report the count-only parser diagnostics."
@@ -352,6 +355,14 @@ def create_integration_router(expected_token: str) -> APIRouter:
         correlation_id: str = Depends(authorize),
     ):
         return await run_library_task(request, correlation_id, "library.spaces.search_availability", body)
+
+    @router.post("/library/spaces/list-dates", response_model=IntegrationResponse)
+    async def list_library_space_dates(
+        body: LibrarySpaceDateOptionsRequest,
+        request: Request,
+        correlation_id: str = Depends(authorize),
+    ):
+        return await run_library_task(request, correlation_id, "library.spaces.list_dates", body)
 
     @router.post("/library/spaces/booking-preview", response_model=IntegrationResponse)
     async def preview_library_space_booking(
@@ -462,7 +473,7 @@ def create_integration_router(expected_token: str) -> APIRouter:
             }
             error_code = task_error.get("code", "TASK_FAILED")
             recovery = (
-                "Reload HKU AGENTS Browser Bridge 0.17.13 and refresh HKU Portal."
+                "Reload HKU AGENTS Browser Bridge 0.17.14 and refresh HKU Portal."
                 if error_code == "EXTENSION_UPDATE_REQUIRED"
                 else "Keep the authenticated HKU Portal home page open and report the count-only parser diagnostics."
                 if error_code == "PORTAL_NOTICE_PARSE_INCOMPLETE"

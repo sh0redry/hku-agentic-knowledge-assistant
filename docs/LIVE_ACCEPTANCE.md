@@ -22,8 +22,9 @@ authorized browser session.
 | Find@HKUL item/access options | ✅ | ✅ | stable record and sanitized labels verified |
 | Book a Space availability | ✅ | Partial | Main Library Discussion Room full two-page result read verified; remaining facility routes await per-type live acceptance |
 | Book a Space exact booking preview | ✅ | Partial | exact Discussion Room preview passed; other preview targets still need per-facility live acceptance |
-| Book a Space supervised F2 booking | ✅ | GUI live acceptance pending | single study and discussion rooms; opt-in one-shot path; real submission and record/cancellation check require an operator |
-| Library facility catalog | ✅ | Partial | 15 allowlisted availability targets; booking preview covers five and F2 writes cover two policy-verified facility types |
+| Book a Space supervised F2 booking | ✅ | ✅ User accepted | one real Discussion Room booking was confirmed and manually cancelled in My Booking Record; other scope-specific cases remain separate |
+| Book a Space F3 shadow scheduler | Not run | Pending | local encrypted recurring rules and no-write scheduler implemented; 20 scheduled comparisons and edge-case acceptance still required |
+| Library facility catalog | ✅ | Partial | 15 allowlisted targets exposed to availability, preview and supervised F2; live F2 acceptance remains per facility |
 | HKUL hours and locations | ✅ | ✅ | 14 unique live locations; duplicate DOM candidates counted |
 
 ## Standard procedure
@@ -126,22 +127,29 @@ zero. Repeat with a mismatched date and unavailable room; both must return
 
 ### F2 supervised one-shot GUI test
 
-The F2 implementation exists, but live write acceptance is still pending. This
-test creates a real reservation. Do not run it unless you have chosen a slot you
+F2 live acceptance for a real Discussion Room booking was reported successful;
+the user verified and manually cancelled that reservation through My Booking
+Record. This procedure remains useful for future regression checks and creates
+a real reservation. Do not run it unless you have chosen a slot you
 genuinely intend to use or have first confirmed that the booking can be safely
-cancelled through the official **My Booking Record** page. F2 currently accepts
-policy-verified Main Library single study rooms and discussion rooms. Eligibility
+cancelled through the official **My Booking Record** page. F2 now exposes all
+15 allowlisted availability facility types, but only the discussion-room path
+has a reported real-write acceptance; the other types require separate live
+form/policy acceptance. Eligibility
 is self-declared, not checked against account data. For discussion rooms, you
 must separately attest that at least two patrons will use the room and that your
 bookings comply with the two-session/120-minute daily limit and interleaving
 rule; the tool cannot inspect your existing account bookings or verify group size.
 
-1. Install/reload Browser Bridge `0.17.13`, restart HKU AGENTS, pair the
+1. Install/reload Browser Bridge `0.17.14`, restart HKU AGENTS, pair the
    extension, and log into the official HKUL booking system in Chrome. Keep
    `APP_HOST` on loopback (`127.0.0.1` by default); F2 refuses drafts otherwise.
-2. Keep `LIBRARY_BOOKING_WRITES_ENABLED=false`. In GUI **Library**, search
-   availability for `single_study_room` or `discussion_room` and an exact date
-   equal to today or tomorrow in `Asia/Hong_Kong`. Create a booking preview from one exact result
+2. Keep `LIBRARY_BOOKING_WRITES_ENABLED=false`. In GUI **Library**, select a facility,
+   click **1. Read this facility's live Date options**, choose a date in
+   **2. Select an offered date**, then click **3. Search availability for selected date**.
+   Reading dates populates the GUI dropdown; only step 3 selects the date on HKUL
+   and submits Search. Changing facility clears the date options; read them again.
+   Create a booking preview from one exact result
    (floor, room, start, and end). Check that the preview is ready, fresh, and
    exact; its counters must show no selection, form, or booking write.
 3. Check the one-reservation policy acknowledgment. For a discussion room, also

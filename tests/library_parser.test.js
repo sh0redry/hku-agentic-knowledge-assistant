@@ -364,6 +364,23 @@ assert.equal(searchClicks, 1);
 assert.equal(configurableSelects[0].value, "Chi Wah Learning Commons");
 assert.equal(configurableSelects[1].value, "Study Room");
 assert.equal(configurableSelects[2].value, "2026-09-23 (Wed)");
+const dateOnly = parser.configureSpaceAvailability(
+  configurableDocument,
+  { origin: "https://booking.lib.hku.hk" },
+  { ...exactFilterPayload, inspect_dates_only: true, submit_search: false },
+  callback => callback()
+);
+assert.equal(dateOnly.stage, "date_options_ready");
+assert.deepEqual(dateOnly.offered_dates, ["2026-09-20", "2026-09-23"]);
+assert.equal(dateOnly.availability_search_submitted, false);
+assert.equal(searchClicks, 1);
+assert.throws(() => parser.configureSpaceAvailability(
+  configurableDocument,
+  { origin: "https://booking.lib.hku.hk" },
+  { ...exactFilterPayload, date: "2026-09-22", submit_search: true },
+  callback => callback()
+), error => error.code === "LIBRARY_SPACE_DATE_NOT_OFFERED");
+assert.equal(searchClicks, 1);
 const waitingForResults = parser.configureSpaceAvailability(
   configurableDocument,
   { origin: "https://booking.lib.hku.hk" },

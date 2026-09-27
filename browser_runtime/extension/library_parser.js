@@ -4,9 +4,9 @@
   const PRIMO_ORIGIN = "https://julac-hku.primo.exlibrisgroup.com";
   const LIBRARY_ORIGIN = "https://lib.hku.hk";
   const BOOKING_ORIGIN = "https://booking.lib.hku.hk";
-  const VERSION = "0.3.5";
+  const VERSION = "0.3.6";
   const HOURS_VERSION = "0.1.1";
-  const BOOKING_FORM_VERSION = "0.1.1";
+  const BOOKING_FORM_VERSION = "0.1.2";
   function escapeRegExp(value) { return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
 
   function clean(value) {
@@ -384,6 +384,22 @@
     return true;
   }
 
+  function offeredBookingDates(select) {
+    const dates = [...(select?.options || select?.querySelectorAll?.("option") || [])]
+      .filter((option) => option.disabled !== true)
+      .map((option) => clean(option.textContent || option.innerText).match(/^20\d{2}-[01]\d-[0-3]\d\b/)?.[0])
+      .filter(Boolean);
+    const unique = [...new Set(dates)];
+    if (unique.length !== dates.length || unique.length > 31 || unique.some((date) =>
+      Number.isNaN(Date.parse(`${date}T00:00:00Z`)) ||
+      new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) !== date)) {
+      const error = new Error("The HKUL Date options could not be verified uniquely.");
+      error.code = "LIBRARY_SPACE_DATE_OPTIONS_UNVERIFIED";
+      throw error;
+    }
+    return unique;
+  }
+
   function configureSpaceAvailability(documentObject, locationObject, payload, scheduler) {
     if (locationObject?.origin !== BOOKING_ORIGIN) {
       const error = new Error("Open the verified HKUL Facilities Booking System first.");
@@ -398,8 +414,7 @@
     }
     const stages = [
       [filters.location, payload?.location, false, "location"],
-      [filters.facilityType, payload?.booking_facility_type, false, "facility_type"],
-      [filters.date, payload?.date, true, "date"]
+      [filters.facilityType, payload?.booking_facility_type, false, "facility_type"]
     ];
     for (const [select, expected, dateMode, stage] of stages) {
       if (!clean(expected)) {
@@ -410,6 +425,36 @@
       if (selectExact(select, expected, dateMode)) {
         return { navigation_started: true, stage, availability_search_submitted: false };
       }
+    }
+    const offeredDates = offeredBookingDates(filters.date);
+    if (offeredDates.length === 0) {
+      const error = new Error("The HKUL Date options are not ready for this facility.");
+      error.code = "LIBRARY_SPACE_DATE_OPTIONS_NOT_READY";
+      throw error;
+    }
+    if (payload?.inspect_dates_only === true) {
+      return {
+        navigation_started: false,
+        stage: "date_options_ready",
+        availability_search_submitted: false,
+        location: payload.location,
+        booking_facility_type: payload.booking_facility_type,
+        offered_dates: offeredDates
+      };
+    }
+    const requestedDate = clean(payload?.date);
+    if (!requestedDate) {
+      const error = new Error("An exact date is required for HKUL availability Search.");
+      error.code = "INVALID_INPUT";
+      throw error;
+    }
+    if (!offeredDates.includes(requestedDate)) {
+      const error = new Error(`The HKUL Date control does not offer ${requestedDate} for this facility. Offered dates: ${offeredDates.join(", ")}.`);
+      error.code = "LIBRARY_SPACE_DATE_NOT_OFFERED";
+      throw error;
+    }
+    if (selectExact(filters.date, requestedDate, true)) {
+      return { navigation_started: true, stage: "date", availability_search_submitted: false };
     }
     const bodyText = clean(documentObject.body?.innerText || documentObject.body?.textContent);
     const hasMatrix = [...(documentObject.querySelectorAll?.("table tr") || [])]
@@ -547,8 +592,12 @@
       facility: selected.facility === values.facility,
       date: dateMatches
     };
+    const extraRequiredControls = [...(documentObject.querySelectorAll?.("input[required], textarea[required], select[required]") || [])]
+      .filter((node) => !node.disabled && node.type !== "hidden" &&
+        (["checkbox", "radio"].includes(node.type) ? node.checked !== true : !clean(node.value)));
     const ready = Object.values(expectedFields).every(Boolean) && exactSessionSelected &&
-      otherSessionsSelected === 0 && submitButtons.length === 1 && submitButtons[0].disabled !== true;
+      otherSessionsSelected === 0 && extraRequiredControls.length === 0 &&
+      submitButtons.length === 1 && submitButtons[0].disabled !== true;
     return {
       origin: BOOKING_ORIGIN,
       logged_in: true,
@@ -570,7 +619,8 @@
         booking_form_marker_found: /new booking/i.test(bodyText),
         selected_field_candidate_counts: fieldCounts,
         session_candidate_count: sessionCandidates.length,
-        exact_session_candidate_count: matchingSession.length
+        exact_session_candidate_count: matchingSession.length,
+        unfilled_required_control_count: extraRequiredControls.length
       }
     };
   }

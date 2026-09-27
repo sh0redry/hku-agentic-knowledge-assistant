@@ -44,6 +44,7 @@ const ALLOWED_COMMANDS = new Set([
   "library.research.access_options",
   "library.hours_and_locations",
   "library.spaces.search_availability",
+  "library.spaces.list_dates",
   "library.spaces.book_exact_once"
 ]);
 const NAVIGATION_DEADLINE_MS = 30000;
@@ -272,7 +273,7 @@ const SPACE_ROUTES = Object.freeze({
   study_room: { location: "Chi Wah Learning Commons", booking_facility_type: "Study Room" }
 });
 const SPACE_AVAILABILITY_URL = "https://booking.lib.hku.hk/Secure/FacilityStatusDate.aspx";
-const F2_BOOKABLE_FACILITY_TYPES = new Set(["single_study_room", "discussion_room"]);
+const F2_BOOKABLE_FACILITY_TYPES = new Set(Object.keys(SPACE_ROUTES));
 
 async function waitForLibraryRead(tabId, command, payload, deadline, expectedPage = null, priorMatrixSignature = null) {
   let lastError = null;
@@ -374,13 +375,12 @@ async function searchLibrarySpaceAvailability(payload, options = {}) {
   }).formatToParts(new Date());
   const part = (type) => hongKongDateParts.find((item) => item.type === type)?.value || "";
   const hongKongToday = `${part("year")}-${part("month")}-${part("day")}`;
-  const tomorrowDate = new Date(`${hongKongToday}T00:00:00Z`);
-  tomorrowDate.setUTCDate(tomorrowDate.getUTCDate() + 1);
-  const hongKongTomorrow = tomorrowDate.toISOString().slice(0, 10);
-  if (date !== hongKongToday && date !== hongKongTomorrow) {
+  const latestDate = new Date(`${hongKongToday}T00:00:00Z`);
+  latestDate.setUTCDate(latestDate.getUTCDate() + 14);
+  if (date < hongKongToday || date > latestDate.toISOString().slice(0, 10)) {
     throw commandError(
       "LIBRARY_SPACE_DATE_OUT_OF_WINDOW",
-      `Choose ${hongKongToday} or ${hongKongTomorrow} (Hong Kong time) for the supported HKUL facilities.`
+      `Choose a date from ${hongKongToday} through ${latestDate.toISOString().slice(0, 10)} (Hong Kong time); the facility's live Date options are checked before Search.`
     );
   }
   const tab = await chrome.tabs.create({ url: SPACE_AVAILABILITY_URL, active: true });
@@ -403,7 +403,7 @@ async function searchLibrarySpaceAvailability(payload, options = {}) {
       }
     } catch (error) {
       lastConfigurationError = error;
-      if (["INVALID_INPUT", "WRONG_LIBRARY_SPACE_PAGE", "LIBRARY_SPACE_FILTER_AMBIGUOUS", "LIBRARY_SPACE_SEARCH_AMBIGUOUS"].includes(error.code)) throw error;
+      if (["INVALID_INPUT", "WRONG_LIBRARY_SPACE_PAGE", "LIBRARY_SPACE_FILTER_AMBIGUOUS", "LIBRARY_SPACE_DATE_NOT_OFFERED", "LIBRARY_SPACE_DATE_OPTIONS_UNVERIFIED", "LIBRARY_SPACE_SEARCH_AMBIGUOUS"].includes(error.code)) throw error;
     }
     await delay(500);
   }
@@ -488,6 +488,48 @@ async function searchLibrarySpaceAvailability(payload, options = {}) {
   return result;
 }
 
+async function listLibrarySpaceDates(payload) {
+  const facilityType = String(payload?.facility_type || "");
+  const target = SPACE_ROUTES[facilityType];
+  if (!target) throw commandError("INVALID_INPUT", "A supported facility_type is required to read HKUL Date options.");
+  const tab = await chrome.tabs.create({ url: SPACE_AVAILABILITY_URL, active: true });
+  const deadline = Date.now() + NAVIGATION_DEADLINE_MS;
+  let lastError = null;
+  while (Date.now() < deadline) {
+    try {
+      const state = await sendTabCommand(tab.id, "library.spaces.configure_availability", {
+        ...target, inspect_dates_only: true, submit_search: false
+      });
+      if (state.stage === "date_options_ready" && state.navigation_started === false) {
+        if (state.location !== target.location || state.booking_facility_type !== target.booking_facility_type ||
+            !Array.isArray(state.offered_dates) || state.offered_dates.length === 0) {
+          throw commandError("LIBRARY_SPACE_DATE_OPTIONS_UNVERIFIED", "The exact facility Date options were not verifiable.");
+        }
+        return {
+          read_only: true,
+          navigation_only: true,
+          library_write_requests_sent: 0,
+          booking_writes_performed: 0,
+          navigation_interactions_performed: true,
+          target_origin: "https://booking.lib.hku.hk",
+          target_page_kind: "space_date_options",
+          facility_type: facilityType,
+          location: target.location,
+          booking_facility_type: target.booking_facility_type,
+          offered_dates: state.offered_dates,
+          availability_search_submitted: false,
+          steps: ["library_fixed_route_to_space_availability", "library_set_exact_availability_filters"]
+        };
+      }
+    } catch (error) {
+      lastError = error;
+      if (["INVALID_INPUT", "WRONG_LIBRARY_SPACE_PAGE", "LIBRARY_SPACE_FILTER_AMBIGUOUS", "LIBRARY_SPACE_DATE_OPTIONS_UNVERIFIED"].includes(error.code)) throw error;
+    }
+    await delay(500);
+  }
+  throw commandError(lastError?.code || "LIBRARY_SPACE_DATE_OPTIONS_NOT_READY", lastError?.message || "The HKUL Date options did not become ready before the deadline.");
+}
+
 function exactSlotKey(slot) {
   return `${String(slot?.floor || "").trim()}|${String(slot?.room || "").trim()}|${slot?.start_time || ""}|${slot?.end_time || ""}`;
 }
@@ -548,7 +590,7 @@ async function bookLibrarySpaceExactlyOnce(payload) {
   if (!F2_BOOKABLE_FACILITY_TYPES.has(facilityType)) {
     throw commandError(
       "LIBRARY_BOOKING_FACILITY_NOT_ENABLED",
-      "F2 live submission is limited to Main Library single study rooms and discussion rooms."
+      "F2 requires an allowlisted HKUL facility route."
     );
   }
   if (facilityType === "discussion_room" && payload?.discussion_room_rules_acknowledged !== true) {
@@ -556,6 +598,9 @@ async function bookLibrarySpaceExactlyOnce(payload) {
       "LIBRARY_DISCUSSION_ROOM_RULES_ACK_REQUIRED",
       "Discussion-room preparation requires the user to attest the minimum group size, daily limits, and interleaving rule."
     );
+  }
+  if (!["single_study_room", "discussion_room"].includes(facilityType) && payload?.facility_rules_acknowledged !== true) {
+    throw commandError("LIBRARY_FACILITY_RULES_ACK_REQUIRED", "This facility requires explicit acknowledgment of its HKUL rules.");
   }
   if (payload?.operation !== "prepare" || !targetRoute ||
       target.facility_type !== facilityType || target.location !== targetRoute.location ||
@@ -578,7 +623,7 @@ async function bookLibrarySpaceExactlyOnce(payload) {
   const snapshot = availability.snapshot;
   const diagnostics = snapshot.diagnostics || {};
   if (snapshot.result_set_complete !== true || diagnostics.unclassified_status_cell_count > 0 ||
-      diagnostics.incomplete_available_slot_candidate_count > 0 || diagnostics.parser_version !== "0.3.5") {
+      diagnostics.incomplete_available_slot_candidate_count > 0 || diagnostics.parser_version !== "0.3.6") {
     throw commandError("LIBRARY_BOOKING_AVAILABILITY_INCOMPLETE", "The refreshed availability matrix was incomplete; no slot was selected.");
   }
   if (snapshot.location !== targetRoute.location || snapshot.booking_facility_type !== targetRoute.booking_facility_type || snapshot.date !== target.date) {
@@ -645,7 +690,7 @@ async function submitPreparedLibraryBooking(payload) {
   if (!F2_BOOKABLE_FACILITY_TYPES.has(target.facility_type)) {
     throw commandError(
       "LIBRARY_BOOKING_FACILITY_NOT_ENABLED",
-      "F2 live submission is limited to Main Library single study rooms and discussion rooms."
+      "F2 requires an allowlisted HKUL facility route."
     );
   }
   if (target.facility_type === "discussion_room" && payload?.discussion_room_rules_acknowledged !== true) {
@@ -653,6 +698,9 @@ async function submitPreparedLibraryBooking(payload) {
       "LIBRARY_DISCUSSION_ROOM_RULES_ACK_REQUIRED",
       "Discussion-room submission requires the user to attest the minimum group size, daily limits, and interleaving rule."
     );
+  }
+  if (!["single_study_room", "discussion_room"].includes(target.facility_type) && payload?.facility_rules_acknowledged !== true) {
+    throw commandError("LIBRARY_FACILITY_RULES_ACK_REQUIRED", "This facility requires explicit acknowledgment of its HKUL rules.");
   }
   if (payload?.policy_acceptance_acknowledged !== true || !target.facility_type ||
       !target.location || !target.date || !target.floor || !target.room ||
@@ -1648,6 +1696,8 @@ async function executeCommand(command, payload = {}) {
   if (command === "library.research.item") return readLibraryResearchDetail(payload, "item");
   if (command === "library.research.access_options") return readLibraryResearchDetail(payload, "access_options");
   if (command === "library.spaces.search_availability") return searchLibrarySpaceAvailability(payload);
+  if (command === "library.spaces.list_dates") return listLibrarySpaceDates(payload);
+  if (command === "library.spaces.list_dates") return listLibrarySpaceDates(payload);
   if (command === "library.spaces.book_exact_once") return bookLibrarySpaceExactlyOnce(payload);
   if (command === "library.hours_and_locations") return readLibraryHoursAndLocations();
   return inspectBoundSisTab(command);

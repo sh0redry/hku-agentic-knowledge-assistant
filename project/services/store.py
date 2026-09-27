@@ -95,6 +95,36 @@ class SQLiteStore:
                     data_json TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS library_shadow_rules (
+                    id TEXT PRIMARY KEY,
+                    state TEXT NOT NULL,
+                    encrypted_payload BLOB NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    next_run_at TEXT,
+                    expires_at TEXT NOT NULL,
+                    run_count INTEGER NOT NULL DEFAULT 0,
+                    max_runs INTEGER NOT NULL,
+                    version INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_library_shadow_rules_due
+                    ON library_shadow_rules(state, next_run_at);
+                CREATE TABLE IF NOT EXISTS library_shadow_runs (
+                    id TEXT PRIMARY KEY,
+                    rule_id TEXT NOT NULL REFERENCES library_shadow_rules(id),
+                    occurrence_key TEXT NOT NULL,
+                    scheduled_at TEXT NOT NULL,
+                    started_at TEXT NOT NULL,
+                    completed_at TEXT,
+                    outcome TEXT NOT NULL,
+                    candidate_count INTEGER NOT NULL DEFAULT 0,
+                    encrypted_payload BLOB NOT NULL,
+                    feedback_state TEXT NOT NULL DEFAULT 'pending',
+                    choice_agreement INTEGER,
+                    UNIQUE(rule_id, occurrence_key)
+                );
+                CREATE INDEX IF NOT EXISTS idx_library_shadow_runs_rule
+                    ON library_shadow_runs(rule_id, scheduled_at);
                 """
             )
 
@@ -300,3 +330,250 @@ class SQLiteStore:
             )
             for row in rows
         ]
+
+    def create_library_shadow_rule(self, rule: dict, *, max_active: int = 5) -> None:
+        with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            active_count = db.execute(
+                "SELECT COUNT(*) FROM library_shadow_rules WHERE state = 'active'"
+            ).fetchone()[0]
+            if active_count >= max_active:
+                raise ValueError(f"At most {max_active} active F3 shadow rules are allowed.")
+            db.execute(
+                """INSERT INTO library_shadow_rules
+                (id, state, encrypted_payload, created_at, updated_at, next_run_at,
+                 expires_at, run_count, max_runs, version)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)""",
+                (
+                    rule["id"], rule["state"], rule["encrypted_payload"],
+                    rule["created_at"], rule["updated_at"], rule["next_run_at"],
+                    rule["expires_at"], rule["max_runs"], rule["version"],
+                ),
+            )
+
+    def get_library_shadow_rule(self, rule_id: str) -> dict:
+        with self._connection() as db:
+            row = db.execute(
+                "SELECT * FROM library_shadow_rules WHERE id = ?", (rule_id,)
+            ).fetchone()
+        if row is None:
+            raise KeyError(rule_id)
+        return dict(row)
+
+    def list_library_shadow_rules(self, limit: int = 100) -> list[dict]:
+        with self._connection() as db:
+            rows = db.execute(
+                "SELECT * FROM library_shadow_rules ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def list_due_library_shadow_rules(self, now: str, limit: int = 20) -> list[dict]:
+        with self._connection() as db:
+            rows = db.execute(
+                """SELECT * FROM library_shadow_rules
+                WHERE state = 'active' AND next_run_at IS NOT NULL
+                  AND next_run_at <= ? AND expires_at > ? AND run_count < max_runs
+                ORDER BY next_run_at LIMIT ?""",
+                (now, now, limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def list_active_library_shadow_rules(self) -> list[dict]:
+        with self._connection() as db:
+            rows = db.execute(
+                "SELECT * FROM library_shadow_rules WHERE state = 'active' "
+                "ORDER BY next_run_at"
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def claim_library_shadow_occurrence(
+        self,
+        *,
+        rule_id: str,
+        run_id: str,
+        occurrence_key: str,
+        scheduled_at: str,
+        next_run_at: str | None,
+        started_at: str,
+        encrypted_payload: bytes,
+    ) -> bool:
+        with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            rule = db.execute(
+                "SELECT state, next_run_at, expires_at, run_count, max_runs "
+                "FROM library_shadow_rules WHERE id = ?", (rule_id,),
+            ).fetchone()
+            if (rule is None or rule["state"] != "active"
+                    or rule["next_run_at"] is None or rule["next_run_at"] > started_at
+                    or rule["expires_at"] <= started_at or rule["run_count"] >= rule["max_runs"]):
+                return False
+            existing = db.execute(
+                "SELECT 1 FROM library_shadow_runs WHERE rule_id = ? AND occurrence_key = ?",
+                (rule_id, occurrence_key),
+            ).fetchone()
+            if existing is not None:
+                return False
+            db.execute(
+                """INSERT INTO library_shadow_runs
+                (id, rule_id, occurrence_key, scheduled_at, started_at, outcome,
+                 encrypted_payload)
+                VALUES (?, ?, ?, ?, ?, 'running', ?)""",
+                (run_id, rule_id, occurrence_key, scheduled_at, started_at, encrypted_payload),
+            )
+            db.execute(
+                """UPDATE library_shadow_rules
+                SET run_count = run_count + 1, next_run_at = ?, updated_at = ?
+                WHERE id = ?""",
+                (next_run_at, started_at, rule_id),
+            )
+            return True
+
+    def complete_library_shadow_run(
+        self, run_id: str, *, outcome: str, candidate_count: int,
+        encrypted_payload: bytes, completed_at: str,
+    ) -> dict:
+        with self._connection() as db:
+            cursor = db.execute(
+                """UPDATE library_shadow_runs
+                SET outcome = ?, candidate_count = ?, encrypted_payload = ?, completed_at = ?
+                WHERE id = ?""",
+                (outcome, candidate_count, encrypted_payload, completed_at, run_id),
+            )
+            if cursor.rowcount != 1:
+                raise KeyError(run_id)
+            row = db.execute(
+                "SELECT * FROM library_shadow_runs WHERE id = ?", (run_id,)
+            ).fetchone()
+        return dict(row)
+
+    def fail_running_library_shadow_runs_for_rule(
+        self, rule_id: str, completed_at: str,
+    ) -> list[str]:
+        with self._connection() as db:
+            rows = db.execute(
+                "SELECT id FROM library_shadow_runs "
+                "WHERE rule_id = ? AND outcome = 'running'", (rule_id,),
+            ).fetchall()
+            identifiers = [row["id"] for row in rows]
+            db.execute(
+                "UPDATE library_shadow_runs SET outcome = 'internal_error', "
+                "completed_at = ?, feedback_state = 'not_comparable' "
+                "WHERE rule_id = ? AND outcome = 'running'",
+                (completed_at, rule_id),
+            )
+        return identifiers
+
+    def list_library_shadow_runs(self, rule_id: str | None = None, limit: int = 100) -> list[dict]:
+        with self._connection() as db:
+            if rule_id:
+                rows = db.execute(
+                    """SELECT * FROM library_shadow_runs WHERE rule_id = ?
+                    ORDER BY scheduled_at DESC LIMIT ?""", (rule_id, limit),
+                ).fetchall()
+            else:
+                rows = db.execute(
+                    "SELECT * FROM library_shadow_runs ORDER BY scheduled_at DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_library_shadow_run(self, run_id: str) -> dict:
+        with self._connection() as db:
+            row = db.execute(
+                "SELECT * FROM library_shadow_runs WHERE id = ?", (run_id,)
+            ).fetchone()
+        if row is None:
+            raise KeyError(run_id)
+        return dict(row)
+
+    def update_library_shadow_run_feedback(
+        self, run_id: str, *, encrypted_payload: bytes,
+        feedback_state: str, choice_agreement: bool,
+    ) -> dict:
+        with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT feedback_state FROM library_shadow_runs WHERE id = ?", (run_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(run_id)
+            if row["feedback_state"] != "pending":
+                raise ValueError("Feedback for this shadow run has already been recorded.")
+            db.execute(
+                """UPDATE library_shadow_runs
+                SET encrypted_payload = ?, feedback_state = ?, choice_agreement = ?
+                WHERE id = ?""",
+                (encrypted_payload, feedback_state, int(choice_agreement), run_id),
+            )
+            updated = db.execute(
+                "SELECT * FROM library_shadow_runs WHERE id = ?", (run_id,)
+            ).fetchone()
+        return dict(updated)
+
+    def set_library_shadow_rule_state(
+        self, rule_id: str, state: str, updated_at: str,
+        encrypted_payload: bytes | None = None,
+        next_run_at: str | None = None,
+    ) -> dict:
+        with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT state, encrypted_payload FROM library_shadow_rules WHERE id = ?",
+                (rule_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(rule_id)
+            if row["state"] in {"revoked", "expired", "policy_changed", "completed"}:
+                raise ValueError(f"A {row['state']} shadow rule cannot be reactivated.")
+            if row["state"] == "migration_required" and state not in {"migration_required", "revoked"}:
+                raise ValueError("A migrated shadow rule cannot be resumed; review and create a new rule.")
+            db.execute(
+                """UPDATE library_shadow_rules SET state = ?, updated_at = ?,
+                encrypted_payload = COALESCE(?, encrypted_payload), next_run_at = ?
+                WHERE id = ?""",
+                (state, updated_at, encrypted_payload, next_run_at, rule_id),
+            )
+            updated = db.execute(
+                "SELECT * FROM library_shadow_rules WHERE id = ?", (rule_id,)
+            ).fetchone()
+        return dict(updated)
+
+    def expire_library_shadow_rules(self, now: str) -> list[str]:
+        with self._connection() as db:
+            rows = db.execute(
+                "SELECT id FROM library_shadow_rules WHERE state = 'active' AND expires_at <= ?",
+                (now,),
+            ).fetchall()
+            identifiers = [row["id"] for row in rows]
+            db.execute(
+                """UPDATE library_shadow_rules SET state = 'expired', updated_at = ?
+                WHERE state = 'active' AND expires_at <= ?""", (now, now),
+            )
+        return identifiers
+
+    def mark_interrupted_library_shadow_runs(self, completed_at: str) -> list[dict]:
+        with self._connection() as db:
+            rows = db.execute(
+                "SELECT * FROM library_shadow_runs WHERE outcome = 'running'"
+            ).fetchall()
+            db.execute(
+                """UPDATE library_shadow_runs SET outcome = 'interrupted_after_restart',
+                completed_at = ?, feedback_state = 'not_comparable'
+                WHERE outcome = 'running'""", (completed_at,),
+            )
+        return [dict(row) for row in rows]
+
+    def complete_exhausted_library_shadow_rules(self, updated_at: str) -> list[str]:
+        with self._connection() as db:
+            rows = db.execute(
+                "SELECT id FROM library_shadow_rules "
+                "WHERE state = 'active' AND run_count >= max_runs"
+            ).fetchall()
+            identifiers = [row["id"] for row in rows]
+            db.execute(
+                "UPDATE library_shadow_rules SET state = 'completed', updated_at = ?, "
+                "next_run_at = NULL WHERE state = 'active' AND run_count >= max_runs",
+                (updated_at,),
+            )
+        return identifiers

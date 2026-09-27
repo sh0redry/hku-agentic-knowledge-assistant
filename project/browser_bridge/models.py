@@ -731,6 +731,28 @@ class LibrarySpaceNavigationResult(StrictMessage):
         return self
 
 
+class LibrarySpaceDateOptionsNavigationResult(StrictMessage):
+    read_only: Literal[True]
+    navigation_only: Literal[True]
+    library_write_requests_sent: Literal[0]
+    booking_writes_performed: Literal[0]
+    navigation_interactions_performed: bool
+    target_origin: Literal["https://booking.lib.hku.hk"]
+    target_page_kind: Literal["space_date_options"]
+    facility_type: str = Field(min_length=1, max_length=80)
+    location: str = Field(min_length=1, max_length=160)
+    booking_facility_type: str = Field(min_length=1, max_length=160)
+    offered_dates: list[datetime_module.date] = Field(min_length=1, max_length=31)
+    availability_search_submitted: Literal[False]
+    steps: list[Literal["library_fixed_route_to_space_availability", "library_set_exact_availability_filters"]] = Field(min_length=2, max_length=2)
+
+    @model_validator(mode="after")
+    def validate_dates(self):
+        if len(set(self.offered_dates)) != len(self.offered_dates):
+            raise ValueError("Library Date options contain duplicates.")
+        return self
+
+
 class SISNavigationResult(StrictMessage):
     read_only: Literal[True]
     navigation_only: Literal[True]

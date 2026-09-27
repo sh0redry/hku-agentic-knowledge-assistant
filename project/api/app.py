@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import re
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Query, Request, WebSocket
 from fastapi.exceptions import RequestValidationError
@@ -14,6 +17,7 @@ from pydantic import ValidationError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from agents.errors import CapabilityError
+from agents.library.agent import library_booking_host_is_loopback
 from agents.models import TERMINAL_TASK_STATUSES, TaskStatus
 from api.integration import IntegrationAPIError, create_integration_router
 from api.schemas import ActionConfirmRequest, ActionDraftRequest, ActionExecuteRequest, ChatRequest
@@ -25,6 +29,13 @@ from connectors.sis.models import (
     SISPreflightRequest,
 )
 import config
+from services.data_protection import DataProtectionUnavailable
+from services.library_shadow import (
+    ShadowCreateRequest,
+    ShadowFeedbackRequest,
+    ShadowPreviewRequest,
+    ShadowRuleActionRequest,
+)
 
 
 def _dump(model):
@@ -37,10 +48,23 @@ def create_api_app(
     db_path: str | Path | None = None,
     integration_token: str | None = None,
 ) -> FastAPI:
+    @asynccontextmanager
+    async def lifespan(lifespan_app: FastAPI):
+        shadow = lifespan_app.state.container.library_shadow
+        local_binding = library_booking_host_is_loopback()
+        if local_binding:
+            await shadow.start()
+        try:
+            yield
+        finally:
+            if local_binding:
+                await shadow.stop()
+
     app = FastAPI(
         title="HKU AGENTS API",
         version="0.1.0",
         description="Local-first capability and task API for the HKU AGENTS assistant.",
+        lifespan=lifespan,
     )
     app.add_middleware(
         TrustedHostMiddleware,
@@ -83,6 +107,46 @@ def create_api_app(
                 "details": details,
             },
         }
+
+    def require_local_shadow_access(request: Request) -> None:
+        client_host = request.client.host if request.client else ""
+        try:
+            client_is_loopback = ipaddress.ip_address(client_host.strip("[]")).is_loopback
+        except ValueError:
+            client_is_loopback = client_host.lower() == "localhost"
+        origin = request.headers.get("origin")
+        origin_is_local = True
+        if origin:
+            parsed_origin = urlsplit(origin)
+            origin_host = parsed_origin.hostname or ""
+            try:
+                origin_is_local = (
+                    parsed_origin.scheme in {"http", "https"}
+                    and ipaddress.ip_address(origin_host).is_loopback
+                )
+            except ValueError:
+                origin_is_local = (
+                    parsed_origin.scheme in {"http", "https"}
+                    and origin_host.lower() == "localhost"
+                )
+        if not library_booking_host_is_loopback() or not client_is_loopback or not origin_is_local:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "LIBRARY_SHADOW_LOCAL_ONLY",
+                    "message": "F3 shadow rules are available only through the loopback local GUI.",
+                },
+            )
+
+    def shadow_error(exc: Exception) -> HTTPException:
+        if isinstance(exc, KeyError):
+            return HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": str(exc)})
+        if isinstance(exc, DataProtectionUnavailable):
+            return HTTPException(
+                status_code=503,
+                detail={"code": "LIBRARY_SHADOW_PROTECTION_UNAVAILABLE", "message": str(exc)},
+            )
+        return HTTPException(status_code=409, detail={"code": "LIBRARY_SHADOW_REQUEST_REJECTED", "message": str(exc)})
 
     @app.exception_handler(IntegrationAPIError)
     async def integration_api_error_handler(request: Request, exc: IntegrationAPIError):
@@ -347,6 +411,87 @@ def create_api_app(
         except KeyError:
             raise HTTPException(status_code=404, detail="Action draft not found.")
         return _dump(task)
+
+    @app.get("/api/v1/library/shadow/status")
+    async def library_shadow_status(request: Request):
+        require_local_shadow_access(request)
+        shadow = app.state.container.library_shadow
+        return {
+            "enabled": shadow.enabled,
+            "scheduler_running": shadow.running,
+            "loopback_binding_required": True,
+            "mode": "shadow_only",
+            "booking_authority": False,
+            "booking_executor_available": False,
+            "booking_writes_performed": 0,
+            "policy_change_detection_scope": "local_verified_catalog_digest_only",
+            "maximum_active_rules": 5,
+            "data_protection": "windows_current_user_dpapi" if shadow.enabled else "unavailable",
+            "unavailable_reason": shadow.protection_error,
+        }
+
+    @app.post("/api/v1/library/shadow/rules/preview")
+    async def preview_library_shadow_rule(body: ShadowPreviewRequest, request: Request):
+        require_local_shadow_access(request)
+        try:
+            return app.state.container.library_shadow.preview(body)
+        except Exception as exc:
+            raise shadow_error(exc) from exc
+
+    @app.post("/api/v1/library/shadow/rules")
+    async def create_library_shadow_rule(body: ShadowCreateRequest, request: Request):
+        require_local_shadow_access(request)
+        try:
+            return app.state.container.library_shadow.create_rule(body)
+        except Exception as exc:
+            raise shadow_error(exc) from exc
+
+    @app.get("/api/v1/library/shadow/rules")
+    async def list_library_shadow_rules(request: Request):
+        require_local_shadow_access(request)
+        try:
+            return app.state.container.library_shadow.list_rules()
+        except Exception as exc:
+            raise shadow_error(exc) from exc
+
+    @app.post("/api/v1/library/shadow/rules/{rule_id}/{action}")
+    async def change_library_shadow_rule(
+        rule_id: str, action: str, body: ShadowRuleActionRequest, request: Request,
+    ):
+        require_local_shadow_access(request)
+        if action not in {"pause", "resume", "revoke"}:
+            raise HTTPException(status_code=404, detail="Unknown shadow-rule action.")
+        if action == "revoke" and not body.revoke_acknowledged:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "LIBRARY_SHADOW_REVOKE_NOT_ACKNOWLEDGED", "message": "Explicit revoke acknowledgment is required."},
+            )
+        try:
+            return app.state.container.library_shadow.change_rule_state(rule_id, action)
+        except Exception as exc:
+            raise shadow_error(exc) from exc
+
+    @app.get("/api/v1/library/shadow/runs")
+    async def list_library_shadow_runs(
+        request: Request,
+        rule_id: str | None = None,
+        limit: int = Query(default=100, ge=1, le=500),
+    ):
+        require_local_shadow_access(request)
+        try:
+            return app.state.container.library_shadow.list_runs(rule_id, limit)
+        except Exception as exc:
+            raise shadow_error(exc) from exc
+
+    @app.post("/api/v1/library/shadow/runs/{run_id}/feedback")
+    async def record_library_shadow_feedback(
+        run_id: str, body: ShadowFeedbackRequest, request: Request,
+    ):
+        require_local_shadow_access(request)
+        try:
+            return app.state.container.library_shadow.record_feedback(run_id, body)
+        except Exception as exc:
+            raise shadow_error(exc) from exc
 
     @app.get("/api/v1/tasks")
     async def list_tasks(limit: int = Query(default=50, ge=1, le=200)):

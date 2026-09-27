@@ -25,6 +25,7 @@ from agents.library.agent import (
     LibraryResearchItemCapability,
     LibraryResearchSearchCapability,
     LibrarySpaceAvailabilityCapability,
+    LibrarySpaceDateOptionsCapability,
     LibrarySpaceBookCapability,
     LibrarySpaceBookingPreviewCapability,
 )
@@ -47,6 +48,7 @@ from services.moodle import MoodleAssignmentService, MoodleCourseService
 from services.briefing import DailyBriefingService
 from services.portal import PortalNoticeService
 from services.library_booking import LibraryBookingPreviewRegistry
+from services.library_shadow import LibraryShadowScheduler
 
 
 class ApplicationContainer:
@@ -117,6 +119,7 @@ class ApplicationContainer:
         self.registry.register(LibraryFacilityListCapability())
         self.registry.register(LibraryHoursAndLocationsCapability(self.connectors["sis_browser"]))
         self.registry.register(LibrarySpaceAvailabilityCapability(self.connectors["sis_browser"]))
+        self.registry.register(LibrarySpaceDateOptionsCapability(self.connectors["sis_browser"]))
         self.registry.register(
             LibrarySpaceBookingPreviewCapability(
                 self.connectors["sis_browser"], self.library_booking_previews
@@ -130,6 +133,7 @@ class ApplicationContainer:
 
         self.tasks = TaskManager(self.registry, self.store)
         self.actions = ActionService(self.registry, self.store, self.tasks, self.policy)
+        self.library_shadow = LibraryShadowScheduler(self.store, self.tasks)
 
     def connection_status(self) -> list[dict]:
         return [connector.health() for connector in self.connectors.values()]
