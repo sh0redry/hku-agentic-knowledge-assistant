@@ -1,6 +1,8 @@
 import Schema from '@deepseek-ai/schemastery';
 import { defineTool } from '@deepseek-ai/dsh-tools';
 import { HKUAgentsClient } from './client.js';
+import { installDesktopStatusBridge } from './desktop_status.js';
+import { installDesktopAdminBridge } from './desktop_admin.js';
 export const name = 'hku-agents';
 export const inject = ['tools'];
 export const Config = Schema.object({
@@ -16,6 +18,8 @@ const envelopeOutput = {
 };
 export function apply(ctx, config) {
     const client = new HKUAgentsClient(config);
+    installDesktopStatusBridge(ctx, client);
+    installDesktopAdminBridge(ctx, client);
     ctx.tools.register(defineTool({
         name: 'hku_sis_status',
         description: 'Check the local HKU AGENTS service, read-only SIS browser connection, and available capabilities. Use this before other HKU SIS tools or when connection state is unclear. This never logs in or writes to SIS.',

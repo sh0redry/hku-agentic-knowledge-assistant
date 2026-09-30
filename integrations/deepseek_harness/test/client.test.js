@@ -3,10 +3,15 @@ import { once } from 'node:events'
 import http from 'node:http'
 import test from 'node:test'
 
-import { apply } from '../lib/index.js'
+import { apply as hostApply } from '../lib/index.js'
 import { HKUAgentsAPIError, HKUAgentsClient } from '../lib/client.js'
 
 const TOKEN = 'test-hku-agents-token-12345678901234567890'
+
+function apply(ctx, config) {
+  ctx.inject = () => {}
+  hostApply(ctx, config)
+}
 
 function envelope(result, correlationId = 'server-correlation') {
   return {

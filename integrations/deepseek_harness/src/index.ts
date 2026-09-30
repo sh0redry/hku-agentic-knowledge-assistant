@@ -3,6 +3,8 @@ import Schema from '@deepseek-ai/schemastery'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 
 import { HKUAgentsClient } from './client.js'
+import { installDesktopStatusBridge } from './desktop_status.js'
+import { installDesktopAdminBridge } from './desktop_admin.js'
 
 export const name = 'hku-agents'
 export const inject = ['tools']
@@ -28,6 +30,8 @@ const envelopeOutput = {
 
 export function apply(ctx: Context, config: Config): void {
   const client = new HKUAgentsClient(config)
+  installDesktopStatusBridge(ctx, client)
+  installDesktopAdminBridge(ctx, client)
 
   ctx.tools.register(
     defineTool({

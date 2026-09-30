@@ -1,5 +1,15 @@
 ﻿# HKU AGENTS for DeepSeek Harness
 
+Desktop compatibility target: official DeepSeek Harness Desktop `0.2.0-rc.2`
+on Windows. This package contributes Host-side **read-only tools** and a
+browser-side native **read-only shell** in the sidebar. The business panel
+requests a narrow Core/Chrome Bridge connection-status projection through the
+Desktop Host. A separate **HKU Admin** panel now offers one fixed, read-only
+Library facility-catalog test with a redacted result; it does not show private
+capability results. Neither panel
+expose F2/F3/F4 write or scheduling controls. The Desktop UI migration is staged in
+`../../HKU_AGENTS_INTEGRATION_PLAN.md` Section 23.8.
+
 This package contributes twenty-two restricted HKU tools to DeepSeek Harness:
 
 - `hku_sis_status`
@@ -48,7 +58,10 @@ omitted.
 
 ## Prerequisites
 
-1. Use Node.js `^22.19.0` or `>=24.0.0`, matching the current Harness runtime.
+1. Use Node.js `^22.19.0` or `>=24.0.0` for local builds. The verified
+   Desktop `0.2.0-rc.2` installation bundles Node `24.18.1`, Cordis `4.0.4`,
+   dsh-tools `0.2.0-rc.2`, and Schemastery `3.18.4`; this package pins those
+   shared peer versions for that Desktop release.
 2. On Windows, enable Developer Mode or run Harness from an elevated terminal.
    Harness uses directory symbolic links while composing profiles; without that
    Windows privilege the CLI can report `EISDIR` before any plugin is loaded.
@@ -74,13 +87,13 @@ npm test
 
 ## Install into a Harness profile
 
-From the repository root, with the `dsh` CLI installed:
+For a regular Harness Web profile, from this package directory with the `dsh`
+CLI installed:
 
 ```powershell
-cd integrations/deepseek_harness
 npm run build
 npm pack
-dsh plugin --profile web add ./dsh-hku-agents-0.18.0.tgz
+dsh plugin --profile web add ./dsh-hku-agents-0.18.6.tgz
 dsh --profile web --dump-config
 dsh --profile web
 ```
@@ -88,6 +101,61 @@ dsh --profile web
 Packing avoids a development-time link from the profile to this source tree.
 For a DeepSeek Harness source checkout, use the equivalent `pnpm dsh` commands.
 The package declares a `dsh.bundle` whose `cordis.patch.yml` mounts the plugin.
+
+### Official Desktop `0.2.0-rc.2` on Windows
+
+Desktop uses its own `desktop` profile. A Web-profile installation does not
+install this plugin into Desktop. First launch Desktop once to initialize its
+profile. **Fully quit Desktop**, rather than only closing/hiding its window,
+before using the packaged CLI to install a local tarball. In PowerShell, from
+this package directory:
+
+```powershell
+npm test
+npm pack
+$dshDesktop = Join-Path $env:LOCALAPPDATA 'Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd'
+& $dshDesktop --version
+& $dshDesktop plugin --profile desktop add .\dsh-hku-agents-0.18.6.tgz
+& $dshDesktop plugin --profile desktop list
+```
+
+The bundled `dsh.cmd` is used because registering `dsh` on PATH is optional.
+If Desktop is installed elsewhere, obtain its actual installation path from
+the application rather than assuming the path above. Reopen Desktop after the
+install and verify the HKU AGENTS status panel, separate HKU Admin entry, and
+twenty-two read-only HKU tools. Use **Refresh status** to check Core and Chrome Bridge;
+the sidebar appearing by itself does **not**
+prove that the local API or Chrome Bridge is connected. The plugin's Node Host
+process must receive the same `INTEGRATION_API_TOKEN` as the HKU AGENTS
+service; setting it in a *different* terminal after Desktop has started does
+not update that running process. Never put the token value in a plugin config
+file, command line, screenshot, or log. The browser-extension pairing token is
+separate. If the API or Chrome Bridge is unavailable, the tools must report a
+bounded connection error, not attempt a booking.
+
+The `./client` export is a Harness browser-loader module, not a Node or plain
+ESM entry point. It uses React and the Desktop connection service, registers
+`main` and `sidebar.panellist` through slot injection, and contains no loopback
+fetch or credential storage. The business panel requests only the exact status
+RPC on `/api/hku-agents/status` (`/api` channel, `hku-agents/status` endpoint).
+The Host uses its existing bearer-authenticated
+loopback client, then returns only Core version, bounded Chrome Bridge state,
+and a correlation ID; tab URLs, cookies, tokens, and the full Core status are
+not sent to the panel. Admin's only additional Host route is the exact
+`/api/hku-agents/admin/facilities` catalog read; it accepts no inputs and
+returns only bounded facility labels, locations, support flags, counts and a
+correlation ID. No generic API console, token, policy body or live booking
+data is exposed. Other operations and nonempty payloads are rejected.
+The status panel distinguishes an invalid RPC target, missing Host route, protocol
+error, and other Host request failure without displaying raw exception text.
+These two read-only slices are not the full D2 bridge or a Chat/Admin feature-parity
+claim. The local Gradio GUI remains the supported operator and recovery UI.
+
+The in-app Plugins manager can also install a local package archive, but this
+procedure has not yet been accepted on the user's packaged Desktop build.
+Do not use `allow-version` to bypass a compatibility warning: rebuild and
+verify against the exact installed release first. Uninstall or rollback should
+use the Desktop profile, not the Web profile.
 
 ## Configuration
 
