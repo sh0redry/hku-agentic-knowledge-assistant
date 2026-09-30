@@ -30,6 +30,11 @@ from connectors.sis.models import (
 )
 import config
 from services.data_protection import DataProtectionUnavailable
+from services.library_autobook import (
+    AutobookPilotDraft, AutobookDraftCreateRequest,
+    AutobookAuthorizationCreateRequest, AutobookAuthorizationActionRequest,
+    preview_autobook_pilot,
+)
 from services.library_shadow import (
     ShadowCreateRequest,
     ShadowFeedbackRequest,
@@ -108,7 +113,7 @@ def create_api_app(
             },
         }
 
-    def require_local_shadow_access(request: Request) -> None:
+    def require_local_shadow_access(request: Request, feature: str = "F3 shadow rules") -> None:
         client_host = request.client.host if request.client else ""
         try:
             client_is_loopback = ipaddress.ip_address(client_host.strip("[]")).is_loopback
@@ -134,7 +139,7 @@ def create_api_app(
                 status_code=403,
                 detail={
                     "code": "LIBRARY_SHADOW_LOCAL_ONLY",
-                    "message": "F3 shadow rules are available only through the loopback local GUI.",
+                    "message": f"{feature} is available only through the loopback local GUI.",
                 },
             )
 
@@ -411,6 +416,83 @@ def create_api_app(
         except KeyError:
             raise HTTPException(status_code=404, detail="Action draft not found.")
         return _dump(task)
+
+    @app.post("/api/v1/library/autobook/pilot-preview")
+    async def library_autobook_pilot_preview(body: AutobookPilotDraft, request: Request):
+        require_local_shadow_access(request, "F4 pilot design preview")
+        try:
+            return preview_autobook_pilot(body)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "LIBRARY_AUTOBOOK_PREVIEW_REJECTED", "message": str(exc)},
+            ) from exc
+
+    @app.post("/api/v1/library/autobook/drafts/preview")
+    async def library_autobook_draft_preview(body: AutobookPilotDraft, request: Request):
+        require_local_shadow_access(request, "F4 inert drafts")
+        try:
+            return app.state.container.library_autobook.preview(body)
+        except (ValueError, DataProtectionUnavailable) as exc:
+            raise shadow_error(exc) from exc
+
+    @app.post("/api/v1/library/autobook/drafts")
+    async def library_autobook_draft_create(body: AutobookDraftCreateRequest, request: Request):
+        require_local_shadow_access(request, "F4 inert drafts")
+        try:
+            return app.state.container.library_autobook.create(body)
+        except (ValueError, DataProtectionUnavailable) as exc:
+            raise shadow_error(exc) from exc
+
+    @app.get("/api/v1/library/autobook/drafts")
+    async def library_autobook_draft_list(request: Request):
+        require_local_shadow_access(request, "F4 inert drafts")
+        try:
+            return app.state.container.library_autobook.list()
+        except DataProtectionUnavailable as exc:
+            raise shadow_error(exc) from exc
+
+    @app.post("/api/v1/library/autobook/drafts/{draft_id}/revoke")
+    async def library_autobook_draft_revoke(draft_id: str, request: Request):
+        require_local_shadow_access(request, "F4 inert drafts")
+        try:
+            return app.state.container.library_autobook.revoke(draft_id)
+        except (KeyError, DataProtectionUnavailable) as exc:
+            raise shadow_error(exc) from exc
+
+    @app.post("/api/v1/library/autobook/authorizations/preview")
+    async def library_autobook_authorization_preview(body: AutobookPilotDraft, request: Request):
+        require_local_shadow_access(request, "F4 authorization")
+        try:
+            return app.state.container.library_autobook.authorization_preview(body)
+        except (ValueError, DataProtectionUnavailable) as exc:
+            raise shadow_error(exc) from exc
+
+    @app.post("/api/v1/library/autobook/authorizations")
+    async def library_autobook_authorization_create(body: AutobookAuthorizationCreateRequest, request: Request):
+        require_local_shadow_access(request, "F4 authorization")
+        try:
+            return app.state.container.library_autobook.create_authorization(body)
+        except (ValueError, DataProtectionUnavailable) as exc:
+            raise shadow_error(exc) from exc
+
+    @app.get("/api/v1/library/autobook/authorizations")
+    async def library_autobook_authorization_list(request: Request):
+        require_local_shadow_access(request, "F4 authorization")
+        try:
+            return app.state.container.library_autobook.list_authorizations()
+        except DataProtectionUnavailable as exc:
+            raise shadow_error(exc) from exc
+
+    @app.post("/api/v1/library/autobook/authorizations/{authorization_id}/action")
+    async def library_autobook_authorization_action(
+        authorization_id: str, body: AutobookAuthorizationActionRequest, request: Request,
+    ):
+        require_local_shadow_access(request, "F4 authorization")
+        try:
+            return app.state.container.library_autobook.change_authorization(authorization_id, body.action)
+        except (ValueError, KeyError, DataProtectionUnavailable) as exc:
+            raise shadow_error(exc) from exc
 
     @app.get("/api/v1/library/shadow/status")
     async def library_shadow_status(request: Request):

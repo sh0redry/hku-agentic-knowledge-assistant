@@ -252,6 +252,42 @@ class HKUAgentsAPIClient:
     def library_shadow_status(self) -> dict:
         return self._request("GET", "/api/v1/library/shadow/status")
 
+    def library_autobook_pilot_preview(self, draft: dict) -> dict:
+        return self._request("POST", "/api/v1/library/autobook/pilot-preview", json=draft)
+
+    def library_autobook_draft_preview(self, draft: dict) -> dict:
+        return self._request("POST", "/api/v1/library/autobook/drafts/preview", json=draft)
+
+    def library_autobook_draft_create(self, preview_digest: str, acknowledged: bool) -> dict:
+        return self._request("POST", "/api/v1/library/autobook/drafts", json={
+            "preview_digest": preview_digest, "non_authorizing_acknowledged": acknowledged,
+        })
+
+    def library_autobook_drafts(self) -> dict:
+        return self._request("GET", "/api/v1/library/autobook/drafts")
+
+    def library_autobook_draft_revoke(self, draft_id: str) -> dict:
+        return self._request("POST", f"/api/v1/library/autobook/drafts/{draft_id}/revoke")
+
+    def library_autobook_authorization_preview(self, draft: dict) -> dict:
+        return self._request("POST", "/api/v1/library/autobook/authorizations/preview", json=draft)
+
+    def library_autobook_authorization_create(self, digest: str, acknowledged: bool,
+                                               policy_acknowledged: bool, rules_acknowledged: bool) -> dict:
+        return self._request("POST", "/api/v1/library/autobook/authorizations", json={
+            "preview_digest": digest,
+            "future_booking_acknowledged": acknowledged,
+            "policy_acceptance_acknowledged": policy_acknowledged,
+            "discussion_room_rules_acknowledged": rules_acknowledged,
+        })
+
+    def library_autobook_authorizations(self) -> dict:
+        return self._request("GET", "/api/v1/library/autobook/authorizations")
+
+    def library_autobook_authorization_action(self, authorization_id: str, action: str) -> dict:
+        return self._request("POST", f"/api/v1/library/autobook/authorizations/{authorization_id}/action",
+                             json={"action": action})
+
     def library_shadow_rule_preview(self, rule: dict) -> dict:
         return self._request(
             "POST", "/api/v1/library/shadow/rules/preview", json={"rule": rule}

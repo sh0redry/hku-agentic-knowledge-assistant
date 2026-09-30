@@ -49,6 +49,7 @@ from services.briefing import DailyBriefingService
 from services.portal import PortalNoticeService
 from services.library_booking import LibraryBookingPreviewRegistry
 from services.library_shadow import LibraryShadowScheduler
+from services.library_autobook import LibraryAutobookDraftService
 
 
 class ApplicationContainer:
@@ -134,6 +135,7 @@ class ApplicationContainer:
         self.tasks = TaskManager(self.registry, self.store)
         self.actions = ActionService(self.registry, self.store, self.tasks, self.policy)
         self.library_shadow = LibraryShadowScheduler(self.store, self.tasks)
+        self.library_autobook = LibraryAutobookDraftService(self.store)
 
     def connection_status(self) -> list[dict]:
         return [connector.health() for connector in self.connectors.values()]

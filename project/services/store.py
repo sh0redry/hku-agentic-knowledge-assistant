@@ -125,8 +125,204 @@ class SQLiteStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_library_shadow_runs_rule
                     ON library_shadow_runs(rule_id, scheduled_at);
+                CREATE TABLE IF NOT EXISTS library_autobook_drafts (
+                    id TEXT PRIMARY KEY,
+                    state TEXT NOT NULL CHECK (state IN ('held_non_authorizing', 'revoked')),
+                    encrypted_payload BLOB NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    version INTEGER NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS library_autobook_authorizations (
+                    id TEXT PRIMARY KEY,
+                    state TEXT NOT NULL CHECK (state IN
+                        ('pending_executor', 'paused', 'revoked', 'completed', 'outcome_unknown', 'expired')),
+                    encrypted_payload BLOB NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    execution_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    version INTEGER NOT NULL,
+                    attempt_count INTEGER NOT NULL DEFAULT 0,
+                    success_count INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE TABLE IF NOT EXISTS library_autobook_attempts (
+                    id TEXT PRIMARY KEY,
+                    authorization_id TEXT NOT NULL REFERENCES library_autobook_authorizations(id),
+                    state TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(authorization_id)
+                );
                 """
             )
+            # Older local F4 development databases had no execution bound.
+            # Leave those authorizations non-executable until explicitly replaced.
+            columns = {row["name"] for row in db.execute("PRAGMA table_info(library_autobook_authorizations)")}
+            if "execution_at" not in columns:
+                db.execute("ALTER TABLE library_autobook_authorizations ADD COLUMN execution_at TEXT")
+
+    def create_library_autobook_draft(self, record: dict) -> None:
+        with self._connection() as db:
+            db.execute(
+                """INSERT INTO library_autobook_drafts
+                (id, state, encrypted_payload, created_at, updated_at, expires_at, version)
+                VALUES (?, 'held_non_authorizing', ?, ?, ?, ?, 1)""",
+                (record["id"], record["encrypted_payload"], record["created_at"],
+                 record["updated_at"], record["expires_at"]),
+            )
+
+    def list_library_autobook_drafts(self, limit: int = 100) -> list[dict]:
+        with self._connection() as db:
+            rows = db.execute(
+                "SELECT * FROM library_autobook_drafts ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def revoke_library_autobook_draft(self, draft_id: str, updated_at: str) -> dict:
+        with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT * FROM library_autobook_drafts WHERE id = ?", (draft_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(draft_id)
+            if row["state"] == "held_non_authorizing":
+                db.execute(
+                    "UPDATE library_autobook_drafts SET state = 'revoked', updated_at = ? WHERE id = ?",
+                    (updated_at, draft_id),
+                )
+        result = dict(row)
+        result["_changed"] = row["state"] == "held_non_authorizing"
+        result["state"] = "revoked"
+        result["updated_at"] = updated_at if row["state"] != "revoked" else row["updated_at"]
+        return result
+
+    def create_library_autobook_authorization(self, record: dict, *, max_pending: int = 5) -> None:
+        with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            count = db.execute(
+                "SELECT COUNT(*) FROM library_autobook_authorizations WHERE state IN ('pending_executor', 'paused')"
+            ).fetchone()[0]
+            if count >= max_pending:
+                raise ValueError(f"At most {max_pending} pending F4 authorizations are allowed.")
+            db.execute(
+                """INSERT INTO library_autobook_authorizations
+                (id, state, encrypted_payload, created_at, updated_at, execution_at, expires_at, version)
+                VALUES (?, 'pending_executor', ?, ?, ?, ?, ?, 1)""",
+                (record["id"], record["encrypted_payload"], record["created_at"],
+                 record["updated_at"], record["execution_at"], record["expires_at"]),
+            )
+
+    def list_library_autobook_authorizations(self, limit: int = 100) -> list[dict]:
+        with self._connection() as db:
+            rows = db.execute(
+                "SELECT * FROM library_autobook_authorizations ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def expire_library_autobook_authorizations(self, now: str) -> list[str]:
+        with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            rows = db.execute(
+                """SELECT id FROM library_autobook_authorizations
+                WHERE state IN ('pending_executor', 'paused') AND expires_at <= ?""",
+                (now,),
+            ).fetchall()
+            if rows:
+                db.execute(
+                    """UPDATE library_autobook_authorizations
+                    SET state = 'expired', updated_at = ?
+                    WHERE state IN ('pending_executor', 'paused') AND expires_at <= ?""",
+                    (now, now),
+                )
+        return [row["id"] for row in rows]
+
+    def change_library_autobook_authorization_state(
+        self, authorization_id: str, action: str, updated_at: str
+    ) -> dict:
+        transitions = {
+            ("pending_executor", "pause"): "paused",
+            ("pending_executor", "revoke"): "revoked",
+            ("paused", "revoke"): "revoked",
+        }
+        with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT * FROM library_autobook_authorizations WHERE id = ?", (authorization_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(authorization_id)
+            new_state = transitions.get((row["state"], action))
+            if new_state is None:
+                raise ValueError("This F4 authorization cannot make that state transition.")
+            db.execute(
+                "UPDATE library_autobook_authorizations SET state = ?, updated_at = ? WHERE id = ?",
+                (new_state, updated_at, authorization_id),
+            )
+        result = dict(row)
+        result.update(state=new_state, updated_at=updated_at)
+        return result
+
+    def claim_library_autobook_attempt(
+        self, authorization_id: str, attempt_id: str, now: str
+    ) -> bool:
+        """Single-use claim for a future executor; claim means no automatic retry."""
+        with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT state, execution_at, expires_at, attempt_count FROM library_autobook_authorizations WHERE id = ?",
+                (authorization_id,),
+            ).fetchone()
+            if (row is None or row["state"] != "pending_executor"
+                    or not row["execution_at"] or now < row["execution_at"] or row["expires_at"] <= now
+                    or row["attempt_count"] != 0):
+                return False
+            db.execute(
+                """INSERT INTO library_autobook_attempts
+                (id, authorization_id, state, created_at, updated_at)
+                VALUES (?, ?, 'outcome_unknown', ?, ?)""",
+                (attempt_id, authorization_id, now, now),
+            )
+            db.execute(
+                """UPDATE library_autobook_authorizations
+                SET state = 'outcome_unknown', attempt_count = 1, updated_at = ? WHERE id = ?""",
+                (now, authorization_id),
+            )
+            return True
+
+    def confirm_library_autobook_attempt(
+        self, authorization_id: str, attempt_id: str, now: str,
+        *, record_match_count: int,
+    ) -> bool:
+        """Only exactly one authoritative record can resolve an attempt as success."""
+        if record_match_count != 1:
+            return False
+        with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                """SELECT a.state, a.success_count, t.id AS attempt_id
+                FROM library_autobook_authorizations a
+                JOIN library_autobook_attempts t ON t.authorization_id = a.id
+                WHERE a.id = ?""",
+                (authorization_id,),
+            ).fetchone()
+            if (row is None or row["state"] != "outcome_unknown"
+                    or row["attempt_id"] != attempt_id or row["success_count"] != 0):
+                return False
+            db.execute(
+                """UPDATE library_autobook_authorizations
+                SET state = 'completed', success_count = 1, updated_at = ? WHERE id = ?""",
+                (now, authorization_id),
+            )
+            db.execute(
+                "UPDATE library_autobook_attempts SET state = 'confirmed', updated_at = ? WHERE id = ?",
+                (now, attempt_id),
+            )
+            return True
 
     def create_task(self, record: TaskRecord) -> None:
         with self._connection() as db:
@@ -428,6 +624,13 @@ class SQLiteStore:
                 (next_run_at, started_at, rule_id),
             )
             return True
+
+    def update_library_shadow_progress(self, run_id: str, encrypted_payload: bytes) -> None:
+        with self._connection() as db:
+            db.execute(
+                "UPDATE library_shadow_runs SET encrypted_payload = ? WHERE id = ? AND outcome = 'running'",
+                (encrypted_payload, run_id),
+            )
 
     def complete_library_shadow_run(
         self, run_id: str, *, outcome: str, candidate_count: int,

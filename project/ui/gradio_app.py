@@ -96,11 +96,18 @@ def _shadow_room_preferences(value: str) -> list[dict]:
     return preferences
 
 
-def _shadow_start_times(value: str) -> list[str]:
-    starts = [part.strip() for part in (value or "").replace("\n", ",").split(",") if part.strip()]
-    if not starts:
-        raise ValueError("Enter at least one preferred start time in HH:MM format.")
-    return starts
+def _shadow_sessions(value: str) -> list[dict]:
+    intervals = []
+    for part in (value or "").replace("\n", ",").split(","):
+        if not part.strip():
+            continue
+        pair = [item.strip() for item in part.split("-")]
+        if len(pair) != 2 or not all(pair):
+            raise ValueError("Use full intervals, for example 10:00-11:00, 11:00-12:00.")
+        intervals.append({"start_time": pair[0], "end_time": pair[1]})
+    if not intervals:
+        raise ValueError("Enter at least one exact preferred interval.")
+    return intervals
 
 
 def create_gradio_ui(container):
@@ -541,6 +548,91 @@ def create_gradio_ui(container):
         except Exception as exc:
             return _pretty({"ok": False, "read_only": True, "message": str(exc)})
 
+    def _f4_draft_payload(
+        target_date, prepare_at, execution_at, stop_at, room,
+        start_time, end_time, eligibility_category,
+    ):
+        return {
+            "facility_type": "discussion_room",
+            "target_date": (target_date or "").strip(),
+            "prepare_at": (prepare_at or "").strip(),
+            "execution_at": (execution_at or "").strip(),
+            "stop_at": (stop_at or "").strip(),
+            "floor": "Level 3",
+            "room": (room or "").strip(),
+            "start_time": (start_time or "").strip(),
+            "end_time": (end_time or "").strip(),
+            "eligibility_category": eligibility_category,
+        }
+
+    async def library_autobook_pilot_preview_handler(
+        target_date, prepare_at, execution_at, stop_at, room,
+        start_time, end_time, eligibility_category,
+    ):
+        draft = _f4_draft_payload(target_date, prepare_at, execution_at, stop_at, room,
+                                  start_time, end_time, eligibility_category)
+        try:
+            return _pretty(await asyncio.to_thread(api_client.library_autobook_pilot_preview, draft))
+        except Exception as exc:
+            return _pretty({"ok": False, "read_only": True, "message": str(exc)})
+
+    async def library_autobook_draft_preview_handler(*values):
+        try:
+            result = await asyncio.to_thread(api_client.library_autobook_draft_preview, _f4_draft_payload(*values))
+            return _pretty(result), result.get("preview_digest", "")
+        except Exception as exc:
+            return _pretty({"ok": False, "booking_authority": False, "message": str(exc)}), ""
+
+    async def library_autobook_draft_create_handler(digest, acknowledged):
+        try:
+            if not acknowledged:
+                raise ValueError("Acknowledge that this saved draft grants no booking authority.")
+            return _pretty(await asyncio.to_thread(api_client.library_autobook_draft_create, digest, acknowledged))
+        except Exception as exc:
+            return _pretty({"ok": False, "booking_authority": False, "message": str(exc)})
+
+    async def library_autobook_drafts_handler():
+        try:
+            return _pretty(await asyncio.to_thread(api_client.library_autobook_drafts))
+        except Exception as exc:
+            return _pretty({"ok": False, "booking_authority": False, "message": str(exc)})
+
+    async def library_autobook_draft_revoke_handler(draft_id):
+        try:
+            return _pretty(await asyncio.to_thread(api_client.library_autobook_draft_revoke, (draft_id or "").strip()))
+        except Exception as exc:
+            return _pretty({"ok": False, "booking_authority": False, "message": str(exc)})
+
+    async def library_autobook_authorization_preview_handler(*values):
+        try:
+            result = await asyncio.to_thread(api_client.library_autobook_authorization_preview,
+                                             _f4_draft_payload(*values))
+            return _pretty(result), result.get("preview_digest", "")
+        except Exception as exc:
+            return _pretty({"ok": False, "execution_enabled": False, "message": str(exc)}), ""
+
+    async def library_autobook_authorization_create_handler(digest, acknowledged, policy_ack, rules_ack):
+        try:
+            if not (acknowledged and policy_ack and rules_ack):
+                raise ValueError("Review the exact target and acknowledge all three F4 conditions.")
+            return _pretty(await asyncio.to_thread(api_client.library_autobook_authorization_create,
+                                                   digest, acknowledged, policy_ack, rules_ack))
+        except Exception as exc:
+            return _pretty({"ok": False, "execution_enabled": False, "message": str(exc)})
+
+    async def library_autobook_authorizations_handler():
+        try:
+            return _pretty(await asyncio.to_thread(api_client.library_autobook_authorizations))
+        except Exception as exc:
+            return _pretty({"ok": False, "execution_enabled": False, "message": str(exc)})
+
+    async def library_autobook_authorization_action_handler(authorization_id, action):
+        try:
+            return _pretty(await asyncio.to_thread(api_client.library_autobook_authorization_action,
+                                                   (authorization_id or "").strip(), action))
+        except Exception as exc:
+            return _pretty({"ok": False, "execution_enabled": False, "message": str(exc)})
+
     async def library_shadow_status_handler():
         try:
             status, rules, runs = await asyncio.gather(
@@ -555,26 +647,33 @@ def create_gradio_ui(container):
 
     async def library_shadow_preview_handler(
         facility_type,
-        target_weekdays,
-        run_time_local,
+        target_date,
+        execution_at,
         room_preferences,
         start_time_preferences,
         allow_room_fallback,
         allow_time_fallback,
         eligibility_category,
-        max_runs,
+        prepare_at="",
+        stop_at="",
+        poll_interval_seconds=15,
+        max_date_checks=1,
     ):
         try:
             rule = {
                 "facility_type": facility_type,
-                "target_weekdays": target_weekdays or [],
-                "run_time_local": (run_time_local or "").strip(),
+                "target_date": (target_date or "").strip(),
+                "execution_at": (execution_at or "").strip(),
+                "prepare_at": (prepare_at or "").strip() or None,
+                "stop_at": (stop_at or "").strip() or None,
+                "poll_interval_seconds": int(poll_interval_seconds),
+                "max_date_checks": int(max_date_checks),
                 "room_preference_order": _shadow_room_preferences(room_preferences),
-                "start_time_preference_order": _shadow_start_times(start_time_preferences),
+                "session_preference_order": _shadow_sessions(start_time_preferences),
                 "allow_room_fallback": bool(allow_room_fallback),
                 "allow_time_fallback": bool(allow_time_fallback),
                 "eligibility_category": eligibility_category,
-                "max_runs": int(max_runs),
+                "max_runs": 1,
                 "shadow_only": True,
             }
             result = await asyncio.to_thread(api_client.library_shadow_rule_preview, rule)
@@ -590,7 +689,7 @@ def create_gradio_ui(container):
             if not preview_digest:
                 raise ValueError("Create and review a fresh F3 rule preview first.")
             if acknowledged is not True:
-                raise ValueError("Confirm that this is a recurring read-only shadow rule with no booking authority.")
+                raise ValueError("Confirm that this is a one-time read-only task with no booking authority.")
             result = await asyncio.to_thread(
                 api_client.library_shadow_rule_create, preview_digest, True
             )
@@ -1127,424 +1226,562 @@ def create_gradio_ui(container):
                 "## HKU Libraries\n"
                 "Research search opens only the fixed Find@HKUL route and reads visible "
                 "bibliographic results. It does not open licensed full text or save/request "
-                "items. Space availability is read-only. A separate supervised one-shot booking "
-                "flow is available below only when its local write gate is deliberately enabled; "
-                "its current live-submit scope is Main Library single study rooms and discussion rooms."
+                "items. Use the sub-tabs for space availability, an exact read-only preview, "
+                "supervised one-shot F2 booking, read-only F3 scheduling, and the F4 design preview. "
+                "F2 requires its separate local write gate; the F4 preview grants no booking authority."
             )
-            library_query = gr.Textbox(value="artificial intelligence", label="Research query")
-            with gr.Row():
-                library_field = gr.Dropdown(
-                    choices=["any", "title", "author", "subject"], value="any", label="Field"
-                )
-                library_scope = gr.Dropdown(
-                    choices=["hku", "everything"], value="hku", label="Scope"
-                )
-                library_limit = gr.Number(value=10, minimum=1, maximum=20, precision=0, label="Limit")
-            library_search_button = gr.Button("Search Find@HKUL", variant="primary")
-            library_output = gr.Code(
-                value="Run a bounded public Find@HKUL search.", language="json", label="Library result"
-            )
-            library_search_button.click(
-                library_research_handler,
-                inputs=[library_query, library_field, library_scope, library_limit],
-                outputs=library_output,
-                show_progress="minimal",
-                queue=False,
-            )
-            gr.Markdown(
-                "### Item details and access options\n"
-                "Paste a stable `record_id` returned by the search above. Access checks "
-                "return labels only; proxy, SSO, and licensed full-text URLs are suppressed."
-            )
-            library_record_id = gr.Textbox(
-                value="alma991000375969703414", label="Find@HKUL record ID"
-            )
-            with gr.Row():
-                library_item_button = gr.Button("Read item details")
-                library_access_button = gr.Button("Read access options")
-            library_item_button.click(
-                library_item_handler,
-                inputs=library_record_id,
-                outputs=library_output,
-                show_progress="minimal",
-                queue=False,
-            )
-            library_access_button.click(
-                library_access_handler,
-                inputs=library_record_id,
-                outputs=library_output,
-                show_progress="minimal",
-                queue=False,
-            )
-            gr.Markdown(
-                "### HKUL opening hours and locations\n"
-                "Open the official current-hours page and read its visible time-period rows. "
-                "An unavailable future date is reported as unknown, not as closed."
-            )
-            library_hours_button = gr.Button("Read current opening hours")
-            library_hours_button.click(
-                library_hours_handler,
-                outputs=library_output,
-                show_progress="minimal",
-                queue=False,
-            )
-            gr.Markdown(
-                "### Book a Space availability\n"
-                "List the supported facilities and verified policy summary locally before "
-                "opening an authenticated availability page."
-            )
-            library_facilities_button = gr.Button("List supported facilities and policies")
-            library_facilities_button.click(
-                library_facilities_handler,
-                outputs=library_output,
-                show_progress="minimal",
-                queue=False,
-            )
-            gr.Markdown(
-                "Availability covers the Main Library facility types shown below plus the "
-                "verified Chi Wah Study Room route. This is read-only: it does not select "
-                "a slot. Read the live Date options for the selected facility before searching. "
-                "The first run can open HKUL authentication; "
-                "complete it manually in Chrome and retry."
-            )
-            library_facility = gr.Dropdown(
-                choices=[
-                    ("Single Study Room (3 sessions) — Main Library", "single_study_room"),
-                    ("AV Group Viewing Room — Main Library", "av_group_viewing_room"),
-                    ("Communal Virtual PC — Main Library", "communal_virtual_pc"),
-                    ("Computer — Main Library", "computer"),
-                    ("Computer in LIC — Main Library", "computer_in_lic"),
-                    ("Engraving/cutting computer — Main Library", "engraving_cutting_computer"),
-                    ("Concept and Creation Room — Main Library", "concept_and_creation_room"),
-                    ("Discussion Room — Main Library", "discussion_room"),
-                    ("Microform Scanner — Special Collections", "microform_scanner"),
-                    ("Overhead Scanner — Special Collections", "overhead_scanner"),
-                    ("Research Desk — Special Collections", "research_desk"),
-                    ("Studio and Editing Room — Main Library", "studio_editing_room"),
-                    ("Study Table — Main Library", "study_table"),
-                    ("Study Table (Deep Quiet) — Main Library", "study_table_deep_quiet"),
-                    ("Study Room — Chi Wah Learning Commons", "study_room"),
-                ],
-                value="single_study_room",
-                label="Facility type",
-            )
-            library_dates_button = gr.Button("1. Read this facility's live Date options")
-            library_availability_date = gr.Dropdown(
-                choices=[], value=None, interactive=False,
-                label="2. Select an offered date (YYYY-MM-DD)",
-                info="Reading dates fills this list and selects the first option. Choose your date, then click Search below.",
-            )
-            library_space_button = gr.Button("3. Search availability for selected date", interactive=False)
-            library_dates_button.click(
-                library_dates_handler, inputs=[library_facility, library_availability_date],
-                outputs=[library_output, library_availability_date, library_space_button],
-                show_progress="minimal", queue=False,
-            )
-            library_facility.input(
-                lambda: (
-                    gr.update(choices=[], value=None, interactive=False),
-                    gr.update(interactive=False),
-                ),
-                outputs=[library_availability_date, library_space_button], queue=False,
-            )
-            library_space_button.click(
-                library_space_handler,
-                inputs=[library_facility, library_availability_date],
-                outputs=library_output,
-                show_progress="minimal",
-                queue=False,
-            )
-            gr.Markdown(
-                "### Exact booking preview (Phase F1, read-only)\n"
-                "All 15 availability-supported facility types can be previewed. Each preview re-reads "
-                "the exact live date and slot. Some facility-specific rules are not account-verified; "
-                "review the linked HKUL policy and live form before a real booking.\n"
-                "Copy one exact slot from the availability result. The preview re-reads the "
-                "live page, checks the displayed date and published eligibility category, "
-                "and expires quickly. Date is intentionally not defaulted: copy the returned "
-                "`date` value exactly. It does not click a slot or authorize a reservation."
-            )
-            library_preview_facility = gr.Dropdown(
-                choices=["single_study_room", "av_group_viewing_room", "communal_virtual_pc", "computer", "computer_in_lic", "engraving_cutting_computer", "concept_and_creation_room", "discussion_room", "microform_scanner", "overhead_scanner", "research_desk", "studio_editing_room", "study_table", "study_table_deep_quiet", "study_room"],
-                value="single_study_room",
-                label="Preview-enabled facility type",
-            )
-            with gr.Row():
-                library_preview_date = gr.Textbox(value="", label="Date (YYYY-MM-DD)")
-                library_preview_floor = gr.Textbox(value="", label="Floor (optional)")
-                library_preview_room = gr.Textbox(value="", label="Exact room")
-            with gr.Row():
-                library_preview_start = gr.Textbox(value="", label="Start (HH:MM)")
-                library_preview_end = gr.Textbox(value="", label="End (HH:MM)")
-                library_preview_eligibility = gr.Dropdown(
-                    choices=[
-                        "current_hku_students",
-                        "current_hku_staff",
-                        "current_hku_space_students",
-                        "current_hku_space_staff",
-                        "hku_alumni",
-                    ],
-                    value="current_hku_students",
-                    label="Self-declared eligibility category",
-                )
-            library_preview_button = gr.Button("Create read-only booking preview")
-            library_preview_digest = gr.State("")
-            library_preview_button.click(
-                library_booking_preview_handler,
-                inputs=[
-                    library_preview_facility,
-                    library_preview_date,
-                    library_preview_floor,
-                    library_preview_room,
-                    library_preview_start,
-                    library_preview_end,
-                    library_preview_eligibility,
-                ],
-                outputs=[library_output, library_preview_digest],
-                show_progress="minimal",
-                queue=False,
-            )
-            gr.Markdown(
-                "### F2 — supervised one-shot booking\n"
-                "F2 allows a supervised one-shot attempt for the 15 listed facility types. "
-                "No live write is guaranteed: missing facility rules, stale slots, extra required form fields, or an unverifiable result stop submission. "
-                "For a discussion room, the extra attestation below is mandatory: you must confirm "
-                "at least two patrons, no more than two sessions/120 minutes for that day, "
-                "and compliance with the interleaving rule. HKUL account bookings and group size "
-                "are not independently verified by this tool. "
-                "The action re-reads the exact slot, selects only that slot, checks every "
-                "booking-form field, and verifies one matching My Booking Record row. It will "
-                "never retry an ambiguous Submit. Preparation, validation, and confirmation "
-                "do not submit. The final Execute button sends the single external request. "
-                "Keep `LIBRARY_BOOKING_WRITES_ENABLED=false` for dry tests; only enable it "
-                "temporarily for an explicitly approved low-impact live test."
-            )
-            library_policy_ack = gr.Checkbox(
-                value=False,
-                label="I reviewed the exact target above and accept the displayed HKUL booking policy for this one reservation.",
-            )
-            library_discussion_rules_ack = gr.Checkbox(
-                value=False,
-                label=(
-                    "Discussion rooms only: I confirm at least two patrons will use the room, "
-                    "and my bookings for that day will comply with the two-session/120-minute limit "
-                    "and the interleaving rule."
-                ),
-            )
-            library_facility_rules_ack = gr.Checkbox(
-                value=False,
-                label="Other facilities: I reviewed the specific HKUL rules, including group size, daily limits and special-use restrictions where applicable, for this exact type and date.",
-            )
-            library_f2_output = gr.Code(
-                value="No booking action draft prepared.", language="json", label="F2 action review / outcome"
-            )
-            library_f2_draft_id = gr.State("")
-            library_f2_preview_digest = gr.State("")
-            library_f2_confirmation_token = gr.State("")
-            library_f2_facility_type = gr.State("")
-            library_f2_prepare_button = gr.Button("1. Prepare one-shot action (no booking yet)")
-            library_f2_prepare_button.click(
-                library_booking_draft_handler,
-                inputs=[library_preview_digest, library_policy_ack, library_discussion_rules_ack, library_facility_rules_ack, library_preview_facility],
-                outputs=[library_f2_output, library_f2_draft_id, library_f2_preview_digest, library_f2_confirmation_token, library_f2_facility_type],
-                show_progress="minimal",
-                queue=False,
-            )
-            library_f2_validate_button = gr.Button("2. Revalidate action preview")
-            library_f2_validate_button.click(
-                library_booking_validate_handler,
-                inputs=[library_f2_draft_id, library_f2_facility_type],
-                outputs=[library_f2_output, library_f2_draft_id, library_f2_preview_digest, library_f2_confirmation_token, library_f2_facility_type],
-                show_progress="minimal",
-                queue=False,
-            )
-            library_f2_confirm_button = gr.Button("3. Confirm exact reservation")
-            library_f2_confirm_button.click(
-                library_booking_confirm_handler,
-                inputs=[library_f2_draft_id, library_f2_preview_digest, library_policy_ack, library_discussion_rules_ack, library_facility_rules_ack, library_f2_facility_type],
-                outputs=[library_f2_output, library_f2_draft_id, library_f2_preview_digest, library_f2_confirmation_token, library_f2_facility_type],
-                show_progress="minimal",
-                queue=False,
-            )
-            library_f2_execute_button = gr.Button("4. Execute exactly once", variant="stop")
-            library_f2_execute_button.click(
-                library_booking_execute_handler,
-                inputs=[library_f2_draft_id, library_f2_confirmation_token],
-                outputs=[library_f2_output, library_f2_draft_id, library_f2_preview_digest, library_f2_confirmation_token],
-                show_progress="full",
-                queue=False,
-            )
+            with gr.Tabs():
+                with gr.Tab("Research & hours"):
+                    library_query = gr.Textbox(value="artificial intelligence", label="Research query")
+                    with gr.Row():
+                        library_field = gr.Dropdown(
+                            choices=["any", "title", "author", "subject"], value="any", label="Field"
+                        )
+                        library_scope = gr.Dropdown(
+                            choices=["hku", "everything"], value="hku", label="Scope"
+                        )
+                        library_limit = gr.Number(value=10, minimum=1, maximum=20, precision=0, label="Limit")
+                    library_search_button = gr.Button("Search Find@HKUL", variant="primary")
+                    library_output = gr.Code(
+                        value="Run a bounded public Find@HKUL search.", language="json", label="Library result"
+                    )
+                    library_search_button.click(
+                        library_research_handler,
+                        inputs=[library_query, library_field, library_scope, library_limit],
+                        outputs=library_output,
+                        show_progress="minimal",
+                        queue=False,
+                    )
+                    gr.Markdown(
+                        "### Item details and access options\n"
+                        "Paste a stable `record_id` returned by the search above. Access checks "
+                        "return labels only; proxy, SSO, and licensed full-text URLs are suppressed."
+                    )
+                    library_record_id = gr.Textbox(
+                        value="alma991000375969703414", label="Find@HKUL record ID"
+                    )
+                    with gr.Row():
+                        library_item_button = gr.Button("Read item details")
+                        library_access_button = gr.Button("Read access options")
+                    library_item_button.click(
+                        library_item_handler,
+                        inputs=library_record_id,
+                        outputs=library_output,
+                        show_progress="minimal",
+                        queue=False,
+                    )
+                    library_access_button.click(
+                        library_access_handler,
+                        inputs=library_record_id,
+                        outputs=library_output,
+                        show_progress="minimal",
+                        queue=False,
+                    )
+                    gr.Markdown(
+                        "### HKUL opening hours and locations\n"
+                        "Open the official current-hours page and read its visible time-period rows. "
+                        "An unavailable future date is reported as unknown, not as closed."
+                    )
+                    library_hours_button = gr.Button("Read current opening hours")
+                    library_hours_button.click(
+                        library_hours_handler,
+                        outputs=library_output,
+                        show_progress="minimal",
+                        queue=False,
+                    )
+                with gr.Tab("Space availability"):
+                    library_space_output = gr.Code(value="Read live Date options, then search.", language="json", label="Availability result")
+                    gr.Markdown(
+                        "### Book a Space availability\n"
+                        "List the supported facilities and verified policy summary locally before "
+                        "opening an authenticated availability page."
+                    )
+                    library_facilities_button = gr.Button("List supported facilities and policies")
+                    library_facilities_button.click(
+                        library_facilities_handler,
+                        outputs=library_space_output,
+                        show_progress="minimal",
+                        queue=False,
+                    )
+                    gr.Markdown(
+                        "Availability covers the Main Library facility types shown below plus the "
+                        "verified Chi Wah Study Room route. This is read-only: it does not select "
+                        "a slot. Read the live Date options for the selected facility before searching. "
+                        "The first run can open HKUL authentication; "
+                        "complete it manually in Chrome and retry."
+                    )
+                    library_facility = gr.Dropdown(
+                        choices=[
+                            ("Single Study Room (3 sessions) — Main Library", "single_study_room"),
+                            ("AV Group Viewing Room — Main Library", "av_group_viewing_room"),
+                            ("Communal Virtual PC — Main Library", "communal_virtual_pc"),
+                            ("Computer — Main Library", "computer"),
+                            ("Computer in LIC — Main Library", "computer_in_lic"),
+                            ("Engraving/cutting computer — Main Library", "engraving_cutting_computer"),
+                            ("Concept and Creation Room — Main Library", "concept_and_creation_room"),
+                            ("Discussion Room — Main Library", "discussion_room"),
+                            ("Microform Scanner — Special Collections", "microform_scanner"),
+                            ("Overhead Scanner — Special Collections", "overhead_scanner"),
+                            ("Research Desk — Special Collections", "research_desk"),
+                            ("Studio and Editing Room — Main Library", "studio_editing_room"),
+                            ("Study Table — Main Library", "study_table"),
+                            ("Study Table (Deep Quiet) — Main Library", "study_table_deep_quiet"),
+                            ("Study Room — Chi Wah Learning Commons", "study_room"),
+                        ],
+                        value="single_study_room",
+                        label="Facility type",
+                    )
+                    library_dates_button = gr.Button("1. Read this facility's live Date options")
+                    library_availability_date = gr.Dropdown(
+                        choices=[], value=None, interactive=False,
+                        label="2. Select an offered date (YYYY-MM-DD)",
+                        info="Reading dates fills this list and selects the first option. Choose your date, then click Search below.",
+                    )
+                    library_space_button = gr.Button("3. Search availability for selected date", interactive=False)
+                    library_dates_button.click(
+                        library_dates_handler, inputs=[library_facility, library_availability_date],
+                        outputs=[library_space_output, library_availability_date, library_space_button],
+                        show_progress="minimal", queue=False,
+                    )
+                    library_facility.input(
+                        lambda: (
+                            gr.update(choices=[], value=None, interactive=False),
+                            gr.update(interactive=False),
+                        ),
+                        outputs=[library_availability_date, library_space_button], queue=False,
+                    )
+                    library_space_button.click(
+                        library_space_handler,
+                        inputs=[library_facility, library_availability_date],
+                        outputs=library_space_output,
+                        show_progress="minimal",
+                        queue=False,
+                    )
+                with gr.Tab("Exact preview"):
+                    library_preview_output = gr.Code(value="Copy an exact slot from availability.", language="json", label="Exact booking preview")
+                    gr.Markdown(
+                        "### Exact booking preview (Phase F1, read-only)\n"
+                        "All 15 availability-supported facility types can be previewed. Each preview re-reads "
+                        "the exact live date and slot. Some facility-specific rules are not account-verified; "
+                        "review the linked HKUL policy and live form before a real booking.\n"
+                        "Copy one exact slot from the availability result. The preview re-reads the "
+                        "live page, checks the displayed date and published eligibility category, "
+                        "and expires quickly. Date is intentionally not defaulted: copy the returned "
+                        "`date` value exactly. It does not click a slot or authorize a reservation."
+                    )
+                    library_preview_facility = gr.Dropdown(
+                        choices=["single_study_room", "av_group_viewing_room", "communal_virtual_pc", "computer", "computer_in_lic", "engraving_cutting_computer", "concept_and_creation_room", "discussion_room", "microform_scanner", "overhead_scanner", "research_desk", "studio_editing_room", "study_table", "study_table_deep_quiet", "study_room"],
+                        value="single_study_room",
+                        label="Preview-enabled facility type",
+                    )
+                    with gr.Row():
+                        library_preview_date = gr.Textbox(value="", label="Date (YYYY-MM-DD)")
+                        library_preview_floor = gr.Textbox(value="", label="Floor (optional)")
+                        library_preview_room = gr.Textbox(value="", label="Exact room")
+                    with gr.Row():
+                        library_preview_start = gr.Textbox(value="", label="Start (HH:MM)")
+                        library_preview_end = gr.Textbox(value="", label="End (HH:MM)")
+                        library_preview_eligibility = gr.Dropdown(
+                            choices=[
+                                "current_hku_students",
+                                "current_hku_staff",
+                                "current_hku_space_students",
+                                "current_hku_space_staff",
+                                "hku_alumni",
+                            ],
+                            value="current_hku_students",
+                            label="Self-declared eligibility category",
+                        )
+                    library_preview_button = gr.Button("Create read-only booking preview")
+                    library_preview_digest = gr.State("")
+                    library_preview_button.click(
+                        library_booking_preview_handler,
+                        inputs=[
+                            library_preview_facility,
+                            library_preview_date,
+                            library_preview_floor,
+                            library_preview_room,
+                            library_preview_start,
+                            library_preview_end,
+                            library_preview_eligibility,
+                        ],
+                        outputs=[library_preview_output, library_preview_digest],
+                        show_progress="minimal",
+                        queue=False,
+                    )
+                with gr.Tab("Supervised booking (F2)"):
+                    gr.Markdown(
+                        "### F2 — supervised one-shot booking\n"
+                        "F2 allows a supervised one-shot attempt for the 15 listed facility types. "
+                        "No live write is guaranteed: missing facility rules, stale slots, extra required form fields, or an unverifiable result stop submission. "
+                        "For a discussion room, the extra attestation below is mandatory: you must confirm "
+                        "at least two patrons, no more than two sessions/120 minutes for that day, "
+                        "and compliance with the interleaving rule. HKUL account bookings and group size "
+                        "are not independently verified by this tool. "
+                        "The action re-reads the exact slot, selects only that slot, checks every "
+                        "booking-form field, and verifies one matching My Booking Record row. It will "
+                        "never retry an ambiguous Submit. Preparation, validation, and confirmation "
+                        "do not submit. The final Execute button sends the single external request. "
+                        "Keep `LIBRARY_BOOKING_WRITES_ENABLED=false` for dry tests; only enable it "
+                        "temporarily for an explicitly approved low-impact live test."
+                    )
+                    library_policy_ack = gr.Checkbox(
+                        value=False,
+                            label="I reviewed the exact target in the Exact preview tab and accept the displayed HKUL booking policy for this one reservation.",
+                    )
+                    library_discussion_rules_ack = gr.Checkbox(
+                        value=False,
+                        label=(
+                            "Discussion rooms only: I confirm at least two patrons will use the room, "
+                            "and my bookings for that day will comply with the two-session/120-minute limit "
+                            "and the interleaving rule."
+                        ),
+                    )
+                    library_facility_rules_ack = gr.Checkbox(
+                        value=False,
+                        label="Other facilities: I reviewed the specific HKUL rules, including group size, daily limits and special-use restrictions where applicable, for this exact type and date.",
+                    )
+                    library_f2_output = gr.Code(
+                        value="No booking action draft prepared.", language="json", label="F2 action review / outcome"
+                    )
+                    library_f2_draft_id = gr.State("")
+                    library_f2_preview_digest = gr.State("")
+                    library_f2_confirmation_token = gr.State("")
+                    library_f2_facility_type = gr.State("")
+                    library_f2_prepare_button = gr.Button("1. Prepare one-shot action (no booking yet)")
+                    library_f2_prepare_button.click(
+                        library_booking_draft_handler,
+                        inputs=[library_preview_digest, library_policy_ack, library_discussion_rules_ack, library_facility_rules_ack, library_preview_facility],
+                        outputs=[library_f2_output, library_f2_draft_id, library_f2_preview_digest, library_f2_confirmation_token, library_f2_facility_type],
+                        show_progress="minimal",
+                        queue=False,
+                    )
+                    library_f2_validate_button = gr.Button("2. Revalidate action preview")
+                    library_f2_validate_button.click(
+                        library_booking_validate_handler,
+                        inputs=[library_f2_draft_id, library_f2_facility_type],
+                        outputs=[library_f2_output, library_f2_draft_id, library_f2_preview_digest, library_f2_confirmation_token, library_f2_facility_type],
+                        show_progress="minimal",
+                        queue=False,
+                    )
+                    library_f2_confirm_button = gr.Button("3. Confirm exact reservation")
+                    library_f2_confirm_button.click(
+                        library_booking_confirm_handler,
+                        inputs=[library_f2_draft_id, library_f2_preview_digest, library_policy_ack, library_discussion_rules_ack, library_facility_rules_ack, library_f2_facility_type],
+                        outputs=[library_f2_output, library_f2_draft_id, library_f2_preview_digest, library_f2_confirmation_token, library_f2_facility_type],
+                        show_progress="minimal",
+                        queue=False,
+                    )
+                    library_f2_execute_button = gr.Button("4. Execute exactly once", variant="stop")
+                    library_f2_execute_button.click(
+                        library_booking_execute_handler,
+                        inputs=[library_f2_draft_id, library_f2_confirmation_token],
+                        outputs=[library_f2_output, library_f2_draft_id, library_f2_preview_digest, library_f2_confirmation_token],
+                        show_progress="full",
+                        queue=False,
+                    )
 
-            gr.Markdown(
-                "### F3 — recurring shadow scheduler (read-only; no booking authority)\n"
-                "F3 stores a narrow, expiring rule and, at each daily observation time, reads this facility's "
-                "live Date options and makes at most one read-only F1 availability Search for an offered target weekday. It ranks exact rooms/times from "
-                "your ordered preferences, records the suggestion, and waits for your later feedback. It never "
-                "selects a slot, opens a booking form, calls F2, or submits/cancels a booking. The run time is "
-                "an observation time—not an assumed HKUL release time. Rules and run details are protected with "
-                "Windows current-user DPAPI; at most five rules can be active at once. F3 is unavailable if that "
-                "protection or loopback-only hosting is unavailable."
-            )
-            library_shadow_status_button = gr.Button("Refresh F3 status, rules, and run history")
-            with gr.Row():
-                library_shadow_status_output = gr.Code(
-                    value="F3 scheduler status not loaded.", language="json", label="F3 status"
-                )
-                library_shadow_rules_output = gr.Code(
-                    value="No rules loaded.", language="json", label="F3 rules"
-                )
-            library_shadow_runs_output = gr.Code(
-                value="No runs loaded.", language="json", label="F3 shadow runs / agreement"
-            )
-            library_shadow_status_button.click(
-                library_shadow_status_handler,
-                outputs=[library_shadow_status_output, library_shadow_rules_output, library_shadow_runs_output],
-                show_progress="minimal",
-                queue=False,
-            )
-            gr.Markdown(
-                "#### Define a narrow observation rule\n"
-                "Target weekdays are the dates you care about; F3 observes daily and follows the live offered dates, including holiday skips. "
-                "Room lines use `FLOOR | exact room` (or just an exact room). Start times are comma-separated "
-                "`HH:MM` values. If fallback is off, only the first room and first time are eligible. "
-                "No rule can be created until you review its preview and acknowledge that it creates a recurring "
-                "read-only rule—not permission to book."
-            )
-            library_shadow_facility = gr.Dropdown(
-                choices=[
-                    ("Single Study Room (3 sessions) — Main Library", "single_study_room"),
-                    ("Studio and Editing Room — Main Library", "studio_editing_room"),
-                    ("Study Table — Main Library", "study_table"),
-                    ("Study Room — Chi Wah Learning Commons", "study_room"),
-                    ("Discussion Room — Main Library", "discussion_room"),
-                ],
-                value="single_study_room",
-                label="F3 facility type (F1 preview-supported only)",
-            )
-            library_shadow_weekdays = gr.CheckboxGroup(
-                choices=[
-                    ("Monday", 0), ("Tuesday", 1), ("Wednesday", 2),
-                    ("Thursday", 3), ("Friday", 4), ("Saturday", 5), ("Sunday", 6),
-                ],
-                value=[0, 1, 2, 3, 4, 5, 6],
-                label="Target date weekdays (Hong Kong time)",
-            )
-            with gr.Row():
-                library_shadow_run_time = gr.Textbox(value="09:00", label="Observation time, Asia/Hong_Kong (HH:MM)")
-                library_shadow_max_runs = gr.Number(value=20, minimum=1, maximum=20, precision=0, label="Maximum scheduled runs (1–20)")
-                library_shadow_eligibility = gr.Dropdown(
-                    choices=[
-                        "current_hku_students", "current_hku_staff",
-                        "current_hku_space_students", "current_hku_space_staff", "hku_alumni",
-                    ],
-                    value="current_hku_students",
-                    label="Self-declared eligibility category",
-                )
-            library_shadow_rooms = gr.Textbox(
-                value="",
-                lines=4,
-                placeholder="4/F | Single Study Room (3 sessions) Room 424\n4/F | Single Study Room (3 sessions) Room 428",
-                label="Exact room preference order (one per line)",
-            )
-            library_shadow_times = gr.Textbox(
-                value="08:30, 13:00, 18:00",
-                label="Preferred start-time order (comma-separated HH:MM)",
-            )
-            with gr.Row():
-                library_shadow_room_fallback = gr.Checkbox(
-                    value=False, label="Allow lower-ranked room preferences if the first is unavailable"
-                )
-                library_shadow_time_fallback = gr.Checkbox(
-                    value=False, label="Allow lower-ranked start times if the first is unavailable"
-                )
-            library_shadow_preview_button = gr.Button("1. Preview recurring shadow rule")
-            library_shadow_preview_output = gr.Code(
-                value="No F3 rule preview prepared.", language="json", label="F3 rule preview"
-            )
-            library_shadow_preview_digest = gr.Textbox(
-                value="", interactive=False,
-                label="F3 preview reference (filled after a successful preview)",
-            )
-            library_shadow_create_ack = gr.Checkbox(
-                value=False,
-                label="I reviewed the exact rule and understand it schedules recurring read-only checks only; it cannot book, select a slot, or call F2.",
-            )
-            library_shadow_create_button = gr.Button("2. Confirm and create shadow-only rule")
-            library_shadow_preview_button.click(
-                library_shadow_preview_handler,
-                inputs=[
-                    library_shadow_facility, library_shadow_weekdays, library_shadow_run_time,
-                    library_shadow_rooms, library_shadow_times, library_shadow_room_fallback,
-                    library_shadow_time_fallback, library_shadow_eligibility, library_shadow_max_runs,
-                ],
-                outputs=[library_shadow_preview_output, library_shadow_preview_digest, library_shadow_create_ack],
-                show_progress="minimal",
-                queue=False,
-            )
-            library_shadow_create_button.click(
-                library_shadow_create_handler,
-                inputs=[library_shadow_preview_digest, library_shadow_create_ack],
-                outputs=[library_shadow_preview_output, library_shadow_preview_digest, library_shadow_create_ack],
-                show_progress="minimal",
-                queue=False,
-            )
-            gr.Markdown(
-                "#### Pause or permanently revoke a rule\n"
-                "Use the rule ID shown above. Revocation is terminal and cannot be undone; it prevents future scheduled reads."
-            )
-            with gr.Row():
-                library_shadow_rule_id = gr.Textbox(value="", label="F3 rule ID")
-                library_shadow_rule_action = gr.Dropdown(
-                    choices=[("Pause", "pause"), ("Resume paused rule", "resume"), ("Revoke permanently", "revoke")],
-                    value="pause",
-                    label="Rule action",
-                )
-            library_shadow_revoke_ack = gr.Checkbox(
-                value=False, label="I understand revoke is permanent and ends future scheduled checks."
-            )
-            library_shadow_action_button = gr.Button("Apply rule action")
-            library_shadow_action_output = gr.Code(
-                value="No F3 rule action performed.", language="json", label="F3 rule action result"
-            )
-            library_shadow_action_button.click(
-                library_shadow_rule_action_handler,
-                inputs=[library_shadow_rule_id, library_shadow_rule_action, library_shadow_revoke_ack],
-                outputs=[library_shadow_action_output, library_shadow_rules_output, library_shadow_revoke_ack],
-                show_progress="minimal",
-                queue=False,
-            )
-            gr.Markdown(
-                "#### Compare suggestions with your actual choice\n"
-                "After a run, refresh history, then record either one candidate ID or that you would book none. "
-                "Feedback is immutable and updates the exact-choice agreement summary."
-            )
-            with gr.Row():
-                library_shadow_runs_rule_filter = gr.Textbox(value="", label="Rule ID filter (optional)")
-                library_shadow_runs_refresh_button = gr.Button("Refresh shadow runs")
-            library_shadow_runs_refresh_button.click(
-                library_shadow_refresh_runs_handler,
-                inputs=library_shadow_runs_rule_filter,
-                outputs=library_shadow_runs_output,
-                show_progress="minimal",
-                queue=False,
-            )
-            with gr.Row():
-                library_shadow_feedback_run_id = gr.Textbox(value="", label="Completed run ID")
-                library_shadow_feedback_candidate_id = gr.Textbox(value="", label="Candidate ID (leave blank if choosing none)")
-            library_shadow_feedback_none = gr.Checkbox(
-                value=False, label="I would book none of the candidates (or there were no matching slots)."
-            )
-            library_shadow_feedback_button = gr.Button("Record my comparison")
-            library_shadow_feedback_output = gr.Code(
-                value="No human comparison recorded.", language="json", label="F3 comparison result"
-            )
-            library_shadow_feedback_button.click(
-                library_shadow_feedback_handler,
-                inputs=[library_shadow_feedback_run_id, library_shadow_feedback_candidate_id, library_shadow_feedback_none],
-                outputs=library_shadow_feedback_output,
-                show_progress="minimal",
-                queue=False,
-            )
+                with gr.Tab("Scheduled read-only checks (F3)"):
+                    gr.Markdown(
+                        "### F3 — exact-date shadow scheduler (read-only; no booking authority)\n"
+                        "F3 stores a one-time task, can prepare its facility page in advance, then performs bounded live Date checks from the specified start time. "
+                        "It makes at most one read-only F1 availability Search for your exact target date. It ranks exact rooms/intervals from "
+                        "your ordered preferences, records the suggestion, and waits for your later feedback. It never "
+                        "selects a slot, opens a booking form, calls F2, or submits/cancels a booking. The run time is "
+                        "an observation time—not an assumed HKUL release time. Rules and run details are protected with "
+                        "Windows current-user DPAPI; at most five rules can be active at once. F3 is unavailable if that "
+                        "protection or loopback-only hosting is unavailable."
+                    )
+                    library_shadow_status_button = gr.Button("Refresh F3 status, rules, and run history")
+                    with gr.Row():
+                        library_shadow_status_output = gr.Code(
+                            value="F3 scheduler status not loaded.", language="json", label="F3 status"
+                        )
+                        library_shadow_rules_output = gr.Code(
+                            value="No rules loaded.", language="json", label="F3 rules"
+                        )
+                    library_shadow_runs_output = gr.Code(
+                        value="No runs loaded.", language="json", label="F3 shadow runs / agreement"
+                    )
+                    library_shadow_status_button.click(
+                        library_shadow_status_handler,
+                        outputs=[library_shadow_status_output, library_shadow_rules_output, library_shadow_runs_output],
+                        show_progress="minimal",
+                        queue=False,
+                    )
+                    gr.Markdown(
+                        "#### Prepare and wait for an exact-date observation (F3.2b)\n"
+                        "Set the full execution date/time in Hong Kong time and the exact facility-use date. "
+                        "Each task runs once and checks that date against the facility's live options; it never substitutes another date. "
+                        "Preparation opens the facility page; complete any login manually. Date checks start only at the checking time. "
+                        "Checks stop at the deadline or attempt limit. At most one availability Search is performed, with no booking. "
+                        "Room lines use `FLOOR | exact room` (or just an exact room). Preferred intervals are comma-separated "
+                        "`HH:MM-HH:MM` values. If fallback is off, only the first room and first interval are eligible. "
+                        "No task can be created until you review its preview and acknowledge that it creates a one-time "
+                        "read-only rule—not permission to book."
+                    )
+                    library_shadow_facility = gr.Dropdown(
+                        choices=[
+                            ("Single Study Room (3 sessions) — Main Library", "single_study_room"),
+                            ("Studio and Editing Room — Main Library", "studio_editing_room"),
+                            ("Study Table — Main Library", "study_table"),
+                            ("Study Room — Chi Wah Learning Commons", "study_room"),
+                            ("Discussion Room — Main Library", "discussion_room"),
+                        ],
+                        value="single_study_room",
+                        label="F3 facility type (F1 preview-supported only)",
+                    )
+                    library_shadow_target_date = gr.Textbox(
+                        value="", label="Facility-use date (YYYY-MM-DD, Hong Kong)",
+                    )
+                    with gr.Row():
+                        library_shadow_run_time = gr.Textbox(
+                            value="", label="Start Date checks at (YYYY-MM-DD HH:MM:SS, Hong Kong)",
+                            placeholder="2026-09-29 00:00:00",
+                        )
+                        library_shadow_eligibility = gr.Dropdown(
+                            choices=[
+                                "current_hku_students", "current_hku_staff",
+                                "current_hku_space_students", "current_hku_space_staff", "hku_alumni",
+                            ],
+                            value="current_hku_students",
+                            label="Self-declared eligibility category",
+                        )
+                    with gr.Row():
+                        library_shadow_prepare = gr.Textbox(
+                            value="", label="Prepare at (Hong Kong; blank = checking start)",
+                            placeholder="2026-09-28 23:59:00",
+                        )
+                        library_shadow_stop = gr.Textbox(
+                            value="", label="Stop at (Hong Kong; blank = start + 2 minutes)",
+                            placeholder="2026-09-29 00:02:00",
+                        )
+                    with gr.Row():
+                        library_shadow_poll = gr.Number(value=15, minimum=15, maximum=120, precision=0,
+                                                        label="Seconds between completed Date checks (15–120)")
+                        library_shadow_attempts = gr.Number(value=8, minimum=1, maximum=20, precision=0,
+                                                            label="Maximum Date checks after start (1–20)")
+                    library_shadow_rooms = gr.Textbox(
+                        value="",
+                        lines=4,
+                        placeholder="4/F | Single Study Room (3 sessions) Room 424\n4/F | Single Study Room (3 sessions) Room 428",
+                        label="Exact room preference order (one per line)",
+                    )
+                    library_shadow_times = gr.Textbox(
+                        value="",
+                        placeholder="10:00-11:00, 11:00-12:00",
+                        label="Preferred exact intervals (HH:MM-HH:MM, in preference order)",
+                    )
+                    with gr.Row():
+                        library_shadow_room_fallback = gr.Checkbox(
+                            value=False, label="Allow lower-ranked room preferences if the first is unavailable"
+                        )
+                        library_shadow_time_fallback = gr.Checkbox(
+                            value=False, label="Allow lower-ranked intervals if the first is unavailable"
+                        )
+                    library_shadow_preview_button = gr.Button("1. Preview exact-date shadow task")
+                    library_shadow_preview_output = gr.Code(
+                        value="No F3 rule preview prepared.", language="json", label="F3 rule preview"
+                    )
+                    library_shadow_preview_digest = gr.Textbox(
+                        value="", interactive=False,
+                        label="F3 preview reference (filled after a successful preview)",
+                    )
+                    library_shadow_create_ack = gr.Checkbox(
+                        value=False,
+                        label="I reviewed preparation, checking start, stop time, check limits, target date and intervals. This task is read-only; it cannot book, select a slot, or call F2.",
+                    )
+                    library_shadow_create_button = gr.Button("2. Confirm and create shadow-only rule")
+                    library_shadow_preview_button.click(
+                        library_shadow_preview_handler,
+                        inputs=[
+                            library_shadow_facility, library_shadow_target_date, library_shadow_run_time,
+                            library_shadow_rooms, library_shadow_times, library_shadow_room_fallback,
+                            library_shadow_time_fallback, library_shadow_eligibility,
+                            library_shadow_prepare, library_shadow_stop, library_shadow_poll, library_shadow_attempts,
+                        ],
+                        outputs=[library_shadow_preview_output, library_shadow_preview_digest, library_shadow_create_ack],
+                        show_progress="minimal",
+                        queue=False,
+                    )
+                    library_shadow_create_button.click(
+                        library_shadow_create_handler,
+                        inputs=[library_shadow_preview_digest, library_shadow_create_ack],
+                        outputs=[library_shadow_preview_output, library_shadow_preview_digest, library_shadow_create_ack],
+                        show_progress="minimal",
+                        queue=False,
+                    )
+                    gr.Markdown(
+                        "#### Pause or permanently revoke a rule\n"
+                        "Use the rule ID shown above. Revocation is terminal and cannot be undone; it prevents future scheduled reads."
+                    )
+                    with gr.Row():
+                        library_shadow_rule_id = gr.Textbox(value="", label="F3 rule ID")
+                        library_shadow_rule_action = gr.Dropdown(
+                            choices=[("Pause", "pause"), ("Resume paused rule", "resume"), ("Revoke permanently", "revoke")],
+                            value="pause",
+                            label="Rule action",
+                        )
+                    library_shadow_revoke_ack = gr.Checkbox(
+                        value=False, label="I understand revoke is permanent and ends future scheduled checks."
+                    )
+                    library_shadow_action_button = gr.Button("Apply rule action")
+                    library_shadow_action_output = gr.Code(
+                        value="No F3 rule action performed.", language="json", label="F3 rule action result"
+                    )
+                    library_shadow_action_button.click(
+                        library_shadow_rule_action_handler,
+                        inputs=[library_shadow_rule_id, library_shadow_rule_action, library_shadow_revoke_ack],
+                        outputs=[library_shadow_action_output, library_shadow_rules_output, library_shadow_revoke_ack],
+                        show_progress="minimal",
+                        queue=False,
+                    )
+                    gr.Markdown(
+                        "#### Compare suggestions with your actual choice\n"
+                        "After a run, refresh history, then record either one candidate ID or that you would book none. "
+                        "Feedback is immutable and updates the exact-choice agreement summary."
+                    )
+                    with gr.Row():
+                        library_shadow_runs_rule_filter = gr.Textbox(value="", label="Rule ID filter (optional)")
+                        library_shadow_runs_refresh_button = gr.Button("Refresh shadow runs")
+                    library_shadow_filtered_runs_output = gr.Code(
+                        value="Click Refresh shadow runs to load results for the rule ID above.",
+                        language="json", label="Refreshed shadow runs / agreement",
+                    )
+                    library_shadow_runs_refresh_button.click(
+                        library_shadow_refresh_runs_handler,
+                        inputs=library_shadow_runs_rule_filter,
+                        outputs=library_shadow_filtered_runs_output,
+                        show_progress="minimal",
+                        queue=False,
+                    )
+                    with gr.Row():
+                        library_shadow_feedback_run_id = gr.Textbox(value="", label="Completed run ID")
+                        library_shadow_feedback_candidate_id = gr.Textbox(value="", label="Candidate ID (leave blank if choosing none)")
+                    library_shadow_feedback_none = gr.Checkbox(
+                        value=False, label="I would book none of the candidates (or there were no matching slots)."
+                    )
+                    library_shadow_feedback_button = gr.Button("Record my comparison")
+                    library_shadow_feedback_output = gr.Code(
+                        value="No human comparison recorded.", language="json", label="F3 comparison result"
+                    )
+                    library_shadow_feedback_button.click(
+                        library_shadow_feedback_handler,
+                        inputs=[library_shadow_feedback_run_id, library_shadow_feedback_candidate_id, library_shadow_feedback_none],
+                        outputs=library_shadow_feedback_output,
+                        show_progress="minimal",
+                        queue=False,
+                    )
+
+                with gr.Tab("Scheduled booking (F4)"):
+                    gr.Markdown(
+                        "### F4 pilot design preview — no authorization yet\n"
+                        "Review one exact Main Library Discussion Room target and the blockers before "
+                        "any delegated-booking feature is enabled. This preview is local and read-only: "
+                        "it does not check availability, create a rule, grant standing authority, "
+                        "or book a room. The supervised F2 flow remains in its own tab."
+                    )
+                    f4_target_date = gr.Textbox(label="Exact facility-use date (YYYY-MM-DD)")
+                    with gr.Row():
+                        f4_prepare = gr.Textbox(label="Prepare at (Hong Kong YYYY-MM-DD HH:MM:SS)")
+                        f4_check = gr.Textbox(label="Start Date checks at (Hong Kong YYYY-MM-DD HH:MM:SS)")
+                        f4_stop = gr.Textbox(label="Stop at (Hong Kong YYYY-MM-DD HH:MM:SS)")
+                    with gr.Row():
+                        f4_room = gr.Textbox(label="Exact Level 3 Discussion Room", placeholder="Discussion Room 2")
+                        f4_start = gr.Textbox(label="Start (HH:MM)")
+                        f4_end = gr.Textbox(label="End (HH:MM)")
+                    f4_eligibility = gr.Dropdown(
+                        choices=["current_hku_students", "current_hku_staff",
+                                 "current_hku_space_students", "current_hku_space_staff"],
+                        value="current_hku_students", label="Self-declared eligibility category",
+                    )
+                    f4_preview_button = gr.Button("Preview F4 pilot scope and unmet gates")
+                    f4_preview_output = gr.Code(
+                        value="No F4 design preview prepared. Unattended booking is disabled.",
+                        language="json", label="F4 design review (no authorization)",
+                    )
+                    f4_preview_button.click(
+                        library_autobook_pilot_preview_handler,
+                        inputs=[f4_target_date, f4_prepare, f4_check, f4_stop,
+                                f4_room, f4_start, f4_end, f4_eligibility],
+                        outputs=f4_preview_output, show_progress="minimal", queue=False,
+                    )
+                    gr.Markdown(
+                        "### Save an inert F4 draft\n"
+                        "This is a local planning record only. Saving it does **not** schedule checks, "
+                        "authorize a future booking, or enable Submit. A future live F4 feature would require "
+                        "a fresh, separate authorization after the remaining gates are satisfied."
+                    )
+                    f4_draft_preview_button = gr.Button("1. Preview non-authorizing draft")
+                    f4_draft_preview_output = gr.Code(language="json", label="F4 draft preview")
+                    f4_draft_digest = gr.Textbox(label="One-time draft preview digest", interactive=False)
+                    f4_draft_preview_button.click(
+                        library_autobook_draft_preview_handler,
+                        inputs=[f4_target_date, f4_prepare, f4_check, f4_stop,
+                                f4_room, f4_start, f4_end, f4_eligibility],
+                        outputs=[f4_draft_preview_output, f4_draft_digest],
+                        show_progress="minimal", queue=False,
+                    )
+                    f4_draft_ack = gr.Checkbox(
+                        label="I understand this saved draft grants no booking authority and performs no booking."
+                    )
+                    f4_draft_save = gr.Button("2. Save inert draft")
+                    f4_draft_save_output = gr.Code(language="json", label="Saved draft result")
+                    f4_draft_save.click(
+                        library_autobook_draft_create_handler,
+                        inputs=[f4_draft_digest, f4_draft_ack], outputs=f4_draft_save_output,
+                        show_progress="minimal", queue=False,
+                    )
+                    f4_drafts_button = gr.Button("List F4 drafts")
+                    f4_drafts_output = gr.Code(language="json", label="Inert F4 drafts")
+                    f4_drafts_button.click(library_autobook_drafts_handler, outputs=f4_drafts_output,
+                                           show_progress="minimal", queue=False)
+                    f4_revoke_id = gr.Textbox(label="Draft ID to revoke")
+                    f4_revoke_button = gr.Button("Revoke inert draft")
+                    f4_revoke_output = gr.Code(language="json", label="Revocation result")
+                    f4_revoke_button.click(library_autobook_draft_revoke_handler,
+                                           inputs=f4_revoke_id, outputs=f4_revoke_output,
+                                           show_progress="minimal", queue=False)
+                    gr.Markdown(
+                        "### One-time F4 authorization (executor not connected)\n"
+                        "This records consent for one exact future booking attempt, but **will not run** "
+                        "until a separately tested F4 executor is enabled. It cannot use F2's confirmation "
+                        "token or turn an F3 rule into a booking. Review the target and date carefully."
+                    )
+                    f4_auth_preview_button = gr.Button("1. Preview exact F4 authorization")
+                    f4_auth_preview_output = gr.Code(language="json", label="F4 authorization review")
+                    f4_auth_digest = gr.Textbox(label="One-time authorization preview digest", interactive=False)
+                    f4_auth_preview_button.click(
+                        library_autobook_authorization_preview_handler,
+                        inputs=[f4_target_date, f4_prepare, f4_check, f4_stop,
+                                f4_room, f4_start, f4_end, f4_eligibility],
+                        outputs=[f4_auth_preview_output, f4_auth_digest],
+                        show_progress="minimal", queue=False,
+                    )
+                    f4_auth_ack = gr.Checkbox(label="I authorize one future booking attempt for exactly the reviewed target.")
+                    f4_policy_ack = gr.Checkbox(label="I accept the applicable HKUL booking policy for this target.")
+                    f4_rules_ack = gr.Checkbox(
+                        label="At least two patrons will use this Discussion Room; I will comply with the daily session and interleaving rules."
+                    )
+                    f4_auth_create_button = gr.Button("2. Record one-time authorization (no execution yet)")
+                    f4_auth_create_output = gr.Code(language="json", label="F4 authorization result")
+                    f4_auth_create_button.click(
+                        library_autobook_authorization_create_handler,
+                        inputs=[f4_auth_digest, f4_auth_ack, f4_policy_ack, f4_rules_ack],
+                        outputs=f4_auth_create_output, show_progress="minimal", queue=False,
+                    )
+                    f4_auth_list_button = gr.Button("List F4 authorizations")
+                    f4_auth_list_output = gr.Code(language="json", label="F4 authorizations")
+                    f4_auth_list_button.click(library_autobook_authorizations_handler,
+                                              outputs=f4_auth_list_output, show_progress="minimal", queue=False)
+                    f4_auth_id = gr.Textbox(label="Authorization ID to pause or revoke")
+                    f4_auth_action = gr.Dropdown(choices=["pause", "revoke"], value="revoke", label="Action")
+                    f4_auth_action_button = gr.Button("Apply F4 authorization action")
+                    f4_auth_action_output = gr.Code(language="json", label="Authorization action result")
+                    f4_auth_action_button.click(library_autobook_authorization_action_handler,
+                                                inputs=[f4_auth_id, f4_auth_action],
+                                                outputs=f4_auth_action_output,
+                                                show_progress="minimal", queue=False)
 
         with gr.Tab("Tasks"):
             tasks_output = gr.Code(value="Press Refresh", language="json", label="Local tasks")

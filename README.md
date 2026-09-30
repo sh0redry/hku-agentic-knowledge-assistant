@@ -246,14 +246,22 @@ See the F2 procedure in [the live acceptance runbook](docs/LIVE_ACCEPTANCE.md).
 ### F3 shadow scheduler
 
 The Library GUI also provides an opt-in F3 shadow scheduler. A user previews and
-confirms a narrowly scoped recurring rule (facility type, target weekdays,
-observation time, ordered exact rooms/times, eligibility category, and a run
-limit). Each daily occurrence reads the selected facility's live Date options,
-then makes at most one F1 availability Search for an offered matching weekday,
+confirms a one-time exact-date task (facility type, full execution timestamp in
+Hong Kong time, target use date, ordered exact rooms/intervals and eligibility).
+It reads the selected facility's live Date options,
+then makes at most one F1 availability Search for the specified date if offered,
 stores an encrypted suggestion, and waits for the user to record what they
 would actually choose. Rules can be paused or permanently revoked in the GUI.
 F3 cannot select a slot, open the booking form, invoke F2, or submit/cancel a
 booking. It is not a production unattended-booking feature or an F4 pilot.
+
+F3.2a rejects past execution times instead of rolling them to tomorrow, matches
+both ends of each preferred interval, and excludes already-started slots.
+Old active/paused weekday rules require migration on restart; history is retained.
+F3.2b adds preparation/start/stop timestamps and bounded Date-option checks
+(15–120 seconds, at most 20 attempts), visible progress, and at most one Search.
+Reload Chrome extension **0.17.16** and create a fresh version-4 task; older
+active/paused rules require migration. Preparation does not enter credentials.
 
 F3 runs only on Windows with current-user DPAPI available and a loopback-bound
 application. Rule and candidate details are encrypted at rest. The scheduler
@@ -262,6 +270,15 @@ does not retry a failed/stale-session read. See the [F3 shadow scheduler
 guide](docs/F3_SHADOW_SCHEDULER.md). Live acceptance—including at least 20
 scheduled runs across the supported types and the required restart, revocation,
 authentication, no-slot, and policy-change cases—remains pending.
+
+The Library GUI now separates research, availability, exact F1 preview, F2,
+F3 and F4 into focused tabs with local result panes. The F4 tab offers an exact
+Discussion Room pilot preview, encrypted inert planning drafts, and a separate
+one-time authorization record that can be paused or revoked. Authorizations
+currently remain `pending_executor`: they do not schedule checks or submit a
+booking. The guarded executor, live-release and authoritative-record checks
+remain open. See the
+[F4 staged delivery plan](docs/F4_AUTOBOOK_PLAN.md).
 
 ## Safety model
 

@@ -15,6 +15,8 @@ const configuredTargets = [];
 const bookingCommands = [];
 let bookingPhase = "form";
 let storedBookingAttempts = [];
+let loginTransitionReads = 0;
+let tabUrl = "https://booking.lib.hku.hk/Secure/FacilityStatusDate.aspx";
 const dateParts = new Intl.DateTimeFormat("en-GB", {
   timeZone: "Asia/Hong_Kong", year: "numeric", month: "2-digit", day: "2-digit"
 }).formatToParts(new Date());
@@ -95,7 +97,8 @@ const context = {
     },
     tabs: {
       async create() { openedTabs += 1; return { id: 42 }; },
-      async get(tabId) { return { id: tabId, url: "https://booking.lib.hku.hk/Secure/FacilityStatusDate.aspx" }; },
+      async get(tabId) { return { id: tabId, url: tabUrl, status: "complete" }; },
+      async update(tabId, options) { tabUrl = options.url; return { id: tabId }; },
       async sendMessage(_tabId, message) {
         bookingCommands.push(message.command);
         if (message.command === "library.spaces.inspect_booking_form") {
@@ -119,6 +122,12 @@ const context = {
             verified_exactly_once: bookingPhase === "record", diagnostics: {} } };
         }
         if (message.command === "library.spaces.configure_availability") {
+          if (loginTransitionReads > 0) {
+            loginTransitionReads -= 1;
+            tabUrl = "https://lib.hku.hk/";
+            return { ok: false, error: { code: "WRONG_LIBRARY_SPACE_PAGE", message: "Login redirect" } };
+          }
+          tabUrl = "https://booking.lib.hku.hk/Secure/FacilityStatusDate.aspx";
           if (message.payload.inspect_dates_only) {
             return { ok: true, data: {
               navigation_started: false, stage: "date_options_ready",
@@ -178,11 +187,16 @@ vm.runInContext(source, context);
     error => error.code === "LIBRARY_SPACE_DATE_OUT_OF_WINDOW"
   );
   assert.equal(openedTabs, 0);
+  loginTransitionReads = 2;
   const dateOptions = await vm.runInContext('listLibrarySpaceDates({facility_type:"study_room"})', context);
+  assert.equal(loginTransitionReads, 0);
   assert.equal(dateOptions.location, "Chi Wah Learning Commons");
   assert.deepEqual([...dateOptions.offered_dates], [today]);
   assert.equal(dateOptions.availability_search_submitted, false);
   assert.equal(openedTabs, 1);
+  const refreshedDates = await vm.runInContext('listLibrarySpaceDates({facility_type:"study_room"})', context);
+  assert.equal(refreshedDates.availability_search_submitted, false);
+  assert.equal(openedTabs, 1, "date polling must reuse its own availability tab");
   await assert.rejects(
     vm.runInContext(`bookLibrarySpaceExactlyOnce({operation:"prepare",facility_type:"discussion_room",target:{facility_type:"discussion_room",date:"${today}",floor:"Level 3",room:"Discussion Room 1",start_time:"13:00",end_time:"14:00"}})`, context),
     error => error.code === "LIBRARY_DISCUSSION_ROOM_RULES_ACK_REQUIRED"
@@ -193,6 +207,12 @@ vm.runInContext(source, context);
   );
   assert.equal(openedTabs, 1);
 
+  tabUrl = "https://example.com/";
+  await assert.rejects(
+    vm.runInContext('librarySpaceNavigationError(42, commandError("WRONG_LIBRARY_SPACE_PAGE", "wrong"))', context),
+    error => error.code === "WRONG_LIBRARY_SPACE_PAGE"
+  );
+  loginTransitionReads = 1;
   const discussionPreparation = await vm.runInContext(`bookLibrarySpaceExactlyOnce({
     operation:"prepare",
     facility_type:"discussion_room",

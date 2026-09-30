@@ -363,6 +363,20 @@ async function readLibraryResearchDetail(payload, mode) {
   };
 }
 
+async function librarySpaceNavigationError(tabId, error) {
+  if (error.code !== "WRONG_LIBRARY_SPACE_PAGE") return error;
+  const tab = await chrome.tabs.get(tabId);
+  let origin;
+  try { origin = new URL(tab.url).origin; } catch (_) { throw error; }
+  // Library authentication can briefly serve the public library/Portal page
+  // before returning to booking. Keep waiting on this exact tab, within the
+  // original deadline; never configure a form on the intermediate origin.
+  if (!["https://lib.hku.hk", "https://booking.lib.hku.hk",
+        "https://hkuportal.hku.hk", "https://studentportal.hku.hk"].includes(origin)) throw error;
+  return commandError("LIBRARY_LOGIN_REQUIRED",
+    "HKUL authentication has not returned to the booking page. Complete any visible login prompt and retry the read.");
+}
+
 async function searchLibrarySpaceAvailability(payload, options = {}) {
   const facilityType = String(payload?.facility_type || "");
   const target = SPACE_ROUTES[facilityType];
@@ -402,8 +416,8 @@ async function searchLibrarySpaceAvailability(payload, options = {}) {
         break;
       }
     } catch (error) {
-      lastConfigurationError = error;
-      if (["INVALID_INPUT", "WRONG_LIBRARY_SPACE_PAGE", "LIBRARY_SPACE_FILTER_AMBIGUOUS", "LIBRARY_SPACE_DATE_NOT_OFFERED", "LIBRARY_SPACE_DATE_OPTIONS_UNVERIFIED", "LIBRARY_SPACE_SEARCH_AMBIGUOUS"].includes(error.code)) throw error;
+      lastConfigurationError = await librarySpaceNavigationError(tab.id, error);
+      if (["INVALID_INPUT", "LIBRARY_SPACE_FILTER_AMBIGUOUS", "LIBRARY_SPACE_DATE_NOT_OFFERED", "LIBRARY_SPACE_DATE_OPTIONS_UNVERIFIED", "LIBRARY_SPACE_SEARCH_AMBIGUOUS"].includes(error.code)) throw error;
     }
     await delay(500);
   }
@@ -488,12 +502,38 @@ async function searchLibrarySpaceAvailability(payload, options = {}) {
   return result;
 }
 
-async function listLibrarySpaceDates(payload) {
+// Reuse only tabs created for date inspection, never a user's booking form.
+const dateInspectionTabs = new Map();
+let dateInspectionQueue = Promise.resolve();
+function listLibrarySpaceDates(payload) {
+  const pending = dateInspectionQueue.then(() => inspectLibrarySpaceDates(payload));
+  dateInspectionQueue = pending.catch(() => {});
+  return pending;
+}
+
+async function inspectLibrarySpaceDates(payload) {
   const facilityType = String(payload?.facility_type || "");
   const target = SPACE_ROUTES[facilityType];
   if (!target) throw commandError("INVALID_INPUT", "A supported facility_type is required to read HKUL Date options.");
-  const tab = await chrome.tabs.create({ url: SPACE_AVAILABILITY_URL, active: true });
   const deadline = Date.now() + NAVIGATION_DEADLINE_MS;
+  let tab = null;
+  const prior = dateInspectionTabs.get(facilityType);
+  if (prior && Date.now() - prior.observedAt < 15 * 60 * 1000) {
+    try {
+      const existing = await chrome.tabs.get(prior.id);
+      if (existing.url === SPACE_AVAILABILITY_URL && !existing.pendingUrl) {
+        tab = await chrome.tabs.update(prior.id, { url: SPACE_AVAILABILITY_URL });
+        // Wait for the new document, not the pre-midnight dropdown still in memory.
+        while (Date.now() < deadline) {
+          const loaded = await chrome.tabs.get(tab.id);
+          if (loaded.status === "complete" && !loaded.pendingUrl) break;
+          await delay(250);
+        }
+      }
+    } catch (_) { tab = null; }
+  }
+  if (!tab) tab = await chrome.tabs.create({ url: SPACE_AVAILABILITY_URL, active: true });
+  dateInspectionTabs.set(facilityType, { id: tab.id, observedAt: Date.now() });
   let lastError = null;
   while (Date.now() < deadline) {
     try {
@@ -522,8 +562,8 @@ async function listLibrarySpaceDates(payload) {
         };
       }
     } catch (error) {
-      lastError = error;
-      if (["INVALID_INPUT", "WRONG_LIBRARY_SPACE_PAGE", "LIBRARY_SPACE_FILTER_AMBIGUOUS", "LIBRARY_SPACE_DATE_OPTIONS_UNVERIFIED"].includes(error.code)) throw error;
+      lastError = await librarySpaceNavigationError(tab.id, error);
+      if (["INVALID_INPUT", "LIBRARY_SPACE_FILTER_AMBIGUOUS", "LIBRARY_SPACE_DATE_OPTIONS_UNVERIFIED"].includes(error.code)) throw error;
     }
     await delay(500);
   }
@@ -1696,7 +1736,6 @@ async function executeCommand(command, payload = {}) {
   if (command === "library.research.item") return readLibraryResearchDetail(payload, "item");
   if (command === "library.research.access_options") return readLibraryResearchDetail(payload, "access_options");
   if (command === "library.spaces.search_availability") return searchLibrarySpaceAvailability(payload);
-  if (command === "library.spaces.list_dates") return listLibrarySpaceDates(payload);
   if (command === "library.spaces.list_dates") return listLibrarySpaceDates(payload);
   if (command === "library.spaces.book_exact_once") return bookLibrarySpaceExactlyOnce(payload);
   if (command === "library.hours_and_locations") return readLibraryHoursAndLocations();
