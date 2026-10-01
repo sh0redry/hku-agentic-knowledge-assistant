@@ -3,6 +3,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { HKUAgentsAPIError, type HKUAgentsClient, type JsonValue } from './client.js'
 
 export const DESKTOP_STATUS_PATH = '/api/hku-agents/status'
+export const DESKTOP_CONNECT_PATH = '/api/hku-agents/connect'
 
 interface ExactFetchRoute {
   path: string
@@ -18,7 +19,7 @@ interface HostConnection {
 interface RpcRequest {
   type: 'client-request'
   rpcId: string
-  method: 'hku-agents/status'
+  method: 'hku-agents/status' | 'hku-agents/connect'
   payload: Record<string, never>
 }
 
@@ -26,7 +27,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function parseRequest(text: string): RpcRequest | null {
+function parseRequest(text: string, method = 'hku-agents/status'): RpcRequest | null {
   if (Buffer.byteLength(text, 'utf8') > 2048) return null
   let value: unknown
   try {
@@ -34,7 +35,7 @@ function parseRequest(text: string): RpcRequest | null {
   } catch {
     return null
   }
-  if (!isRecord(value) || value.type !== 'client-request' || value.method !== 'hku-agents/status') return null
+  if (!isRecord(value) || value.type !== 'client-request' || value.method !== method) return null
   if (Object.keys(value).sort().join(',') !== 'method,payload,rpcId,type') return null
   if (typeof value.rpcId !== 'string' || !/^[0-9a-f-]{36}$/i.test(value.rpcId)) return null
   if (!isRecord(value.payload) || Object.keys(value.payload).length !== 0) return null
@@ -71,13 +72,21 @@ export async function readDesktopStatus(client: Pick<HKUAgentsClient, 'status'>,
       read_only: true,
       core: { state: 'connected', version: narrowString(result.service_version) },
       connections,
+      ...(isRecord(result.binding) ? { binding: {
+        state: narrowString(result.binding.state),
+        logged_in: result.binding.logged_in === true,
+        page_kind: narrowString(result.binding.page_kind),
+        error_code: narrowString(result.binding.error_code),
+      } } : {}),
       correlation_id: narrowString(envelope.correlation_id),
     }
   } catch (error) {
     const rawCode = error instanceof HKUAgentsAPIError ? error.code : 'INVALID_STATUS_RESPONSE'
     const code = /^[A-Z][A-Z0-9_]{0,63}$/.test(rawCode) ? rawCode : 'CORE_STATUS_FAILED'
     const recovery = code === 'TOKEN_NOT_CONFIGURED'
-      ? 'Set the Integration API token in the environment that launches Desktop, then restart Desktop.'
+      ? 'Restart the updated HKU AGENTS service once to initialize automatic local connection.'
+      : code === 'LOCAL_CONNECTION_UNAVAILABLE'
+        ? 'Restart HKU AGENTS under the same Windows account as Desktop.'
       : code === 'API_UNAVAILABLE'
         ? 'Start the local HKU AGENTS service, then refresh this panel.'
         : 'Check the HKU AGENTS local service and refresh this panel.'
@@ -97,9 +106,9 @@ function jsonResponse(value: unknown, status = 200): Response {
   })
 }
 
-export function desktopStatusRoute(client: Pick<HKUAgentsClient, 'status'>): ExactFetchRoute {
+export function desktopStatusRoute(client: Pick<HKUAgentsClient, 'status'>, connect = false): ExactFetchRoute {
   return {
-    path: DESKTOP_STATUS_PATH,
+    path: connect ? DESKTOP_CONNECT_PATH : DESKTOP_STATUS_PATH,
     methods: ['POST'],
     requestBody: 'buffered',
     async fetch(request) {
@@ -108,7 +117,7 @@ export function desktopStatusRoute(client: Pick<HKUAgentsClient, 'status'>): Exa
       if (Number.isFinite(declaredLength) && declaredLength > 2048) {
         return jsonResponse({ error: 'invalid_request' }, 400)
       }
-      const parsed = parseRequest(await request.text())
+      const parsed = parseRequest(await request.text(), connect ? 'hku-agents/connect' : 'hku-agents/status')
       if (parsed === null) return jsonResponse({ error: 'invalid_request' }, 400)
       const status = await readDesktopStatus(client, request.signal)
       return jsonResponse({
@@ -120,9 +129,11 @@ export function desktopStatusRoute(client: Pick<HKUAgentsClient, 'status'>): Exa
   }
 }
 
-export function installDesktopStatusBridge(ctx: Context, client: Pick<HKUAgentsClient, 'status'>): void {
+export function installDesktopStatusBridge(ctx: Context, client: Pick<HKUAgentsClient, 'status' | 'connectHku'>): void {
   ctx.inject(['connection'], connectionContext => {
     const connection = (connectionContext as Context & { connection: HostConnection }).connection
-    return connection.fetch.register(desktopStatusRoute(client))
+    const disposeStatus = connection.fetch.register(desktopStatusRoute(client))
+    const disposeConnect = connection.fetch.register(desktopStatusRoute({ status: signal => client.connectHku(signal) }, true))
+    return () => { disposeConnect(); disposeStatus() }
   })
 }

@@ -256,7 +256,7 @@ def create_api_app(
             "pairing_token": token,
             "websocket_url": f"{scheme}://{request.url.netloc}/api/v1/browser/ws",
             "pairing_token_source": "runtime_rotated",
-            "persistent_across_restarts": False,
+            "persistent_across_restarts": app.state.container.browser_bridge.pairing_info("")["persistent_across_restarts"],
         }
 
     @app.post("/api/v1/browser/pairing/revoke")
@@ -270,7 +270,7 @@ def create_api_app(
             "pairing_token": token,
             "websocket_url": f"{scheme}://{request.url.netloc}/api/v1/browser/ws",
             "pairing_token_source": "runtime_revoked",
-            "persistent_across_restarts": False,
+            "persistent_across_restarts": app.state.container.browser_bridge.pairing_info("")["persistent_across_restarts"],
             "extension_pin_cleared": True,
         }
 

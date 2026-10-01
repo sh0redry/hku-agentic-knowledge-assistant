@@ -550,7 +550,9 @@
         "[data-region='event-list-group-container'], [data-region='event-list-group'], .event-list-group"
       );
       const groupDate = normalizeText(
-        group?.querySelector?.("[data-region='event-list-group-date'], h4, h5")?.textContent
+        group?.querySelector?.("[data-region='event-list-group-date'], h4, h5")?.textContent ||
+        group?.querySelector?.("[data-region='event-list-content-date'], h6")?.textContent ||
+        timelineGroupDate(node)
       );
       if (groupDate) {
         for (const itemText of [...values]) {
@@ -562,6 +564,31 @@
       // The complete row text remains available as a conservative fallback.
     }
     return values;
+  }
+
+  function timelineGroupDate(node) {
+    // Some themes render the date as a preceding h6 rather than a child of
+    // event-list-group. Never borrow a date from another block or event row.
+    const timeline = node?.closest?.(".block_timeline, [data-region='timeline']");
+    if (!timeline) return "";
+    let current = node;
+    for (let depth = 0; current && current !== timeline && depth < 6; depth++) {
+      let sibling = current.previousElementSibling;
+      for (let count = 0; sibling && count < 20; count++, sibling = sibling.previousElementSibling) {
+        const headingSelector = "h4, h5, h6, [data-region='event-list-content-date'], [data-region='event-list-group-date']";
+        const header = sibling.matches?.(headingSelector) ? sibling
+          : !sibling.querySelector?.("[data-region='event-list-item']")
+            ? sibling.querySelector?.(headingSelector) : null;
+        if (header) {
+          const text = normalizeText(header.textContent);
+          // Only a standalone English calendar date; exclude titles/course years.
+          return /^(?:(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s+)?\d{1,2}\s+[A-Za-z]{3,9}(?:\s+20\d{2})?$/i.test(text)
+            ? text : "";
+        }
+      }
+      current = current.parentElement;
+    }
+    return "";
   }
 
   function displayDateHasExplicitYear(value) {
@@ -1013,7 +1040,7 @@
       schedule_course_count: 0,
       available_terms: [],
       diagnostics: {
-        parser_version: "0.4.1",
+        parser_version: "0.4.2",
         dashboard_marker_found: dashboardMarker,
         login_marker_found: loginMarker,
         user_menu_found: userMenuMarker,

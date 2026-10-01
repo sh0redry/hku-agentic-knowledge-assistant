@@ -100,6 +100,7 @@ Core endpoints:
 | `POST /api/v1/integration/sis/preflight` | Authenticated host-neutral live preflight |
 | `POST /api/v1/integration/sis/navigate-and-preflight` | Preferred authenticated one-step Portal navigation and preflight |
 | `POST /api/v1/integration/sis/timetable/sync-weekly` | Navigate and synchronize the live weekly Class Schedule into process memory |
+| `POST /api/v1/integration/connection/connect` | Bind an existing verified Chrome HKU tab and return bounded login/connection state |
 | `POST /api/v1/integration/sis/timetable/next-class` | Derive the next recurring class from the synchronized schedule |
 | `POST /api/v1/integration/sis/timetable/free-slots` | Calculate recurring weekly free periods locally |
 | `POST /api/v1/integration/sis/timetable/check-conflicts` | Compare candidate meetings with the synchronized schedule locally |
@@ -124,14 +125,19 @@ Authorization: Bearer <INTEGRATION_API_TOKEN>
 X-Correlation-ID: <optional-host-task-id>
 ```
 
-Set a random value of at least 32 characters as `INTEGRATION_API_TOKEN` in
-`project/.env`. If it is blank, the application creates a process-local token;
-the current value and its source are visible in the GUI's **Connections** tab.
-This token is separate from the Chrome extension pairing token.
+On Windows, Core manages connection credentials in the current-user DPAPI
+store `%USERPROFILE%\.hku-agents\connection-v1.json`. Start the updated Core
+once, open Desktop normally, and select **Connect HKU** with Portal open in
+the paired Chrome profile. No token terminal is needed. An explicit
+`INTEGRATION_API_TOKEN` in `project/.env` or the Host environment remains an
+advanced override. Other platforms use the existing environment/process token
+flow. The Integration token remains separate from Browser Bridge pairing.
 
 Set a separate random value of 32 to 200 characters as `BROWSER_PAIRING_TOKEN`
 in the ignored `project/.env` file to keep the browser connection stable across
-HKU AGENTS restarts. If it is blank, the app deliberately generates a new
+HKU AGENTS restarts. On Windows, a blank value instead reuses the protected
+user store; rotation/revocation of an automatically managed pairing is saved
+before becoming active. On other platforms a blank value generates a new
 process-local browser token on every start. The extension stores the token in
 Chrome local extension storage and reconnects with bounded exponential backoff.
 

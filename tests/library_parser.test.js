@@ -265,6 +265,33 @@ const spaces = parser.parseSpaceAvailability(spaceDocument, {
   origin: "https://booking.lib.hku.hk",
   pathname: "/FView.aspx"
 });
+// Layout tables surround the real HKUL matrix. Their text must never become
+// fake status cells, even when descendant cells contain complete time ranges.
+const realTable = {};
+const outerTable = {};
+const nestedHeader = { cells: headerRow.querySelectorAll(), closest() { return realTable; } };
+const nestedAvailable = { cells: availableRow.querySelectorAll(), closest() { return realTable; } };
+const layoutCells = [cell("Announcements"), cell("Page 2"), cell("Last Updated: 2026-10-01 15:16:53")];
+const outerRow = {
+  cells: layoutCells,
+  closest() { return outerTable; },
+  querySelectorAll() { return [...layoutCells, ...nestedHeader.cells, ...nestedAvailable.cells]; }
+};
+const unrelatedRow = { cells: [cell("Layout"), cell("Other text"), cell("Unknown")], closest() { return outerTable; } };
+const nestedSpaces = parser.parseSpaceAvailability({
+  body: spaceDocument.body,
+  querySelectorAll(selector) {
+    if (selector === "table tr") return [outerRow, unrelatedRow, nestedHeader, nestedAvailable];
+    return spaceDocument.querySelectorAll(selector);
+  }
+}, { origin: "https://booking.lib.hku.hk", pathname: "/FView.aspx" });
+assert.equal(nestedSpaces.available_slot_count, 1);
+assert.equal(nestedSpaces.diagnostics.facility_row_count, 1);
+assert.equal(nestedSpaces.diagnostics.status_cell_count, 1);
+assert.equal(nestedSpaces.diagnostics.unclassified_status_cell_count, 0);
+assert.equal(research.diagnostics.parser_version, "0.2.2");
+assert.equal(detail.diagnostics.parser_version, "0.2.2");
+assert.equal(spaces.diagnostics.parser_version, "0.3.7");
 assert.equal(spaces.date, "2026-09-20");
 assert.equal(spaces.location, "Main Library");
 assert.equal(spaces.booking_facility_type, "Single Study Room (3 sessions)");

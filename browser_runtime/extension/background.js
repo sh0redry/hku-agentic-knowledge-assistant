@@ -894,14 +894,54 @@ async function findAuthenticatedPortalTab() {
 }
 
 async function readPortalNotices() {
-  const tab = await findAuthenticatedPortalTab();
-  if (!tab) {
-    throw commandError(
-      "PORTAL_LOGIN_REQUIRED",
-      "Open HKU Portal, complete login/MFA, and keep the home page available in Chrome."
-    );
-  }
+  const tab = await requireAuthenticatedPortalTab();
   const snapshot = await sendTabCommand(tab.id, "portal.list_notices");
+  boundTabId = tab.id;
+  lastSnapshot = snapshot;
+  void sendHeartbeat();
+  return snapshot;
+}
+
+// A Portal SSO link may replace its own tab. Restore the fixed Portal entry
+// in a separate tab instead of mistaking a surviving SIS/timetable session
+// for an expired Portal login. Never overwrite the user's target-system tab.
+let portalRecoveryTabId = null;
+async function requireAuthenticatedPortalTab(deadline = Date.now() + NAVIGATION_DEADLINE_MS) {
+  const existing = await findAuthenticatedPortalTab();
+  if (existing) return existing;
+  let tab = null;
+  if (portalRecoveryTabId !== null) {
+    try { tab = await chrome.tabs.get(portalRecoveryTabId); } catch (_error) {}
+    if (!PORTAL_ORIGINS.has(allowedOrigin(tab?.url))) tab = null;
+  }
+  if (!tab) {
+    tab = await chrome.tabs.create({ url: "https://hkuportal.hku.hk/", active: true });
+    portalRecoveryTabId = tab.id;
+  }
+  while (Date.now() < deadline) {
+    const current = await chrome.tabs.get(tab.id);
+    if (isKnownPortalErrorPage(current.url)) {
+      throw commandError("PORTAL_LOGIN_REQUIRED", "Complete HKU Portal login/MFA before continuing.");
+    }
+    if (PORTAL_ORIGINS.has(allowedOrigin(current.url))) {
+      try {
+        const snapshot = await sendTabCommand(tab.id, "hku.inspect_portal");
+        if (snapshot.logged_in === true && snapshot.page_kind === "portal_home") return current;
+        if (snapshot.page_kind === "portal_login" || snapshot.page_kind === "blocked") {
+          throw commandError("PORTAL_LOGIN_REQUIRED", "Complete HKU Portal login/MFA before continuing.");
+        }
+      } catch (error) {
+        if (error.code !== "PAGE_SCRIPT_UNAVAILABLE") throw error;
+      }
+    }
+    await delay(300);
+  }
+  throw commandError("PORTAL_LOGIN_REQUIRED", "The Portal home page did not become ready; complete login/MFA and retry.");
+}
+
+async function inspectAuthenticatedPortal(deadline) {
+  const tab = await requireAuthenticatedPortalTab(deadline);
+  const snapshot = await sendTabCommand(tab.id, "hku.inspect_portal");
   boundTabId = tab.id;
   lastSnapshot = snapshot;
   void sendHeartbeat();
@@ -1402,17 +1442,15 @@ async function waitForCartSnapshot(deadline, requestedTermLabel = null) {
 }
 
 async function openSisOutcome(deadline = Date.now() + NAVIGATION_DEADLINE_MS) {
-  const snapshot = await inspectBoundHkuTab();
-  if (snapshot.origin === SIS_ORIGIN) {
+  let snapshot = await inspectBoundHkuTab();
+  if (snapshot.origin === SIS_ORIGIN && snapshot.logged_in === true) {
     return { snapshot, portalNavigationPerformed: false };
-  }
-  if (!PORTAL_ORIGINS.has(snapshot.origin) || snapshot.page_kind !== "portal_home") {
-    throw commandError("PORTAL_LOGIN_REQUIRED", "Complete HKU Portal login and MFA first.");
   }
   const authenticatedSis = await findAuthenticatedSisSnapshot();
   if (authenticatedSis) {
     return { snapshot: authenticatedSis, portalNavigationPerformed: false };
   }
+  snapshot = await inspectAuthenticatedPortal(deadline);
   const portalTabId = boundTabId;
   const existingSisTabIds = new Set((await querySisTabs()).map((tab) => tab.id));
   await sendTabCommand(portalTabId, "hku.open_sis");
@@ -1428,7 +1466,7 @@ async function openSis(deadline = Date.now() + NAVIGATION_DEADLINE_MS) {
 
 async function openWeeklyTimetable() {
   const deadline = Date.now() + NAVIGATION_DEADLINE_MS;
-  const source = await inspectBoundHkuTab();
+  let source = await inspectBoundHkuTab();
   if (
     source.origin === WEEKLY_TIMETABLE_ORIGIN &&
     source.logged_in === true &&
@@ -1446,12 +1484,6 @@ async function openWeeklyTimetable() {
       snapshot: source
     };
   }
-  if (!PORTAL_ORIGINS.has(source.origin) || source.page_kind !== "portal_home") {
-    throw commandError(
-      "PORTAL_LOGIN_REQUIRED",
-      "Open and authenticate HKU Portal before synchronizing My Weekly Schedule."
-    );
-  }
   const existing = await findAuthenticatedWeeklyTimetableSnapshot();
   if (existing) {
     return {
@@ -1466,6 +1498,7 @@ async function openWeeklyTimetable() {
       snapshot: existing
     };
   }
+  source = await inspectAuthenticatedPortal(deadline);
   const portalTabId = boundTabId;
   await sendTabCommand(portalTabId, "hku.open_weekly_timetable");
   const snapshot = await waitForWeeklyTimetableSnapshot(deadline, portalTabId);
@@ -1534,20 +1567,6 @@ async function openMoodleDashboard() {
       snapshot: outcome.snapshot
     };
   }
-  if (!PORTAL_ORIGINS.has(source.origin) || source.page_kind !== "portal_home") {
-    const portalTab = await findAuthenticatedPortalTab();
-    if (!portalTab) {
-      throw commandError(
-        source.origin === MOODLE_ORIGIN ? "MOODLE_LOGIN_REQUIRED" : "PORTAL_LOGIN_REQUIRED",
-        "Open HKU Portal and complete login/MFA before continuing to Moodle."
-      );
-    }
-    source = await sendTabCommand(portalTab.id, "hku.inspect_portal");
-    portalTabId = portalTab.id;
-    portalSessionReused = true;
-    boundTabId = portalTab.id;
-    lastSnapshot = source;
-  }
   const existing = await findAuthenticatedMoodleSnapshot(true);
   if (existing) {
     if (existing.page_kind !== "dashboard") {
@@ -1588,6 +1607,9 @@ async function openMoodleDashboard() {
       snapshot: existing
     };
   }
+  source = await inspectAuthenticatedPortal(deadline);
+  portalTabId = boundTabId;
+  portalSessionReused = true;
   const portalNavigation = await sendTabCommand(portalTabId, "hku.open_moodle");
   const outcome = await waitForMoodleDashboardSnapshot(deadline, portalTabId);
   const steps = ["portal_to_moodle"];
@@ -1630,7 +1652,7 @@ async function openEnrollmentAddClasses(requestedTermLabel = null) {
   const steps = [];
   let sisSessionReused = false;
   let sisSnapshot = source;
-  if (PORTAL_ORIGINS.has(source.origin)) {
+  if (source.origin !== SIS_ORIGIN) {
     const sisOutcome = await openSisOutcome(deadline);
     sisSnapshot = sisOutcome.snapshot;
     if (sisOutcome.portalNavigationPerformed) {
@@ -1694,7 +1716,7 @@ async function executeCommand(command, payload = {}) {
     void sendHeartbeat();
     return snapshot;
   }
-  if (command === "hku.inspect_portal") return inspectBoundHkuTab();
+  if (command === "hku.inspect_portal") return inspectAuthenticatedPortal();
   if (command === "hku.open_sis") return openSis();
   if (command === "hku.open_weekly_timetable") return openWeeklyTimetable();
   if (command === "hku.open_moodle") return openMoodleDashboard();

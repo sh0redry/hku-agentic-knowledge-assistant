@@ -32,6 +32,30 @@ is a separate, opt-in, one-reservation submission path described above.
 
 ## Install for local development
 
+Version 0.17.17 fixes cross-system session continuity: timetable, SIS, Moodle
+and Portal notice tools reuse their authenticated target tabs first. When an
+SSO navigation has replaced the Portal tab, a Portal-dependent operation opens
+the fixed `https://hkuportal.hku.hk/` entry in a separate tab and waits for the
+verified home page. A real login/MFA requirement still stops the operation;
+credentials are never filled. Target tabs are not overwritten or closed.
+After updating, reload the unpacked extension in `chrome://extensions` and
+refresh existing Portal/Moodle/SIS pages once.
+
+Version 0.17.18 / Moodle parser 0.4.2 additionally handles Timeline date headings
+rendered as h6 or preceding sibling headings. Date lookup remains scoped to the
+Timeline block and combines the group date with the activity clock; course
+years are not accepted as deadline dates. Incomplete rows still fail closed.
+
+Version 0.17.19 / Library parser 0.3.7 scopes availability parsing to the table
+with the Floor/Facility time-range header and reads only direct row cells.
+Outer layout tables and nested descendants no longer become fake status cells.
+Unknown colors within the actual matrix still stop the read safely.
+
+Version 0.17.20 separates the research schema (0.2.2) from the availability
+schema (0.3.7). Research search/detail/access options no longer report the
+availability version, which Core correctly rejects for research. Hours and
+booking-form schemas remain independent (0.1.1 and 0.1.2).
+
 1. Start HKU AGENTS with `python project/app.py`.
 2. Open `chrome://extensions`, enable **Developer mode**, and choose **Load unpacked**.
 3. Select this `browser_runtime/extension` directory.

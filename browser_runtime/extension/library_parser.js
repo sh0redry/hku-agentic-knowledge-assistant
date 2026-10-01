@@ -4,7 +4,10 @@
   const PRIMO_ORIGIN = "https://julac-hku.primo.exlibrisgroup.com";
   const LIBRARY_ORIGIN = "https://lib.hku.hk";
   const BOOKING_ORIGIN = "https://booking.lib.hku.hk";
-  const VERSION = "0.3.6";
+  // Independent schemas: changing the availability parser must not change
+  // the Primo research contract reported to Core.
+  const RESEARCH_VERSION = "0.2.2";
+  const SPACE_VERSION = "0.3.7";
   const HOURS_VERSION = "0.1.1";
   const BOOKING_FORM_VERSION = "0.1.2";
   function escapeRegExp(value) { return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
@@ -130,7 +133,7 @@
       result_count: results.length,
       results,
       diagnostics: {
-        parser_version: VERSION,
+        parser_version: RESEARCH_VERSION,
         results_marker_found: candidates.length > 0 || emptyResultsMarkerFound,
         empty_results_marker_found: emptyResultsMarkerFound,
         result_candidate_count: candidates.length,
@@ -281,7 +284,7 @@
       access_options: access.options,
       detail_url: recordId ? safeDetailUrl(`/discovery/fulldisplay?docid=${encodeURIComponent(recordId)}`) : null,
       diagnostics: {
-        parser_version: VERSION,
+        parser_version: RESEARCH_VERSION,
         detail_marker_found: detailMarkerFound,
         record_id_found: Boolean(recordId),
         title_found: Boolean(title),
@@ -945,7 +948,11 @@
   }
 
   function cellsOf(row) {
-    try { return [...(row.querySelectorAll?.("th, td") || [])]; } catch (_error) { return []; }
+    try {
+      if (row.cells) return [...row.cells];
+      return [...(row.querySelectorAll?.("th, td") || [])]
+        .filter(cell => !cell.closest || cell.closest("tr") === row);
+    } catch (_error) { return []; }
   }
 
   function colorOf(node) {
@@ -1211,19 +1218,26 @@
     const verifiedEmptyResultFound = /\b(?:no\s+(?:facilities|rooms?|slots?|records?)\s+(?:found|available)|no\s+matching\s+(?:facilities|rooms?|slots?)|no\s+data\s+(?:found|available))\b/i.test(bodyText);
 
     let timeColumns = new Map();
+    let matrixTable = null;
     for (const row of rows) {
       const cells = cellsOf(row);
+      if (!/^floor$/i.test(clean(cells[0]?.innerText || cells[0]?.textContent)) ||
+          !/^(?:facility|room)$/i.test(clean(cells[1]?.innerText || cells[1]?.textContent))) continue;
       const candidateColumns = new Map();
       cells.forEach((cell, index) => {
         const range = timeRange(cell.innerText || cell.textContent);
         if (range) candidateColumns.set(index, range);
       });
-      if (candidateColumns.size > timeColumns.size) timeColumns = candidateColumns;
+      if (candidateColumns.size > timeColumns.size) {
+        timeColumns = candidateColumns;
+        matrixTable = row.closest?.("table") || null;
+      }
     }
 
     if (timeColumns.size) {
       tableMatrixFound = true;
       for (const [rowIndex, row] of rows.entries()) {
+        if (matrixTable && row.closest?.("table") !== matrixTable) continue;
         const cells = cellsOf(row);
         if (cells.length < 3) continue;
         const floor = clean(cells[0]?.innerText || cells[0]?.textContent) || null;
@@ -1297,7 +1311,7 @@
       available_slot_count: slots.length,
       available_slots: slots.slice(0, 1000),
       diagnostics: {
-        parser_version: VERSION,
+        parser_version: SPACE_VERSION,
         availability_marker_found: /\b(?:facilities booking system|book a space|facility status|new booking)\b/i.test(bodyText),
         availability_legend_found: availableLegendFound,
         booked_legend_found: bookedLegendFound,

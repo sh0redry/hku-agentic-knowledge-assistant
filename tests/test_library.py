@@ -443,6 +443,18 @@ class LibraryIntegrationTests(unittest.TestCase):
         self.assertFalse(response["result"]["slot_selection_performed"])
         self.assertFalse(response["result"]["booking_form_opened"])
 
+    def test_parser_037_is_accepted_for_search_and_preview(self):
+        original = self.space_navigation
+
+        def upgraded(*args, **kwargs):
+            navigation = original(*args, **kwargs)
+            navigation["snapshot"]["diagnostics"]["parser_version"] = "0.3.7"
+            return navigation
+
+        with patch.object(self, "space_navigation", side_effect=upgraded):
+            self.test_space_availability_has_zero_booking_writes()
+            self.test_booking_preview_matches_exact_slot_without_booking_write()
+
     def test_space_availability_requires_exact_date(self):
         response = self.client.post(
             "/api/v1/integration/library/spaces/search-availability",

@@ -4,13 +4,16 @@ Desktop compatibility target: official DeepSeek Harness Desktop `0.2.0-rc.2`
 on Windows. This package contributes Host-side **read-only tools** and a
 browser-side native **read-only shell** in the sidebar. The business panel
 requests a narrow Core/Chrome Bridge connection-status projection through the
-Desktop Host. A separate **HKU Admin** panel now offers one fixed, read-only
-Library facility-catalog test with a redacted result; it does not show private
-capability results. Neither panel
-expose F2/F3/F4 write or scheduling controls. The Desktop UI migration is staged in
+Desktop Host. A separate **HKU Admin** panel offers a fixed, read-only Library
+facility-catalog test, a SIS connection/course-list/preflight slice, and
+four groups of fixed read-only checks for timetable, Moodle, Portal/briefing,
+and Library. SIS
+course rows are projected for the immediate panel result only; they are not
+saved as Admin history. Neither panel exposes F2/F3/F4 write or scheduling
+controls. The Desktop UI migration is staged in
 `../../HKU_AGENTS_INTEGRATION_PLAN.md` Section 23.8.
 
-This package contributes twenty-two restricted HKU tools to DeepSeek Harness:
+This package contributes twenty-three restricted HKU tools to DeepSeek Harness:
 
 - `hku_sis_status`
 - `hku_sis_navigate_and_preflight` (preferred one-step read-only check)
@@ -31,6 +34,7 @@ This package contributes twenty-two restricted HKU tools to DeepSeek Harness:
 - `hku_library_list_facilities` (local verified facility and booking-policy catalog; no browser interaction)
 - `hku_library_hours_and_locations` (official public visible hours; unpublished dates remain unknown)
 - `hku_library_space_availability` (authenticated visible slots; no booking)
+- `hku_library_space_dates` (authenticated live facility Date options; no Search or booking)
 - `hku_library_space_booking_preview` (fresh exact-slot and policy preview for five verified categories, including Main Library discussion rooms; no selection or booking)
 - `hku_library_research_item` (one fixed record; no full-text navigation)
 - `hku_library_research_access_options` (visible access labels; external links suppressed)
@@ -66,16 +70,21 @@ omitted.
    Harness uses directory symbolic links while composing profiles; without that
    Windows privilege the CLI can report `EISDIR` before any plugin is loaded.
 3. Start HKU AGENTS at `http://127.0.0.1:7860`.
-4. In the HKU AGENTS GUI, open **Connections** and copy the Integration API token.
-   This is not the browser-extension pairing token.
-5. Export the same token in the environment that starts DeepSeek Harness:
+4. On Windows, restart the updated HKU AGENTS service once. It initializes
+   `%USERPROFILE%\.hku-agents\connection-v1.json` with current-user DPAPI
+   ciphertext for the Integration and Browser Bridge credentials. Core reuses
+   these values on later starts when environment overrides are absent.
+5. Open Desktop normally from its icon, then click **Connect HKU**. The Host
+   reads and decrypts only the Integration credential, bound to its configured
+   loopback origin. It asks the paired Chrome extension to detect and bind an
+   open HKU tab and shows connected, login-required, missing-tab or Bridge
+   states. Existing extension pairing is reused; first-time extension pairing
+   still uses the extension popup. HKU login and MFA stay in Chrome.
 
-   ```powershell
-   $env:INTEGRATION_API_TOKEN = "paste-the-local-token-here"
-   ```
-
-   Optionally set `HKU_AGENTS_API_BASE_URL` when the local app uses a different
-   loopback port. Remote API origins are intentionally rejected.
+An explicitly configured `INTEGRATION_API_TOKEN` environment variable remains
+an override for advanced/non-Windows use. Ordinary Windows Desktop use needs
+no token terminal. Configure the Host `baseUrl` if Core uses another local
+port; automatic credentials are never sent to a different origin.
 
 ## Local build and test
 
@@ -93,7 +102,7 @@ CLI installed:
 ```powershell
 npm run build
 npm pack
-dsh plugin --profile web add ./dsh-hku-agents-0.18.6.tgz
+dsh plugin --profile web add ./dsh-hku-agents-0.18.9.tgz
 dsh --profile web --dump-config
 dsh --profile web
 ```
@@ -115,7 +124,7 @@ npm test
 npm pack
 $dshDesktop = Join-Path $env:LOCALAPPDATA 'Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd'
 & $dshDesktop --version
-& $dshDesktop plugin --profile desktop add .\dsh-hku-agents-0.18.6.tgz
+& $dshDesktop plugin --profile desktop add .\dsh-hku-agents-0.18.9.tgz
 & $dshDesktop plugin --profile desktop list
 ```
 
@@ -123,32 +132,54 @@ The bundled `dsh.cmd` is used because registering `dsh` on PATH is optional.
 If Desktop is installed elsewhere, obtain its actual installation path from
 the application rather than assuming the path above. Reopen Desktop after the
 install and verify the HKU AGENTS status panel, separate HKU Admin entry, and
-twenty-two read-only HKU tools. Use **Refresh status** to check Core and Chrome Bridge;
+twenty-three read-only HKU tools. Use **Refresh status** to check Core and Chrome Bridge;
 the sidebar appearing by itself does **not**
 prove that the local API or Chrome Bridge is connected. The plugin's Node Host
-process must receive the same `INTEGRATION_API_TOKEN` as the HKU AGENTS
-service; setting it in a *different* terminal after Desktop has started does
-not update that running process. Never put the token value in a plugin config
-file, command line, screenshot, or log. The browser-extension pairing token is
-separate. If the API or Chrome Bridge is unavailable, the tools must report a
+process automatically reads the Windows user's protected local credential
+after the updated Core has started once. A manually supplied environment token
+still overrides automatic discovery; remove stale overrides when switching to
+the ordinary icon-launch workflow. Never put the token value in a plugin
+config file, screenshot, or log. The browser-extension pairing token remains
+separate and is not decrypted by the Host. If the API or Chrome Bridge is unavailable, the tools must report a
 bounded connection error, not attempt a booking.
 
 The `./client` export is a Harness browser-loader module, not a Node or plain
 ESM entry point. It uses React and the Desktop connection service, registers
 `main` and `sidebar.panellist` through slot injection, and contains no loopback
-fetch or credential storage. The business panel requests only the exact status
+fetch or credential storage. The business panel requests the exact status
 RPC on `/api/hku-agents/status` (`/api` channel, `hku-agents/status` endpoint).
+The **Connect HKU** button uses the additional fixed empty-payload
+`hku-agents/connect` route, backed by authenticated
+`/api/v1/integration/connection/connect`. It binds an existing Chrome tab and
+returns only bounded login/page-state fields; it does not read cookies.
 The Host uses its existing bearer-authenticated
 loopback client, then returns only Core version, bounded Chrome Bridge state,
 and a correlation ID; tab URLs, cookies, tokens, and the full Core status are
-not sent to the panel. Admin's only additional Host route is the exact
-`/api/hku-agents/admin/facilities` catalog read; it accepts no inputs and
-returns only bounded facility labels, locations, support flags, counts and a
-correlation ID. No generic API console, token, policy body or live booking
-data is exposed. Other operations and nonempty payloads are rejected.
+not sent to the panel. Admin's catalog route is the exact
+`/api/hku-agents/admin/facilities` read; it accepts no inputs and returns
+only bounded facility labels, locations, support flags, counts and a
+correlation ID. Additional fixed SIS routes read the open cart and run live
+preflight using only an exact term and at most 20 unique course/section pairs.
+The Host bounds and projects Temporary Course List versus Class Schedule rows,
+parser counts, preflight verdict and task/correlation IDs. SIS operations never
+enroll, alter the cart or save returned course rows as test history. No generic
+API console, token, raw DOM, policy body or live booking data is exposed.
+Other operations and malformed payloads are rejected.
+The `0.18.8` Admin workbench additionally groups eleven fixed read-only cases:
+SIS timetable sync and cached next class; Moodle Dashboard, course count and
+upcoming-assignment count; Portal notice count and cached Daily Briefing; and
+Library hours, live facility Date options, availability count and research
+result count. Host routes validate exact fields and project bounded summaries,
+write counters, task IDs and correlation IDs. Private course, notice, timetable,
+research and exact-slot rows are not sent to this Admin panel. Reading live
+Library Date options fills the date input for a separate, explicit availability
+test; it does not select a slot or submit Search by itself. Chat's existing
+read-only tool results remain available, and the new
+`hku_library_space_dates` tool exposes live Date options to Chat. This version
+does not yet add compact Chat result cards or GUI/F1/F2/F3/F4 parity.
 The status panel distinguishes an invalid RPC target, missing Host route, protocol
 error, and other Host request failure without displaying raw exception text.
-These two read-only slices are not the full D2 bridge or a Chat/Admin feature-parity
+These bounded read-only slices are not the full D2 bridge or a Chat/Admin feature-parity
 claim. The local Gradio GUI remains the supported operator and recovery UI.
 
 The in-app Plugins manager can also install a local package archive, but this

@@ -3,6 +3,8 @@ import { defineTool } from '@deepseek-ai/dsh-tools';
 import { HKUAgentsClient } from './client.js';
 import { installDesktopStatusBridge } from './desktop_status.js';
 import { installDesktopAdminBridge } from './desktop_admin.js';
+import { installDesktopSISBridge } from './desktop_sis.js';
+import { installDesktopReadBridge } from './desktop_readonly.js';
 export const name = 'hku-agents';
 export const inject = ['tools'];
 export const Config = Schema.object({
@@ -20,6 +22,8 @@ export function apply(ctx, config) {
     const client = new HKUAgentsClient(config);
     installDesktopStatusBridge(ctx, client);
     installDesktopAdminBridge(ctx, client);
+    installDesktopSISBridge(ctx, client);
+    installDesktopReadBridge(ctx, client);
     ctx.tools.register(defineTool({
         name: 'hku_sis_status',
         description: 'Check the local HKU AGENTS service, read-only SIS browser connection, and available capabilities. Use this before other HKU SIS tools or when connection state is unclear. This never logs in or writes to SIS.',
@@ -332,7 +336,7 @@ export function apply(ctx, config) {
     }));
     ctx.tools.register(defineTool({
         name: 'hku_library_space_availability',
-        description: 'For an allowlisted Main Library facility visible in the current HKUL selector (or the separately verified Chi Wah Study Room), accept only today or tomorrow in Asia/Hong_Kong; reject other dates before opening HKUL. Open the fixed Facilities Booking System, set the exact allowlisted Location and Facility Type and date, click Search, and read every numbered result page. This is read-only discovery: never click a green Select cell, open a booking form, check a session, enter a description, or submit a reservation. Availability support does not mean booking preview or automated booking is enabled for that facility.',
+        description: 'For one allowlisted Main Library facility (or Chi Wah Study Room), require an exact date currently offered by that facility’s live Date dropdown. Open the fixed Facilities Booking System, set the allowlisted Location and Facility Type and date, click Search, and read every numbered result page. This is read-only discovery: never click a green Select cell, open a booking form, check a session, enter a description, or submit a reservation. Availability support does not mean booking preview or automated booking is enabled for that facility.',
         parameters: {
             facility_type: {
                 type: 'string',
@@ -349,13 +353,35 @@ export function apply(ctx, config) {
             date: {
                 type: 'string',
                 required: true,
-                description: 'Exact YYYY-MM-DD date: today or tomorrow in Asia/Hong_Kong for the currently supported facilities. The live date dropdown remains authoritative.',
+                description: 'Exact YYYY-MM-DD date copied from hku_library_space_dates. The facility’s live Date dropdown is authoritative, including holiday skips.',
             },
         },
         output: envelopeOutput,
         timeoutMs: config.timeoutMs,
         async execute(args, execution) {
             return client.searchLibrarySpaceAvailability(args, execution.signal);
+        },
+    }));
+    ctx.tools.register(defineTool({
+        name: 'hku_library_space_dates',
+        description: 'Read only the live HKUL Date dropdown for one allowlisted facility. It may navigate to the fixed availability page and set Location/Facility Type, but does not submit Search, select a slot, open a booking form, or reserve. Use the offered dates rather than assuming today or tomorrow, especially around holidays.',
+        parameters: {
+            facility_type: {
+                type: 'string', required: true,
+                enum: [
+                    'single_study_room', 'av_group_viewing_room', 'communal_virtual_pc',
+                    'computer', 'computer_in_lic', 'engraving_cutting_computer',
+                    'concept_and_creation_room', 'discussion_room', 'microform_scanner',
+                    'overhead_scanner', 'research_desk', 'studio_editing_room',
+                    'study_table', 'study_table_deep_quiet', 'study_room',
+                ],
+                description: 'Exact allowlisted HKUL facility category.',
+            },
+        },
+        output: envelopeOutput,
+        timeoutMs: config.timeoutMs,
+        async execute(args, execution) {
+            return client.listLibrarySpaceDates({ facility_type: args.facility_type }, execution.signal);
         },
     }));
     ctx.tools.register(defineTool({

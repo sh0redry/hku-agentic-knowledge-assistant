@@ -5,6 +5,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from pydantic import BaseModel, ConfigDict
 
 from agents.models import TaskStatus
 from agents.briefing.agent import DailyBriefingRequest
@@ -51,6 +52,10 @@ class IntegrationAPIError(RuntimeError):
         self.recovery = recovery
 
 
+class IntegrationConnectRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
 def _task_summary(record) -> IntegrationTaskSummary:
     return IntegrationTaskSummary(
         id=record.id,
@@ -78,14 +83,14 @@ def create_integration_router(expected_token: str) -> APIRouter:
                 401,
                 "AUTH_REQUIRED",
                 "A local Integration API bearer token is required.",
-                "Configure the host adapter with INTEGRATION_API_TOKEN.",
+                "Start the updated local HKU AGENTS service to initialize the Windows Host connection, or configure an explicit host token.",
             )
         if not hmac.compare_digest(credentials.credentials, expected_token):
             raise IntegrationAPIError(
                 403,
                 "AUTH_INVALID",
                 "The local Integration API bearer token is invalid.",
-                "Copy the current token from the local GUI or configure the same environment token.",
+                "Refresh the automatic local connection; remove a stale host environment override if one was configured.",
             )
         return request.state.correlation_id
 
@@ -166,6 +171,23 @@ def create_integration_router(expected_token: str) -> APIRouter:
                 ),
             ) from exc
         return response(correlation_id, ok=True, result=snapshot)
+
+    @router.post("/connection/connect", response_model=IntegrationResponse)
+    async def connect_hku(body: IntegrationConnectRequest, request: Request, correlation_id: str = Depends(authorize)):
+        container = request.app.state.container
+        try:
+            snapshot = await container.connectors["sis_browser"].bind_hku_tab()
+            binding = {"state": "connected" if snapshot.get("logged_in") is True else "login_required",
+                       "logged_in": snapshot.get("logged_in") is True,
+                       "page_kind": snapshot.get("page_kind")}
+        except BrowserBridgeError as exc:
+            binding = {"state": "login_required" if "LOGIN_REQUIRED" in exc.code else "unavailable",
+                       "logged_in": False, "error_code": exc.code}
+        return response(correlation_id, ok=True, result={
+            "read_only": True, "domain_writes_performed": 0,
+            "service_version": request.app.version, "connections": container.connection_status(),
+            "binding": binding,
+        })
 
     async def run_timetable_task(
         request: Request,

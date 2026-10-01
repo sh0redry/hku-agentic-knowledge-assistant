@@ -815,8 +815,8 @@ class LibrarySpaceAvailabilityCapability(BaseCapability):
             raise _translate_browser_error(exc) from exc
         snapshot = navigation["snapshot"]
         diagnostics = snapshot["diagnostics"]
-        if diagnostics["parser_version"] != "0.3.6":
-            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.17.14.")
+        if diagnostics["parser_version"] not in {"0.3.6", "0.3.7"}:
+            raise CapabilityError("EXTENSION_UPDATE_REQUIRED", "Reload HKU AGENTS Browser Bridge 0.17.19 and refresh the Library page.")
         if not snapshot["result_set_complete"]:
             raise CapabilityError(
                 "LIBRARY_SPACE_RESULTS_PAGINATED",
@@ -1050,10 +1050,10 @@ class LibrarySpaceBookingPreviewCapability(BaseCapability):
             raise _translate_browser_error(exc) from exc
         snapshot = navigation["snapshot"]
         diagnostics = snapshot["diagnostics"]
-        if diagnostics["parser_version"] != "0.3.6":
+        if diagnostics["parser_version"] not in {"0.3.6", "0.3.7"}:
             raise CapabilityError(
                 "EXTENSION_UPDATE_REQUIRED",
-                "Reload HKU AGENTS Browser Bridge 0.17.14.",
+                "Reload HKU AGENTS Browser Bridge 0.17.19 and refresh the Library page.",
             )
         if not snapshot["result_set_complete"]:
             raise CapabilityError(

@@ -25,10 +25,15 @@ APP_DB_PATH = (
 APP_HOST = os.environ.get("APP_HOST", "127.0.0.1")
 APP_PORT = int(os.environ.get("APP_PORT", "7860"))
 API_BASE_URL = os.environ.get("API_BASE_URL", f"http://{APP_HOST}:{APP_PORT}")
+from services.local_credentials import LocalCredentialError, load_tokens
+try:
+    _LOCAL_TOKENS = load_tokens(API_BASE_URL)
+except LocalCredentialError:
+    _LOCAL_TOKENS = {}
 _INTEGRATION_API_TOKEN_SETTING = os.environ.get("INTEGRATION_API_TOKEN", "").strip()
-INTEGRATION_API_TOKEN = _INTEGRATION_API_TOKEN_SETTING or secrets.token_urlsafe(32)
+INTEGRATION_API_TOKEN = _INTEGRATION_API_TOKEN_SETTING or _LOCAL_TOKENS.get("integration") or secrets.token_urlsafe(32)
 INTEGRATION_API_TOKEN_SOURCE = (
-    "environment" if _INTEGRATION_API_TOKEN_SETTING else "process_generated"
+    "environment" if _INTEGRATION_API_TOKEN_SETTING else "windows_user_store" if _LOCAL_TOKENS else "process_generated"
 )
 CONFIRMATION_TTL_SECONDS = int(os.environ.get("CONFIRMATION_TTL_SECONDS", "300"))
 LIBRARY_BOOKING_PREVIEW_TTL_SECONDS = int(
@@ -57,9 +62,9 @@ BROWSER_BOOKING_SUBMIT_TIMEOUT_SECONDS = float(
     os.environ.get("BROWSER_BOOKING_SUBMIT_TIMEOUT_SECONDS", "60")
 )
 _BROWSER_PAIRING_TOKEN_SETTING = os.environ.get("BROWSER_PAIRING_TOKEN", "").strip()
-BROWSER_PAIRING_TOKEN = _BROWSER_PAIRING_TOKEN_SETTING or secrets.token_urlsafe(32)
+BROWSER_PAIRING_TOKEN = _BROWSER_PAIRING_TOKEN_SETTING or _LOCAL_TOKENS.get("browser_pairing") or secrets.token_urlsafe(32)
 BROWSER_PAIRING_TOKEN_SOURCE = (
-    "environment" if _BROWSER_PAIRING_TOKEN_SETTING else "process_generated"
+    "environment" if _BROWSER_PAIRING_TOKEN_SETTING else "windows_user_store" if _LOCAL_TOKENS else "process_generated"
 )
 BROWSER_EXTENSION_IDS = {
     item.strip()

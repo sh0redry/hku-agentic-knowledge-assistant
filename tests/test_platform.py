@@ -219,6 +219,21 @@ class PlatformAPITests(unittest.TestCase):
         self.assertEqual(body["result"]["auth_mode"], "bearer")
         self.assertNotIn(self.integration_token, str(body))
 
+    def test_integration_connect_requires_auth_and_projects_binding_only(self):
+        url = "/api/v1/integration/connection/connect"
+        self.assertEqual(self.client.post(url, json={}).status_code, 401)
+        self.assertEqual(self.client.post(url, json={"url": "https://example.com"}, headers=self.integration_headers()).status_code, 422)
+        connector = self.container.connectors["sis_browser"]
+        connector.bind_hku_tab = AsyncMock(return_value={"logged_in": True, "page_kind": "portal_home", "private": "not-for-renderer"})
+        result = self.client.post(url, json={}, headers=self.integration_headers()).json()["result"]
+        self.assertEqual(result["binding"]["state"], "connected")
+        self.assertEqual(result["domain_writes_performed"], 0)
+        self.assertNotIn("not-for-renderer", str(result))
+        connector.bind_hku_tab = AsyncMock(side_effect=BrowserBridgeError("HKU_TAB_NOT_FOUND", "private URL"))
+        result = self.client.post(url, json={}, headers=self.integration_headers()).json()["result"]
+        self.assertEqual(result["binding"]["error_code"], "HKU_TAB_NOT_FOUND")
+        self.assertNotIn("private URL", str(result))
+
     def test_integration_sync_has_stable_success_and_error_envelopes(self):
         disconnected = self.client.post(
             "/api/v1/integration/sis/sync",

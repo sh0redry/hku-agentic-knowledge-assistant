@@ -121,7 +121,7 @@ test('client preserves stable API errors without leaking the token', async () =>
   }
 })
 
-test('plugin registers exactly twenty-two restricted HKU tools and forwards preflight input', async () => {
+test('plugin registers exactly twenty-three restricted HKU tools and forwards preflight input', async () => {
   const previous = process.env.INTEGRATION_API_TOKEN
   process.env.INTEGRATION_API_TOKEN = TOKEN
   let receivedBody
@@ -162,6 +162,7 @@ test('plugin registers exactly twenty-two restricted HKU tools and forwards pref
             'hku_library_list_facilities',
             'hku_library_hours_and_locations',
             'hku_library_space_availability',
+            'hku_library_space_dates',
             'hku_library_space_booking_preview',
             'hku_library_research_item',
             'hku_library_research_access_options',
@@ -229,6 +230,10 @@ test('Library tools forward only bounded structured search, record, and facility
           { facility_type: 'discussion_room', date: '2026-09-20' },
           { signal: new AbortController().signal },
         )
+        await tools.find(tool => tool.name === 'hku_library_space_dates').execute(
+          { facility_type: 'discussion_room' },
+          { signal: new AbortController().signal },
+        )
         await tools.find(tool => tool.name === 'hku_library_space_booking_preview').execute(
           {
             facility_type: 'discussion_room',
@@ -269,6 +274,10 @@ test('Library tools forward only bounded structured search, record, and facility
           {
             url: '/api/v1/integration/library/spaces/search-availability',
             body: { facility_type: 'discussion_room', date: '2026-09-20' },
+          },
+          {
+            url: '/api/v1/integration/library/spaces/list-dates',
+            body: { facility_type: 'discussion_room' },
           },
           {
             url: '/api/v1/integration/library/spaces/booking-preview',

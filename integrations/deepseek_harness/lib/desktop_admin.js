@@ -103,7 +103,7 @@ export async function readDesktopFacilities(client, signal) {
             error: {
                 code,
                 recovery: code === 'TOKEN_NOT_CONFIGURED'
-                    ? 'Restart Desktop with the Integration API token in its Host environment.'
+                    ? 'Restart the updated HKU AGENTS service once to initialize automatic connection.'
                     : 'Check the local HKU AGENTS Core, then run this read-only test again.',
             },
             correlation_id: null,

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { readLocalIntegrationToken } from './local_credentials.js';
 export class HKUAgentsAPIError extends Error {
     code;
     status;
@@ -68,6 +69,9 @@ function combinedSignal(parent, timeoutMs) {
     };
 }
 export class HKUAgentsClient {
+    connectHku(signal) {
+        return this.request('POST', '/api/v1/integration/connection/connect', {}, signal);
+    }
     baseUrl;
     tokenEnv;
     timeoutMs;
@@ -171,6 +175,9 @@ export class HKUAgentsClient {
     listLibraryFacilities(signal) {
         return this.request('POST', '/api/v1/integration/library/spaces/list-facilities', {}, signal);
     }
+    listLibrarySpaceDates(input, signal) {
+        return this.request('POST', '/api/v1/integration/library/spaces/list-dates', input, signal);
+    }
     libraryHoursAndLocations(signal) {
         return this.request('POST', '/api/v1/integration/library/hours-and-locations', {}, signal);
     }
@@ -178,9 +185,17 @@ export class HKUAgentsClient {
         return this.request('POST', '/api/v1/integration/briefing/today', input, signal);
     }
     async request(method, path, body, parentSignal) {
-        const token = process.env[this.tokenEnv]?.trim();
+        let token = process.env[this.tokenEnv]?.trim();
+        if (!token && this.tokenEnv === 'INTEGRATION_API_TOKEN') {
+            try {
+                token = await readLocalIntegrationToken(this.baseUrl) || undefined;
+            }
+            catch {
+                throw new HKUAgentsAPIError('LOCAL_CONNECTION_UNAVAILABLE', 'The Windows local connection could not be opened. Restart HKU AGENTS under the same Windows account.');
+            }
+        }
         if (!token || token.length < 32) {
-            throw new HKUAgentsAPIError('TOKEN_NOT_CONFIGURED', `${this.tokenEnv} must contain the current local HKU AGENTS Integration API token.`);
+            throw new HKUAgentsAPIError('TOKEN_NOT_CONFIGURED', 'Start the updated HKU AGENTS service once under this Windows account to initialize automatic connection.');
         }
         const requestUrl = new URL(path, `${this.baseUrl}/`);
         if (requestUrl.origin !== this.baseUrl) {

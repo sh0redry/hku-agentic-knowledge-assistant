@@ -86,13 +86,30 @@ test('Core outage is reported without leaking exception messages', async () => {
 })
 
 test('Host registration is scoped to the connection service', () => {
-  let route
+  const routes = []
   const ctx = {
     inject(requirements, install) {
       assert.deepEqual(requirements, ['connection'])
-      install({ connection: { fetch: { register(value) { route = value; return () => {} } } } })
+      install({ connection: { fetch: { register(value) { routes.push(value); return () => {} } } } })
     },
   }
   installDesktopStatusBridge(ctx, { async status() { throw new Error('not called') } })
-  assert.equal(route.path, DESKTOP_STATUS_PATH)
+  assert.deepEqual(routes.map(route => route.path), [DESKTOP_STATUS_PATH, '/api/hku-agents/connect'])
+})
+
+test('Connect HKU accepts only an empty fixed request and redacts binding data', async () => {
+  let calls = 0
+  const route = desktopStatusRoute({ async status() {
+    calls++
+    return { correlation_id: 'connect-id', result: { service_version: 'test', connections: [],
+      binding: { state: 'login_required', logged_in: false, page_kind: 'login', token: 'secret' } } }
+  } }, true)
+  const body = { type: 'client-request', rpcId, method: 'hku-agents/connect', payload: {} }
+  const response = await route.fetch(request(JSON.stringify(body)))
+  const value = (await response.json()).result.value
+  assert.equal(value.core.state, 'connected')
+  assert.equal(value.binding.state, 'login_required')
+  assert.doesNotMatch(JSON.stringify(value), /secret/)
+  assert.equal((await route.fetch(request(JSON.stringify({ ...body, payload: { url: 'https://example.com' } })))).status, 400)
+  assert.equal(calls, 1)
 })

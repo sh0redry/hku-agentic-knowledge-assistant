@@ -51,6 +51,7 @@ export declare class HKUAgentsAPIError extends Error {
     });
 }
 export declare class HKUAgentsClient {
+    connectHku(signal?: AbortSignal): Promise<IntegrationEnvelope>;
     readonly baseUrl: string;
     readonly tokenEnv: string;
     readonly timeoutMs: number;
@@ -128,6 +129,9 @@ export declare class HKUAgentsClient {
         eligibility_category: 'current_hku_students' | 'current_hku_staff' | 'current_hku_space_students' | 'current_hku_space_staff' | 'hku_alumni';
     }, signal?: AbortSignal): Promise<IntegrationEnvelope>;
     listLibraryFacilities(signal?: AbortSignal): Promise<IntegrationEnvelope>;
+    listLibrarySpaceDates(input: {
+        facility_type: LibraryAvailabilityFacilityType;
+    }, signal?: AbortSignal): Promise<IntegrationEnvelope>;
     libraryHoursAndLocations(signal?: AbortSignal): Promise<IntegrationEnvelope>;
     dailyBriefing(input: {
         term_label?: string;

@@ -6,7 +6,7 @@ import re
 import secrets
 import threading
 import time
-from typing import Any
+from typing import Any, Callable
 
 from fastapi import WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
@@ -59,6 +59,8 @@ class BrowserBridgeService:
         if not 32 <= len(self._pairing_token) <= 200:
             raise ValueError("Browser pairing token must contain 32 to 200 characters.")
         self._pairing_token_source = pairing_token_source
+        self._pairing_persistent = pairing_token_source in {"environment", "windows_user_store"}
+        self._persist_pairing: Callable[[str], bool] | None = None
         self._paired_extension_id: str | None = None
         self._extension_version: str | None = None
         self._websocket: WebSocket | None = None
@@ -81,9 +83,13 @@ class BrowserBridgeService:
                 "websocket_url": websocket_url,
                 "paired_extension_id": self._paired_extension_id,
                 "pairing_token_source": self._pairing_token_source,
-                "persistent_across_restarts": self._pairing_token_source == "environment",
+                "persistent_across_restarts": self._pairing_persistent,
                 "security": "localhost + token + extension-origin pinning",
             }
+
+    def set_pairing_persistence(self, persist: Callable[[str], bool]) -> None:
+        self._persist_pairing = persist
+        self._pairing_persistent = True
 
     async def rotate_pairing_token(self) -> str:
         return await self._replace_pairing_token(
@@ -103,7 +109,15 @@ class BrowserBridgeService:
         self, *, clear_extension_pin: bool, source: str, close_reason: str
     ) -> str:
         with self._state_lock:
-            self._pairing_token = secrets.token_urlsafe(32)
+            replacement = secrets.token_urlsafe(32)
+            if self._persist_pairing is not None:
+                try:
+                    if self._persist_pairing(replacement) is not True:
+                        raise ValueError("Pairing persistence unavailable")
+                except Exception as exc:
+                    raise BrowserBridgeError("LOCAL_CONNECTION_UNAVAILABLE", "The new browser pairing could not be saved.") from exc
+            self._pairing_token = replacement
+            self._pairing_persistent = self._persist_pairing is not None
             self._pairing_token_source = source
             self._last_pairing_error = None
             self._last_pairing_error_at = 0.0

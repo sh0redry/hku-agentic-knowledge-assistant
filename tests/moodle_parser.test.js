@@ -25,7 +25,7 @@ const dashboard = parser.inspect(dashboardDocument(), {
 });
 assert.equal(dashboard.logged_in, true);
 assert.equal(dashboard.page_kind, "dashboard");
-assert.equal(dashboard.diagnostics.parser_version, "0.4.1");
+assert.equal(dashboard.diagnostics.parser_version, "0.4.2");
 assert.equal(dashboard.diagnostics.dashboard_marker_found, true);
 assert.equal(dashboard.diagnostics.course_link_candidate_count, 0);
 assert.equal(JSON.stringify(dashboard).includes("Private Course Name"), false);
@@ -356,6 +356,35 @@ assert.equal(
   "display_text_hong_kong_inferred_year"
 );
 assert.equal(groupedDateList.diagnostics.inferred_assignment_year_count, 1);
+
+// HKULMS Timeline screenshot: standalone date heading, clock in activity row.
+const timelineBlock = {};
+const oldClosest = groupedDateRow.closest;
+const oldText = groupedDateRow.textContent;
+const oldQuery = groupedDateRow.querySelector;
+groupedDateRow.closest = selector => selector.includes("block_timeline") ? timelineBlock : null;
+groupedDateRow.previousElementSibling = {
+  textContent: "Sunday, 4 October 2026",
+  matches() { return true; }
+};
+groupedDateRow.parentElement = timelineBlock;
+groupedDateRow.textContent = "00:00 Project deadline Course [Section 1A, 2026]";
+groupedDateRow.querySelector = selector => selector === "[data-region='event-time']"
+  ? { textContent: "00:00", getAttribute() { return null; } } : oldQuery.call(groupedDateRow, selector);
+const themeList = parser.parseUpcomingAssignments(groupedDateDocument, {
+  origin: "https://moodle.hku.hk", pathname: "/my/"
+});
+assert.equal(themeList.assignments[0].due_at, "2026-10-03T16:00:00.000Z");
+assert.equal(themeList.diagnostics.unparsed_assignment_candidate_count, 0);
+groupedDateRow.previousElementSibling.textContent = "Course [2026]";
+assert.equal(parser.parseUpcomingAssignments(groupedDateDocument, {
+  origin: "https://moodle.hku.hk", pathname: "/my/"
+}).diagnostics.unparsed_assignment_candidate_count, 1, "course year is not a due date");
+groupedDateRow.closest = oldClosest;
+groupedDateRow.querySelector = oldQuery;
+groupedDateRow.textContent = oldText;
+delete groupedDateRow.previousElementSibling;
+delete groupedDateRow.parentElement;
 
 const splitExplicitDateRow = {
   dataset: { eventId: "9012", eventName: "Project deadline" },

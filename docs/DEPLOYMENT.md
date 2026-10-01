@@ -91,13 +91,24 @@ it never enters or reads authentication factors.
 
 ## Install DeepSeek Harness support
 
+Windows Desktop plugin `0.18.9` supports ordinary icon startup without a
+token-bearing PowerShell window. Start the updated Core once, then click
+**Connect HKU** in Desktop with HKU Portal open in the paired Chrome profile.
+Core stores Integration and Browser Bridge credentials as Windows current-user
+DPAPI ciphertext in `%USERPROFILE%\.hku-agents\connection-v1.json`; the Host
+decrypts only the Integration credential for its configured loopback origin.
+Without environment overrides, Core reuses both values across restarts. Initial
+Chrome extension pairing and HKU login/MFA remain user actions. Environment
+tokens are optional overrides for legacy/non-Windows setups.
+
 ```powershell
 npm install --global pnpm@11.7.0
 cd integrations\deepseek_harness
 npm install
 npm test
 npm pack
-$env:INTEGRATION_API_TOKEN = "the-integration-token"
+# Windows automatic connection needs no environment token.
+# Non-Windows/legacy setups may still configure INTEGRATION_API_TOKEN.
 npx.cmd --yes @deepseek-ai/dsh@0.1.2-rc.1 plugin --profile web add .\dsh-hku-agents-0.18.0.tgz
 npx.cmd --yes @deepseek-ai/dsh@0.1.2-rc.1 --profile web --dump-config
 npx.cmd --yes @deepseek-ai/dsh@0.1.2-rc.1 --profile web
@@ -132,9 +143,11 @@ the popup reports `token_rejected`. Enter the new value or use the GUI pairing
 controls. If the service is stopped, the extension reports `reconnecting` and
 continues with bounded backoff.
 
-If `INTEGRATION_API_TOKEN` changes, restart Harness with the new environment
-variable. An HTTP `401` normally means the host token is missing or incorrect;
-it does not indicate a browser-pairing failure.
+For automatic Windows connection, restart Core after changing its explicit
+token setting; Host reads the refreshed protected credential on the next call.
+If the Host itself has an environment override, update/remove that override
+and restart Harness. HTTP `401`/`403` indicates Integration authentication,
+rather than browser pairing.
 
 ## Uninstallation
 
