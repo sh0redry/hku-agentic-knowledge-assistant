@@ -1,4 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis'
+import { recordRoute, safeDiagnostics, historyRoute } from './history.js'
 
 import { HKUAgentsAPIError, type HKUAgentsClient, type LibraryAvailabilityFacilityType } from './client.js'
 
@@ -187,9 +188,11 @@ async function execute(client: ReadClient, operation: AdminReadOperation, payloa
 function failure(error: unknown) {
   const raw = error instanceof HKUAgentsAPIError ? error.code : 'INVALID_READ_RESPONSE'
   const code = /^[A-Z][A-Z0-9_]{0,63}$/.test(raw) ? raw : 'READ_FAILED'
-  return { ok: false, read_only: true, error: { code,
+  return { ok: false, read_only: true, task_id: error instanceof HKUAgentsAPIError ? str(error.taskId, 64) : null,
+    diagnostics: safeDiagnostics(error instanceof HKUAgentsAPIError ? error.diagnostics : null), error: { code,
     recovery: code === 'TOKEN_NOT_CONFIGURED' ? 'Restart the updated HKU AGENTS service once to initialize automatic connection.'
-      : 'Check Core, Chrome Bridge, the relevant HKU login and exact input, then retry this read-only test.' }, correlation_id: null }
+      : 'Check Core, Chrome Bridge, the relevant HKU login and exact input, then retry this read-only test.' },
+    correlation_id: error instanceof HKUAgentsAPIError ? str(error.correlationId, 64) : null }
 }
 
 export async function readDesktopOperation(client: ReadClient, operation: AdminReadOperation, payload: Record<string, unknown>, signal: AbortSignal) {
@@ -199,6 +202,7 @@ export async function readDesktopOperation(client: ReadClient, operation: AdminR
     const projected = summary(operation, envelope.result)
     if (!projected) throw new Error('Incomplete read-only projection')
     return { ok: true, read_only: true, domain_writes_performed: 0, operation, summary: projected,
+      diagnostics: safeDiagnostics(envelope.result.diagnostics),
       task_id: record(envelope.task) ? str(envelope.task.id, 64) : null,
       correlation_id: str(envelope.correlation_id, 64) }
   } catch (error) { return failure(error) }
@@ -224,7 +228,8 @@ export function desktopReadRoute(client: ReadClient, operation: AdminReadOperati
 export function installDesktopReadBridge(ctx: Context, client: ReadClient): void {
   ctx.inject(['connection'], connectionContext => {
     const connection = (connectionContext as Context & { connection: HostConnection }).connection
-    const disposers = ADMIN_READ_OPERATIONS.map(operation => connection.fetch.register(desktopReadRoute(client, operation)))
+    const disposers = ADMIN_READ_OPERATIONS.map(operation => connection.fetch.register(recordRoute(desktopReadRoute(client, operation), operation)))
+    disposers.push(connection.fetch.register(historyRoute('list')), connection.fetch.register(historyRoute('review')))
     return () => { for (const dispose of disposers.reverse()) dispose() }
   })
 }

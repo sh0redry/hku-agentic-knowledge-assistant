@@ -1,4 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis'
+import { recordRoute } from './history.js'
 
 import { HKUAgentsAPIError, type HKUAgentsClient } from './client.js'
 
@@ -142,6 +143,6 @@ export function desktopFacilitiesRoute(client: Pick<HKUAgentsClient, 'listLibrar
 export function installDesktopAdminBridge(ctx: Context, client: Pick<HKUAgentsClient, 'listLibraryFacilities'>): void {
   ctx.inject(['connection'], connectionContext => {
     const connection = (connectionContext as Context & { connection: HostConnection }).connection
-    return connection.fetch.register(desktopFacilitiesRoute(client))
+    return connection.fetch.register(recordRoute(desktopFacilitiesRoute(client), 'facilities'))
   })
 }

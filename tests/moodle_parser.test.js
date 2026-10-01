@@ -25,7 +25,7 @@ const dashboard = parser.inspect(dashboardDocument(), {
 });
 assert.equal(dashboard.logged_in, true);
 assert.equal(dashboard.page_kind, "dashboard");
-assert.equal(dashboard.diagnostics.parser_version, "0.4.2");
+assert.equal(dashboard.diagnostics.parser_version, "0.4.3");
 assert.equal(dashboard.diagnostics.dashboard_marker_found, true);
 assert.equal(dashboard.diagnostics.course_link_candidate_count, 0);
 assert.equal(JSON.stringify(dashboard).includes("Private Course Name"), false);
@@ -483,6 +483,32 @@ assert.equal(todoList.diagnostics.duplicate_assignment_candidate_count, 1);
 assert.equal(todoList.assignments[0].module_id, "8123");
 assert.equal(todoList.assignments[0].source, "todo");
 assert.equal(todoList.assignments[0].due_at, "2026-09-27T15:59:00.000Z");
+
+// Sparse To do and richer Timeline may share a module/date but only one has an event ID.
+function mergedDeadlineList(rows) {
+  return parser.parseUpcomingAssignments({
+    ...assignmentDocument,
+    querySelectorAll(selector) {
+      return selector === "[data-region='event-list-item']" ? rows : [];
+    }
+  }, { origin: "https://moodle.hku.hk", pathname: "/my/" });
+}
+const sparseDeadline = assignmentNode({ eventId: "", moduleId: "7001", courseId: "",
+  courseName: "", title: "Project milestone", timestamp: 4102444800, type: "assign" });
+for (const rows of [[sparseDeadline, assignment], [assignment, sparseDeadline]]) {
+  const merged = mergedDeadlineList(rows);
+  assert.equal(merged.assignment_count, 1);
+  assert.equal(merged.assignments[0].course_id, "123");
+  assert.equal(merged.assignments[0].course_name, "COMP3297 Software Engineering");
+  assert.equal(merged.diagnostics.duplicate_assignment_candidate_count, 1);
+}
+const conflictingDeadline = assignmentNode({ eventId: "9001", moduleId: "7001", courseId: "456",
+  courseName: "Wrong course", title: "Project milestone", timestamp: 4102444800, type: "assign" });
+assert.equal(mergedDeadlineList([assignment, conflictingDeadline]).assignments[0].course_name,
+  "COMP3297 Software Engineering");
+const laterDeadline = assignmentNode({ eventId: "", moduleId: "7001", courseId: "123",
+  courseName: "COMP3297 Software Engineering", title: "Later deadline", timestamp: 4102531200, type: "assign" });
+assert.equal(mergedDeadlineList([sparseDeadline, laterDeadline]).assignment_count, 2);
 
 const homeLocation = {
   origin: "https://moodle.hku.hk",

@@ -44,10 +44,16 @@ export declare class HKUAgentsAPIError extends Error {
     readonly code: string;
     readonly status: number | null;
     readonly recovery: string | null;
+    readonly taskId: string | null;
+    readonly correlationId: string | null;
+    readonly diagnostics: unknown;
     constructor(code: string, message: string, options?: {
         status?: number | null;
         recovery?: string | null;
         cause?: unknown;
+        taskId?: string | null;
+        correlationId?: string | null;
+        diagnostics?: unknown;
     });
 }
 export declare class HKUAgentsClient {

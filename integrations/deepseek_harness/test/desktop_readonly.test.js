@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { ADMIN_READ_OPERATIONS, desktopReadRoute } from '../lib/desktop_readonly.js'
+import { HKUAgentsAPIError } from '../lib/client.js'
 
 const rpcId = '12345678-1234-4123-8123-123456789abc'
 function request(route, payload = {}) {
@@ -66,4 +67,16 @@ test('Admin read projection rejects writes and incomplete responses', async () =
   const incomplete = desktopReadRoute({ async listMoodleCourses() { return envelope({ moodle_writes_performed: 0, course_list: {} }) } }, 'moodle_courses')
   const other = await (await incomplete.fetch(request(incomplete))).json()
   assert.equal(other.result.value.ok, false)
+})
+
+test('failed reads preserve task identifiers and only safe diagnostic counters', async () => {
+  const route = desktopReadRoute({ async listMoodleCourses() {
+    throw new HKUAgentsAPIError('MOODLE_COURSE_PARSE_INCOMPLETE', 'PRIVATE', { taskId: 'task-id', correlationId: 'correlation-id',
+      diagnostics: { parser_version: '0.4.2', unparsed_course_candidate_count: 2, raw_dom: 'PRIVATE' } })
+  } }, 'moodle_courses')
+  const body = await (await route.fetch(request(route))).json()
+  assert.equal(body.result.value.task_id, 'task-id')
+  assert.equal(body.result.value.correlation_id, 'correlation-id')
+  assert.deepEqual(body.result.value.diagnostics, { parser_version: '0.4.2', unparsed_course_candidate_count: 2 })
+  assert.doesNotMatch(JSON.stringify(body), /PRIVATE|raw_dom/)
 })

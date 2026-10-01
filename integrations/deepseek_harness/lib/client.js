@@ -4,12 +4,18 @@ export class HKUAgentsAPIError extends Error {
     code;
     status;
     recovery;
+    taskId;
+    correlationId;
+    diagnostics;
     constructor(code, message, options = {}) {
         super(message, options.cause === undefined ? undefined : { cause: options.cause });
         this.name = 'HKUAgentsAPIError';
         this.code = code;
         this.status = options.status ?? null;
         this.recovery = options.recovery ?? null;
+        this.taskId = options.taskId ?? null;
+        this.correlationId = options.correlationId ?? null;
+        this.diagnostics = options.diagnostics;
     }
 }
 function normalizedLoopbackBaseUrl(value) {
@@ -241,7 +247,9 @@ export class HKUAgentsClient {
                 throw new HKUAgentsAPIError('INVALID_RESPONSE', 'HKU AGENTS returned an incompatible Integration API envelope.', { status: response.status });
             }
             if (!response.ok || !value.ok) {
-                throw new HKUAgentsAPIError(value.error?.code ?? `HTTP_${response.status}`, value.error?.message ?? 'HKU AGENTS request failed.', { status: response.status, recovery: value.error?.recovery ?? null });
+                throw new HKUAgentsAPIError(value.error?.code ?? `HTTP_${response.status}`, value.error?.message ?? 'HKU AGENTS request failed.', { status: response.status, recovery: value.error?.recovery ?? null,
+                    taskId: value.task?.id ?? null, correlationId: value.correlation_id,
+                    diagnostics: value.task?.error?.details?.diagnostics });
             }
             return value;
         }

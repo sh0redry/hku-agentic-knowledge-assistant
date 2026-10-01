@@ -11,6 +11,7 @@ const commands = [];
 const context = {
   importScripts() {}, URL, Date, console, setTimeout, clearTimeout, setInterval, clearInterval,
   chrome: {
+    alarms: { create() {}, async clear() {}, onAlarm: { addListener() {} } },
     storage: { local: { async get(d) { return d; } } },
     runtime: { onMessage: { addListener() {} }, onStartup: { addListener() {} }, onInstalled: { addListener() {} } },
     tabs: {

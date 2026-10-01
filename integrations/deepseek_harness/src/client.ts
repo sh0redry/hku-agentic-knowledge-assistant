@@ -66,17 +66,23 @@ export class HKUAgentsAPIError extends Error {
   readonly code: string
   readonly status: number | null
   readonly recovery: string | null
+  readonly taskId: string | null
+  readonly correlationId: string | null
+  readonly diagnostics: unknown
 
   constructor(
     code: string,
     message: string,
-    options: { status?: number | null; recovery?: string | null; cause?: unknown } = {},
+    options: { status?: number | null; recovery?: string | null; cause?: unknown; taskId?: string | null; correlationId?: string | null; diagnostics?: unknown } = {},
   ) {
     super(message, options.cause === undefined ? undefined : { cause: options.cause })
     this.name = 'HKUAgentsAPIError'
     this.code = code
     this.status = options.status ?? null
     this.recovery = options.recovery ?? null
+    this.taskId = options.taskId ?? null
+    this.correlationId = options.correlationId ?? null
+    this.diagnostics = options.diagnostics
   }
 }
 
@@ -479,7 +485,9 @@ export class HKUAgentsClient {
         throw new HKUAgentsAPIError(
           value.error?.code ?? `HTTP_${response.status}`,
           value.error?.message ?? 'HKU AGENTS request failed.',
-          { status: response.status, recovery: value.error?.recovery ?? null },
+          { status: response.status, recovery: value.error?.recovery ?? null,
+            taskId: value.task?.id ?? null, correlationId: value.correlation_id,
+            diagnostics: (value.task?.error?.details as { diagnostics?: unknown } | undefined)?.diagnostics },
         )
       }
       return value

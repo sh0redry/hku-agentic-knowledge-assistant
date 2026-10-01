@@ -1,4 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis'
+import { recordRoute } from './history.js'
 
 import { HKUAgentsAPIError, type HKUAgentsClient } from './client.js'
 
@@ -174,8 +175,8 @@ export function desktopSISPreflightRoute(client: Pick<SISClient, 'preflight'>): 
 export function installDesktopSISBridge(ctx: Context, client: SISClient): void {
   ctx.inject(['connection'], connectionContext => {
     const connection = (connectionContext as Context & { connection: HostConnection }).connection
-    const disposeSync = connection.fetch.register(desktopSISSyncRoute(client))
-    const disposePreflight = connection.fetch.register(desktopSISPreflightRoute(client))
+    const disposeSync = connection.fetch.register(recordRoute(desktopSISSyncRoute(client), 'sis_sync'))
+    const disposePreflight = connection.fetch.register(recordRoute(desktopSISPreflightRoute(client), 'sis_preflight'))
     return () => { disposePreflight(); disposeSync() }
   })
 }

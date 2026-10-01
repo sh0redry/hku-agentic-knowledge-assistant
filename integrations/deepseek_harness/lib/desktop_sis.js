@@ -1,3 +1,4 @@
+import { recordRoute } from './history.js';
 import { HKUAgentsAPIError } from './client.js';
 export const DESKTOP_SIS_SYNC_PATH = '/api/hku-agents/admin/sis/sync';
 export const DESKTOP_SIS_PREFLIGHT_PATH = '/api/hku-agents/admin/sis/preflight';
@@ -171,8 +172,8 @@ export function desktopSISPreflightRoute(client) {
 export function installDesktopSISBridge(ctx, client) {
     ctx.inject(['connection'], connectionContext => {
         const connection = connectionContext.connection;
-        const disposeSync = connection.fetch.register(desktopSISSyncRoute(client));
-        const disposePreflight = connection.fetch.register(desktopSISPreflightRoute(client));
+        const disposeSync = connection.fetch.register(recordRoute(desktopSISSyncRoute(client), 'sis_sync'));
+        const disposePreflight = connection.fetch.register(recordRoute(desktopSISPreflightRoute(client), 'sis_preflight'));
         return () => { disposePreflight(); disposeSync(); };
     });
 }

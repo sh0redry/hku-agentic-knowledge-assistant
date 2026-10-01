@@ -51,6 +51,14 @@ with the Floor/Facility time-range header and reads only direct row cells.
 Outer layout tables and nested descendants no longer become fake status cells.
 Unknown colors within the actual matrix still stop the read safely.
 
+Version 0.17.22 adds the Chrome alarms permission for reconnect wakeup after MV3
+worker suspension. Existing in-memory retry timers remain the fast path; alarms
+only retry the paired local Bridge and cannot authorize booking or login.
+
+Version 0.17.21 / Moodle parser 0.4.3 enriches duplicate Dashboard deadlines
+with course metadata from richer Timeline rows when identities agree. Different
+deadlines or conflicting course identities are not combined.
+
 Version 0.17.20 separates the research schema (0.2.2) from the availability
 schema (0.3.7). Research search/detail/access options no longer report the
 availability version, which Core correctly rejects for research. Hours and

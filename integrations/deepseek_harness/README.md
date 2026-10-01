@@ -1,5 +1,45 @@
 ﻿# HKU AGENTS for DeepSeek Harness
 
+## Desktop 0.18.12: Start and connect HKU
+
+### 0.18.14 rc.2 Chat toolview correction
+
+The installed Desktop rc.2 client dispatches `tool.call.toolview` by tool name;
+Host `presentCall`/`presentResult` hooks alone did not change its visible cards.
+The browser bundle now registers all 23 HKU keys and declares the ui-tool client
+dependency. Cards render preparing/running/completed/failed/interrupted states
+and allowlisted `block.meta` summary fields only. They do not copy raw arguments,
+private rows, or the canonical result JSON into the summary. A **View original
+details** button uses Harness's existing inspector; model-facing output remains
+unchanged. Missing metadata is explicitly unverified, never assumed success.
+Client keyed-slot registration and actual rc.2 owner-prop shapes now have tests;
+real Desktop display acceptance is still required after installation.
+
+The business panel starts the registered Windows Core in the background, without
+a token terminal, then checks the paired Chrome Bridge and HKU login. The Host
+reads `%USERPROFILE%/.hku-agents/core-launch-v1.json`, registered by Core startup
+or local installation. It runs only that installation's `.venv/Scripts/pythonw.exe`
+and `project/app.py`, with no renderer-supplied commands, paths or arguments.
+0.18.13 uses the GUI-subsystem `pythonw.exe` (instead of `python.exe`) without
+detached console creation. Chrome Bridge waiting is 40 seconds to cover its
+30-second reconnect backoff. Chrome extension 0.17.22 adds alarm-based retry
+wakeup when MV3 suspends its service worker; reload that extension once.
+This phase supports `http://127.0.0.1:7860` only. It checks public service health
+before authenticated status, refuses unrelated port occupation and coalesces
+clicks with a shared startup lock. Automatic launch forces supervised Library
+writes off; no booking authority is added or persisted permissions changed.
+
+Core survives closing Desktop so scheduled tasks are not interrupted. No stop/kill
+endpoint exists. Chrome must be open and paired; Portal login/MFA remains manual.
+A disconnected Bridge cannot distinguish closed Chrome from a disabled/missing
+extension. Missing registration, port conflict, timeout and login requirements
+have distinct states. Failures expose redacted codes, not raw process output.
+Core stdout/stderr are local installation logs in `.cache/desktop-core`, reset
+only when the launcher starts a new process; never publish these logs unredacted.
+An orphaned startup lock after a Host crash needs local administrator inspection;
+the launcher does not guess or kill processes. Bundled Core and repair/log
+management remain later work.
+
 Desktop compatibility target: official DeepSeek Harness Desktop `0.2.0-rc.2`
 on Windows. This package contributes Host-side **read-only tools** and a
 browser-side native **read-only shell** in the sidebar. The business panel
@@ -12,6 +52,22 @@ course rows are projected for the immediate panel result only; they are not
 saved as Admin history. Neither panel exposes F2/F3/F4 write or scheduling
 controls. The Desktop UI migration is staged in
 `../../HKU_AGENTS_INTEGRATION_PLAN.md` Section 23.8.
+
+Desktop 0.18.10 adds SDK-native pending/completed Chat tool cards with bounded
+source/status/count metadata, three business read shortcuts, and a local Admin
+history for catalog, SIS sync/preflight and the eleven read operations. The
+canonical model result remains available to the Agent; private rows are omitted
+from the card metadata and Admin history, not promised absent from Harness Chat
+conversation storage. History stores the latest 100 calls in
+`%USERPROFILE%\.hku-agents\desktop-test-history-v1.json`, with task/correlation IDs,
+safe diagnostic counters/parser version, Host/plugin versions and a separate
+human verdict. Core/extension versions are explicitly unknown when not reported.
+No inputs, raw error messages, DOM, credentials or private result rows are saved.
+History is not a full Core audit viewer and does not import previous calls.
+Failed history writes warn without changing the original operation result.
+History review writes only local acceptance metadata, never HKU data.
+The compact cards do not create booking authority or change the 23 tools.
+Consolidated acceptance: `../../docs/DESKTOP_CHAT_ACCEPTANCE.md`.
 
 This package contributes twenty-three restricted HKU tools to DeepSeek Harness:
 
@@ -102,7 +158,7 @@ CLI installed:
 ```powershell
 npm run build
 npm pack
-dsh plugin --profile web add ./dsh-hku-agents-0.18.9.tgz
+dsh plugin --profile web add ./dsh-hku-agents-0.18.10.tgz
 dsh --profile web --dump-config
 dsh --profile web
 ```
@@ -124,7 +180,7 @@ npm test
 npm pack
 $dshDesktop = Join-Path $env:LOCALAPPDATA 'Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd'
 & $dshDesktop --version
-& $dshDesktop plugin --profile desktop add .\dsh-hku-agents-0.18.9.tgz
+& $dshDesktop plugin --profile desktop add .\dsh-hku-agents-0.18.10.tgz
 & $dshDesktop plugin --profile desktop list
 ```
 
@@ -176,7 +232,7 @@ Library Date options fills the date input for a separate, explicit availability
 test; it does not select a slot or submit Search by itself. Chat's existing
 read-only tool results remain available, and the new
 `hku_library_space_dates` tool exposes live Date options to Chat. This version
-does not yet add compact Chat result cards or GUI/F1/F2/F3/F4 parity.
+adds compact Chat cards in 0.18.10, but does not yet provide GUI/F1/F2/F3/F4 parity.
 The status panel distinguishes an invalid RPC target, missing Host route, protocol
 error, and other Host request failure without displaying raw exception text.
 These bounded read-only slices are not the full D2 bridge or a Chat/Admin feature-parity

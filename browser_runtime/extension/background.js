@@ -127,11 +127,14 @@ function scheduleReconnect() {
   reconnectAttempt += 1;
   const delayMs = self.HKUConnectionLifecycle.reconnectDelayMs(reconnectAttempt);
   nextRetryAt = Date.now() + delayMs;
+  // MV3 may suspend this worker and discard its timer. A one-shot alarm wakes it.
+  chrome.alarms.create("hku-bridge-reconnect", { when: nextRetryAt });
   reconnectTimer = setTimeout(() => connect(), delayMs);
 }
 
 function restartConnection() {
   clearTimeout(reconnectTimer);
+  void chrome.alarms.clear("hku-bridge-reconnect");
   reconnectAttempt = 0;
   nextRetryAt = 0;
   lastConnectionError = null;
@@ -184,6 +187,7 @@ async function connect() {
       nextRetryAt = 0;
       lastConnectionError = null;
       clearTimeout(reconnectTimer);
+      void chrome.alarms.clear("hku-bridge-reconnect");
       clearInterval(heartbeatTimer);
       heartbeatTimer = setInterval(() => void sendHeartbeat(), 20000);
       void sendHeartbeat();
@@ -1828,5 +1832,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 });
 
 chrome.runtime.onStartup.addListener(connect);
+chrome.alarms.onAlarm.addListener(alarm => {
+  if (alarm.name === "hku-bridge-reconnect") void connect();
+});
 chrome.runtime.onInstalled.addListener(connect);
 connect();

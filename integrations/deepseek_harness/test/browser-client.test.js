@@ -31,6 +31,7 @@ function loadBrowserHalf() {
     fetch() { throw new Error('Browser half must not call Core directly') },
     localStorage: new Proxy({}, { get() { throw new Error('Browser half must not store credentials') } }),
     AbortController,
+    setTimeout,
   })
   assert.equal(registration.id, manifest.name)
   const plugin = registration.factory(name => {
@@ -58,7 +59,46 @@ test('Desktop package declares client bundle and platform dependencies', () => {
     '@deepseek-ai/dsh-client-connection',
     '@deepseek-ai/dsh-client-ui-layout',
     '@deepseek-ai/dsh-client-ui-sidebar',
+    '@deepseek-ai/dsh-client-ui-tool',
   ])
+})
+
+test('rc.2 keyed toolviews cover every HKU tool and render only safe metadata, with original inspection', () => {
+  const { plugin } = loadBrowserHalf()
+  const registered = []
+  const ctx = { slots: {
+    inject(name, install) { if (name === 'tool.call.toolview') [...install()] },
+    register(options, component) { registered.push({ options, component }); return () => {} },
+  } }
+  plugin.apply(ctx)
+  const names = [...readFileSync(new URL('src/index.ts', packageRoot), 'utf8').matchAll(/name: '(hku_[^']+)'/g)].map(match => match[1])
+  assert.equal(names.length, 23)
+  assert.deepEqual(registered.map(row => row.options.key), names)
+  assert.ok(registered.every(row => row.options.name === 'tool.call.toolview'))
+  const render = registered.find(row => row.options.key === 'hku_library_space_dates').component
+  let inspected = 0
+  const props = { toolName: 'hku_library_space_dates', phase: 'result', inspect() { inspected++ }, block: {
+    kind: 'tool-result', isError: false, call: { argsRaw: 'PRIVATE_INPUT' },
+    content: [{ type: 'text', text: 'PRIVATE_ORIGINAL_JSON' }],
+    meta: { state: 'Read completed — not a booking', date_option_count: 2,
+      offered_dates: '2026-10-02, 2026-10-03', domain_writes: '0', task_id: 'task-id',
+      correlation_id: 'safe-id', private_rows: 'PRIVATE_ROWS', course_name: 'PRIVATE_COURSE' }
+  } }
+  const tree = render(props)
+  const text = JSON.stringify(tree)
+  assert.match(text, /Read completed/)
+  assert.match(text, /2026-10-02/)
+  assert.match(text, /task-id/)
+  assert.doesNotMatch(text, /PRIVATE_|argsRaw|course_name/)
+  findNode(tree, node => node.type === 'button').props.onClick()
+  assert.equal(inspected, 1)
+  assert.match(JSON.stringify(render({ ...props, phase: 'preparing', block: {} })), /Preparing read/)
+  assert.match(JSON.stringify(render({ ...props, phase: 'start', block: {} })), /Reading/)
+  const failed = JSON.stringify(render({ ...props, block: { ...props.block, isError: true, error: { code: 'API_UNAVAILABLE' } } }))
+  assert.match(failed, /Read failed/); assert.doesNotMatch(failed, /Read completed|2026-10-02/)
+  const missing = JSON.stringify(render({ ...props, block: { kind: 'tool-result', isError: false } }))
+  assert.match(missing, /Result not verified/); assert.doesNotMatch(missing, /Read completed/)
+  assert.match(JSON.stringify(render({ ...props, block: { isError: true, error: { code: 'interrupted' } } })), /Read interrupted/)
 })
 
 test('browser half contributes separate business and Admin panels', () => {
@@ -77,8 +117,8 @@ test('browser half contributes separate business and Admin panels', () => {
     },
   }
   plugin.apply(ctx)
-  assert.deepEqual(entries.map(entry => entry.waitedFor), ['main', 'sidebar.panellist', 'main', 'sidebar.panellist'])
-  const [panel, sidebar, adminPanel, adminSidebar] = entries.map(entry => entry.registration)
+  assert.deepEqual(entries.map(entry => entry.waitedFor), ['tool.call.toolview', 'main', 'sidebar.panellist', 'main', 'sidebar.panellist'])
+  const [panel, sidebar, adminPanel, adminSidebar] = entries.slice(1).map(entry => entry.registration)
   assert.equal(panel.options.key, 'hku-agents')
   assert.equal(sidebar.options.id, 'hku-agents')
   assert.equal(sidebar.options.label(), 'HKU AGENTS')
@@ -136,6 +176,16 @@ test('browser panel reads only Host-mediated redacted status', async () => {
   await Promise.resolve()
   assert.equal(calls[1].endpoint, 'hku-agents/connect')
   assert.deepEqual(JSON.parse(JSON.stringify(calls[1].payload)), {})
+  await new Promise(resolve => setImmediate(resolve))
+  const startButton = findNode(root.type(root.props), node => node.type === 'button' && node.children[0] === 'Start and connect HKU')
+  startButton.props.onClick()
+  assert.equal(findNode(root.type(root.props), node => node.type === 'button' && node.children[0] === 'Start and connect HKU').props.disabled, true)
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(calls[2].endpoint, 'hku-agents/start')
+  assert.equal(calls[3].endpoint, 'hku-agents/connect')
+  assert.deepEqual(JSON.parse(JSON.stringify(calls[2].payload)), {})
+  assert.match(source, /attempt < 40/)
+  assert.match(source, /Waiting for Chrome Bridge/)
   dispose()
 })
 
@@ -285,4 +335,43 @@ test('read-only Admin groups call fixed routes and carry live Date options into 
   const dateInput = findNode(tree(), node => node.type === 'input' && node.props.maxLength === 10)
   assert.equal(dateInput.props.value, '2026-10-02')
   assert.match(JSON.stringify(tree()), /Domain writes: 0/)
+  const rendered = JSON.stringify(tree())
+  assert.equal((rendered.match(/task-id/g) || []).length, 1)
+  assert.equal((rendered.match(/correlation-id/g) || []).length, 1)
+})
+
+test('business quick checks stay narrow and history reviews use only fixed local RPCs', async () => {
+  const { plugin, resetState } = loadBrowserHalf()
+  const panels = []; const calls = []
+  const historyRecord = { id: '12345678-1234-4123-8123-123456789abc', operation: 'moodle_assignments',
+    outcome: 'completed', verdict: 'pending', plugin_version: '0.18.10', recorded_at: '2026-10-01T10:00:00.000Z', domain_writes: '0', diagnostics: { parser_version: '0.4.2' } }
+  const ctx = { connection: { rpc: { async call(channel, endpoint, payload) {
+    calls.push({ channel, endpoint, payload })
+    return { ok: true, value: { ok: true, local_only: true, records: [{ ...historyRecord, verdict: payload.verdict || 'pending' }] } }
+  } } }, slots: {
+    inject(name, install) { if (name === 'main') panels.push(install()) },
+    register(options, component) { return { options, component } }
+  } }
+  plugin.apply(ctx)
+  const root = panels[0].component()
+  const quick = findNode(root.type(root.props), n => n.type?.name === 'ReadOnlyAdminSection')
+  assert.equal(quick.props.business, true)
+  resetState()
+  const quickText = JSON.stringify(quick.type(quick.props))
+  assert.match(quickText, /Refresh assignment count/)
+  assert.doesNotMatch(quickText, /Count available slots|Library research keywords|Sync weekly timetable/)
+  resetState()
+  const adminRoot = panels[1].component()
+  const history = findNode(adminRoot.type(adminRoot.props), n => n.type?.name === 'HistorySection')
+  resetState()
+  const tree = () => history.type(history.props)
+  findNode(tree(), n => n.type === 'button' && n.children[0] === 'Refresh test history').props.onClick()
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(calls[0].endpoint, 'hku-agents/admin/history/list')
+  assert.match(JSON.stringify(tree()), /review: pending/)
+  findNode(tree(), n => n.type === 'button' && n.children[0] === 'Mark pass').props.onClick()
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(calls[1].endpoint, 'hku-agents/admin/history/review')
+  assert.deepEqual(JSON.parse(JSON.stringify(calls[1].payload)), { id: historyRecord.id, verdict: 'pass' })
+  assert.match(JSON.stringify(tree()), /review: pass/)
 })

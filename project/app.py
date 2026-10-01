@@ -25,9 +25,15 @@ from application import ApplicationContainer
 from ui.css import custom_css
 from ui.gradio_app import create_gradio_ui
 from services.local_credentials import LocalCredentialError, publish_tokens
+from pathlib import Path
+from services.core_launcher import publish_launcher
 
 
 def create_app():
+    try:
+        publish_launcher(Path(__file__).resolve().parent.parent)
+    except (OSError, ValueError):
+        logging.getLogger(__name__).warning("Desktop Core launcher registration is unavailable.")
     automatic_connection = False
     try:
         automatic_connection = publish_tokens(config.API_BASE_URL, config.INTEGRATION_API_TOKEN, config.BROWSER_PAIRING_TOKEN)

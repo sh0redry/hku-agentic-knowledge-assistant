@@ -86,6 +86,7 @@ const context = {
   Date,
   console,
   chrome: {
+    alarms: { create() {}, async clear() {}, onAlarm: { addListener() {} } },
     storage: { local: {
       async get(defaults) { return { ...defaults, pairingToken: "", bridgePort: 7860, libraryBookingAttempts: storedBookingAttempts }; },
       async set(value) { if (value.libraryBookingAttempts) storedBookingAttempts = value.libraryBookingAttempts; }

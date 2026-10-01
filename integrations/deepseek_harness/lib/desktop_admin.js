@@ -1,3 +1,4 @@
+import { recordRoute } from './history.js';
 import { HKUAgentsAPIError } from './client.js';
 export const DESKTOP_FACILITIES_PATH = '/api/hku-agents/admin/facilities';
 const RPC_METHOD = 'hku-agents/admin/facilities';
@@ -138,7 +139,7 @@ export function desktopFacilitiesRoute(client) {
 export function installDesktopAdminBridge(ctx, client) {
     ctx.inject(['connection'], connectionContext => {
         const connection = connectionContext.connection;
-        return connection.fetch.register(desktopFacilitiesRoute(client));
+        return connection.fetch.register(recordRoute(desktopFacilitiesRoute(client), 'facilities'));
     });
 }
 //# sourceMappingURL=desktop_admin.js.map

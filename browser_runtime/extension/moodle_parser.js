@@ -736,7 +736,8 @@
     const rawCandidates = activityCandidateNodes(documentObject);
     const candidates = rawCandidates.filter((node) => !isActivityPlaceholder(node));
     const assignments = [];
-    const seen = new Set();
+    const seen = new Map();
+    const moduleRecords = new Map();
     let unparsed = 0;
     let missingTitle = 0;
     let missingDueAt = 0;
@@ -784,21 +785,41 @@
         : moduleId
           ? `module:${moduleId}|${dueAt}`
           : `text:${course.course_id || "none"}|${dueAt}|${title}`;
-      if (seen.has(key)) {
+      const type = activityType(node, anchor);
+      const moduleKey = moduleId ? `${type}:${moduleId}|${dueAt}` : null;
+      const moduleRecord = moduleKey ? moduleRecords.get(moduleKey) : null;
+      const existing = seen.get(key) || (moduleRecord &&
+        (!eventId || !moduleRecord.event_id || eventId === moduleRecord.event_id)
+        ? moduleRecord : null);
+      if (existing) {
         duplicates += 1;
+        // Enrich the same deadline from a richer Dashboard representation.
+        // Never combine course fields belonging to conflicting identities.
+        if (existing.due_at === dueAt && existing.activity_type === type &&
+            (!existing.module_id || !moduleId || existing.module_id === moduleId) &&
+            (!existing.course_id || !course.course_id || existing.course_id === course.course_id) &&
+            (!existing.course_name || !course.course_name || existing.course_name === course.course_name)) {
+          existing.course_id ||= course.course_id;
+          existing.course_name ||= course.course_name;
+          existing.module_id ||= moduleId;
+          existing.event_id ||= eventId;
+        }
+        seen.set(key, existing);
         continue;
       }
-      seen.add(key);
-      assignments.push({
+      const record = {
         event_id: eventId,
         module_id: moduleId,
         ...course,
         title,
-        activity_type: activityType(node, anchor),
+        activity_type: type,
         due_at: dueAt,
         due_at_source: due.due_at_source,
         source: activitySource(node)
-      });
+      };
+      seen.set(key, record);
+      if (moduleKey) moduleRecords.set(moduleKey, record);
+      assignments.push(record);
     }
     assignments.sort((left, right) => left.due_at.localeCompare(right.due_at));
     return {
@@ -1040,7 +1061,7 @@
       schedule_course_count: 0,
       available_terms: [],
       diagnostics: {
-        parser_version: "0.4.2",
+        parser_version: "0.4.3",
         dashboard_marker_found: dashboardMarker,
         login_marker_found: loginMarker,
         user_menu_found: userMenuMarker,

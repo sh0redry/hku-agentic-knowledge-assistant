@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
   "name": "HKU AGENTS Multi-System Browser Bridge",
-  "version": "0.17.20",
+  "version": "0.17.22",
   "description": "Restricted local HKU navigation and discovery bridge with an opt-in, one-shot Library booking workflow.",
   "minimum_chrome_version": "116",
-  "permissions": ["storage"],
+  "permissions": ["storage", "alarms"],
   "host_permissions": [
     "https://hkuportal.hku.hk/*",
     "https://studentportal.hku.hk/*",

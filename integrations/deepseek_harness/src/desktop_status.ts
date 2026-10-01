@@ -1,9 +1,11 @@
 import type { Context } from '@deepseek-ai/cordis'
 
 import { HKUAgentsAPIError, type HKUAgentsClient, type JsonValue } from './client.js'
+import { createCoreLauncher, type LaunchResult } from './core_launcher.js'
 
 export const DESKTOP_STATUS_PATH = '/api/hku-agents/status'
 export const DESKTOP_CONNECT_PATH = '/api/hku-agents/connect'
+export const DESKTOP_START_PATH = '/api/hku-agents/start'
 
 interface ExactFetchRoute {
   path: string
@@ -19,7 +21,7 @@ interface HostConnection {
 interface RpcRequest {
   type: 'client-request'
   rpcId: string
-  method: 'hku-agents/status' | 'hku-agents/connect'
+  method: 'hku-agents/status' | 'hku-agents/connect' | 'hku-agents/start'
   payload: Record<string, never>
 }
 
@@ -129,11 +131,37 @@ export function desktopStatusRoute(client: Pick<HKUAgentsClient, 'status'>, conn
   }
 }
 
-export function installDesktopStatusBridge(ctx: Context, client: Pick<HKUAgentsClient, 'status' | 'connectHku'>): void {
+export function desktopStartRoute(client: Pick<HKUAgentsClient, 'status'>, launcher: { ensureStarted(): Promise<LaunchResult> }): ExactFetchRoute {
+  return {
+    path: DESKTOP_START_PATH, methods: ['POST'], requestBody: 'buffered',
+    async fetch(request) {
+      if (request.method !== 'POST') return jsonResponse({ error: 'method_not_allowed' }, 405)
+      if (Number(request.headers.get('content-length') || 0) > 2048) return jsonResponse({ error: 'invalid_request' }, 400)
+      const parsed = parseRequest(await request.text(), 'hku-agents/start')
+      if (!parsed) return jsonResponse({ error: 'invalid_request' }, 400)
+      const launch = await launcher.ensureStarted()
+      const status = launch.state === 'ready' ? await readDesktopStatus(client, request.signal) : {
+        read_only: true, core: { state: 'unavailable', error_code: launch.code,
+          recovery: launch.code === 'CORE_INSTALLATION_NOT_REGISTERED'
+            ? 'Local Core installation needs registration; contact the local administrator.'
+            : 'Check the local installation or occupied port; no other process was stopped.' },
+        connections: [], correlation_id: null,
+      }
+      return jsonResponse({ type: 'server-response', rpcId: parsed.rpcId,
+        result: { ok: true, value: { ...status, launcher: launch } } })
+    }
+  }
+}
+
+export function installDesktopStatusBridge(ctx: Context, client: Pick<HKUAgentsClient, 'status' | 'connectHku'>,
+  baseUrl = 'http://127.0.0.1:7860'): void {
+  const launcher = createCoreLauncher(baseUrl)
   ctx.inject(['connection'], connectionContext => {
     const connection = (connectionContext as Context & { connection: HostConnection }).connection
     const disposeStatus = connection.fetch.register(desktopStatusRoute(client))
     const disposeConnect = connection.fetch.register(desktopStatusRoute({ status: signal => client.connectHku(signal) }, true))
-    return () => { disposeConnect(); disposeStatus() }
+    const disposeStart = connection.fetch.register(desktopStartRoute(client, launcher))
+    // Core is intentionally not killed on plugin/Desktop disposal (scheduled tasks may be active).
+    return () => { disposeStart(); disposeConnect(); disposeStatus() }
   })
 }

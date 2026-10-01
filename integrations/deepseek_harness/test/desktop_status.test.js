@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { HKUAgentsAPIError } from '../lib/client.js'
-import { DESKTOP_STATUS_PATH, desktopStatusRoute, installDesktopStatusBridge, readDesktopStatus } from '../lib/desktop_status.js'
+import { DESKTOP_STATUS_PATH, desktopStatusRoute, desktopStartRoute, installDesktopStatusBridge, readDesktopStatus } from '../lib/desktop_status.js'
 
 const rpcId = '12345678-1234-4123-8123-123456789abc'
 const requestBody = JSON.stringify({ type: 'client-request', rpcId, method: 'hku-agents/status', payload: {} })
@@ -94,7 +94,21 @@ test('Host registration is scoped to the connection service', () => {
     },
   }
   installDesktopStatusBridge(ctx, { async status() { throw new Error('not called') } })
-  assert.deepEqual(routes.map(route => route.path), [DESKTOP_STATUS_PATH, '/api/hku-agents/connect'])
+  assert.deepEqual(routes.map(route => route.path), [DESKTOP_STATUS_PATH, '/api/hku-agents/connect', '/api/hku-agents/start'])
+})
+
+test('start route rejects executable input and separates startup from read-only status', async () => {
+  let starts = 0
+  const route = desktopStartRoute({ async status() { return { result: { service_version: '1', connections: [] } } } },
+    { async ensureStarted() { starts++; return { state: 'ready', code: 'CORE_STARTED', started: true } } })
+  const body = { type: 'client-request', rpcId, method: 'hku-agents/start', payload: {} }
+  assert.equal((await route.fetch(request(JSON.stringify({ ...body, payload: { command: 'secret' } })))).status, 400)
+  assert.equal(starts, 0)
+  const value = (await (await route.fetch(request(JSON.stringify(body)))).json()).result.value
+  assert.equal(starts, 1)
+  assert.equal(value.launcher.started, true)
+  assert.equal(value.core.state, 'connected')
+  assert.equal(value.binding, undefined)
 })
 
 test('Connect HKU accepts only an empty fixed request and redacts binding data', async () => {

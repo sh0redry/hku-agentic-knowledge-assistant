@@ -12,17 +12,20 @@ interface ExactFetchRoute {
 export declare function readDesktopOperation(client: ReadClient, operation: AdminReadOperation, payload: Record<string, unknown>, signal: AbortSignal): Promise<{
     ok: boolean;
     read_only: boolean;
+    task_id: string | null;
+    diagnostics: Record<string, string | number | boolean>;
     error: {
         code: string;
         recovery: string;
     };
-    correlation_id: null;
+    correlation_id: string | null;
 } | {
     ok: boolean;
     read_only: boolean;
     domain_writes_performed: number;
     operation: "timetable_sync" | "next_class" | "moodle_dashboard" | "moodle_courses" | "moodle_assignments" | "portal_notices" | "briefing" | "library_hours" | "library_dates" | "library_availability" | "library_research";
     summary: Record<string, unknown>;
+    diagnostics: Record<string, string | number | boolean>;
     task_id: string | null;
     correlation_id: string | null;
 }>;
