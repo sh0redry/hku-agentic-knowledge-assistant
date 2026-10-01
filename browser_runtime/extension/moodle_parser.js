@@ -669,6 +669,49 @@
     };
   }
 
+  function enrichCalendarCourses(documentObject, assignments) {
+    // HKULMS month cards expose a plain course label under view-event, not
+    // a course link. Read only that event's descendants; never the day/month
+    // container, a popup, or an activity/submission page.
+    const selector = "[data-action='view-event'][data-event-id]";
+    const labels = new Map();
+    let candidates = 0;
+    let enriched = 0;
+    let conflicts = 0;
+    let unmatched = 0;
+    for (const node of documentObject.querySelectorAll(selector)) {
+      const eventId = numericId(activityValue(node, ["event-id"]));
+      const courseName = meaningfulActivityText(node.querySelector?.(
+        "div.d-inline-flex.align-items-center.flex-wrap.small.mt-1.mb-2.w-100"
+      )?.textContent);
+      const title = meaningfulActivityText(node.getAttribute?.("title"));
+      const dueAt = activityMachineDueAt(node);
+      if (!eventId || !courseName || !title || !dueAt) continue;
+      candidates++;
+      const key = `${eventId}|${new Date(dueAt).getTime()}|${title}`;
+      const names = labels.get(key) || new Set();
+      names.add(courseName);
+      labels.set(key, names);
+    }
+    for (const [key, names] of labels) {
+      const matches = assignments.filter(row =>
+        `${row.event_id}|${new Date(row.due_at).getTime()}|${row.title}` === key);
+      if (names.size !== 1 || matches.length > 1) { conflicts++; continue; }
+      if (matches.length !== 1) { unmatched++; continue; }
+      const row = matches[0];
+      const name = [...names][0];
+      if (row.course_name && row.course_name !== name) { conflicts++; continue; }
+      if (!row.course_name) { row.course_name = name; enriched++; }
+      // A visible name is not a numeric Moodle course ID. Keep absent IDs null.
+    }
+    return {
+      calendar_course_candidate_count: candidates,
+      calendar_course_enriched_count: enriched,
+      calendar_course_conflict_count: conflicts,
+      calendar_course_unmatched_count: unmatched
+    };
+  }
+
   function activityUrl(node, anchor) {
     const rawUrl = normalizeText(
       anchor?.getAttribute?.("href") || scopedActivityValue(node, ["event-url", "activity-url"])
@@ -821,6 +864,7 @@
       if (moduleKey) moduleRecords.set(moduleKey, record);
       assignments.push(record);
     }
+    const calendarDiagnostics = enrichCalendarCourses(documentObject, assignments);
     assignments.sort((left, right) => left.due_at.localeCompare(right.due_at));
     return {
       ...dashboard,
@@ -828,6 +872,7 @@
       assignments,
       diagnostics: {
         ...dashboard.diagnostics,
+        ...calendarDiagnostics,
         assignment_candidate_count: candidates.length,
         parsed_assignment_count: assignments.length,
         unparsed_assignment_candidate_count: unparsed,
@@ -1061,7 +1106,7 @@
       schedule_course_count: 0,
       available_terms: [],
       diagnostics: {
-        parser_version: "0.4.3",
+        parser_version: "0.4.4",
         dashboard_marker_found: dashboardMarker,
         login_marker_found: loginMarker,
         user_menu_found: userMenuMarker,

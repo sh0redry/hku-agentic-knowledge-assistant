@@ -25,7 +25,7 @@ const dashboard = parser.inspect(dashboardDocument(), {
 });
 assert.equal(dashboard.logged_in, true);
 assert.equal(dashboard.page_kind, "dashboard");
-assert.equal(dashboard.diagnostics.parser_version, "0.4.3");
+assert.equal(dashboard.diagnostics.parser_version, "0.4.4");
 assert.equal(dashboard.diagnostics.dashboard_marker_found, true);
 assert.equal(dashboard.diagnostics.course_link_candidate_count, 0);
 assert.equal(JSON.stringify(dashboard).includes("Private Course Name"), false);
@@ -509,6 +509,62 @@ assert.equal(mergedDeadlineList([assignment, conflictingDeadline]).assignments[0
 const laterDeadline = assignmentNode({ eventId: "", moduleId: "7001", courseId: "123",
   courseName: "COMP3297 Software Engineering", title: "Later deadline", timestamp: 4102531200, type: "assign" });
 assert.equal(mergedDeadlineList([sparseDeadline, laterDeadline]).assignment_count, 2);
+
+// HKULMS Calendar shape supplied by the user: course is plain text,
+// event title is on view-event and its sibling span, due is a nested timestamp.
+function calendarCourseCard(eventId, courseName, timestamp = 1791215940, title = "Assignment 1: Entity-Relationship Modeling is due") {
+  return {
+    dataset: { eventId },
+    getAttribute(name) { return name === "title" ? title : null; },
+    querySelector(selector) {
+      if (selector === "div.d-inline-flex.align-items-center.flex-wrap.small.mt-1.mb-2.w-100") {
+        return { textContent: courseName };
+      }
+      if (selector === "[data-timestamp]") {
+        return { getAttribute(name) { return name === "data-timestamp" ? String(timestamp) : null; } };
+      }
+      return null;
+    }
+  };
+}
+function calendarDeadlineList(cards, rowOverrides = {}) {
+  const row = assignmentNode({ eventId: "11092396", moduleId: "4299770", courseId: "",
+    courseName: "", title: "Assignment 1: Entity-Relationship Modeling is due",
+    timestamp: 1791215940, type: "assign", ...rowOverrides });
+  const documentObject = dashboardDocument();
+  documentObject.querySelectorAll = selector => {
+    if (selector === "[data-region='event-list-item']") return [row];
+    if (selector === "[data-action='view-event'][data-event-id]") return cards;
+    return [];
+  };
+  return parser.parseUpcomingAssignments(documentObject, { origin: "https://moodle.hku.hk", pathname: "/my/" });
+}
+const calendarName = "COMP3278 Introduction to database management systems [Section 1A, 2026]";
+const calendarCard = calendarCourseCard("11092396", calendarName);
+const calendarMerged = calendarDeadlineList([calendarCard, calendarCard]);
+assert.equal(calendarMerged.assignment_count, 1);
+assert.equal(calendarMerged.assignments[0].course_name, calendarName);
+assert.equal(calendarMerged.assignments[0].course_id, null);
+assert.equal(calendarMerged.assignments[0].due_at, "2026-10-05T15:59:00.000Z");
+assert.equal(calendarMerged.diagnostics.calendar_course_candidate_count, 2);
+assert.equal(calendarMerged.diagnostics.calendar_course_enriched_count, 1);
+assert.equal(calendarMerged.diagnostics.calendar_course_conflict_count, 0);
+for (const card of [calendarCourseCard("11092397", calendarName),
+  calendarCourseCard("11092396", calendarName, 1791215941),
+  calendarCourseCard("11092396", calendarName, 1791215940, "Different event")]) {
+  const result = calendarDeadlineList([card]);
+  assert.equal(result.assignments[0].course_name, null);
+  assert.equal(result.diagnostics.calendar_course_unmatched_count, 1);
+}
+for (const cards of [[calendarCard, calendarCourseCard("11092396", "Different course")],
+  [calendarCourseCard("11092396", "Different course"), calendarCard]]) {
+  const result = calendarDeadlineList(cards);
+  assert.equal(result.assignments[0].course_name, null);
+  assert.equal(result.diagnostics.calendar_course_conflict_count, 1);
+}
+assert.equal(calendarDeadlineList([calendarCard], { courseName: "Existing conflicting course" })
+  .assignments[0].course_name, "Existing conflicting course");
+assert.equal(calendarDeadlineList([calendarCard], { eventId: "" }).assignments[0].course_name, null);
 
 const homeLocation = {
   origin: "https://moodle.hku.hk",

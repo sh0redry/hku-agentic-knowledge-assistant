@@ -68,3 +68,21 @@ Windows user, not per workspace. Human pass/fail is independent of transport
 completion. Corrupt/unwritable history warns and is not silently overwritten.
 Full Core audit timeline, arbitrary notes/export and F1/F2/F3/F4 controls remain
 later migration work. This batch cannot replace the local booking GUI.
+
+### Moodle Calendar course enrichment (parser 0.4.4 / Chrome Bridge 0.17.23)
+
+Reload the unpacked Chrome extension and reload the Moodle Dashboard. Restart
+Core to load the new diagnostic schema; restarting Desktop alone does not restart
+Core. No Desktop plugin reinstall is required for this parser-only change.
+
+With the Calendar month cards loaded in the Dashboard DOM, ask Chat once to read
+the next 14 days of visible Moodle deadlines, including course attribution.
+Compare COMP3278's Entity-Relationship Modeling deadline against Calendar:
+course name, date/time, and a single result rather than duplicated rows.
+Inspect parser 0.4.4 and `calendar_course_enriched_count`; course_id may remain
+null because the supplied Calendar markup contains no numeric course ID.
+Calendar labels are matched only by exact event ID, title and deadline instant.
+Missing identities, unloaded Calendar cards and conflicting labels are not
+guessed; inspect unmatched/conflict counts if course attribution remains unknown.
+No popup, activity/submission page, calendar API, month navigation, or write
+control is activated by this change. This does not expand deadline coverage.

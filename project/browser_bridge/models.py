@@ -253,6 +253,10 @@ class MoodleAssignment(StrictMessage):
 
 
 class MoodleAssignmentParserDiagnostics(MoodleParserDiagnostics):
+    calendar_course_candidate_count: int = Field(default=0, ge=0, le=10000)
+    calendar_course_enriched_count: int = Field(default=0, ge=0, le=10000)
+    calendar_course_conflict_count: int = Field(default=0, ge=0, le=10000)
+    calendar_course_unmatched_count: int = Field(default=0, ge=0, le=10000)
     assignment_candidate_count: int = Field(ge=0, le=10000)
     parsed_assignment_count: int = Field(ge=0, le=10000)
     unparsed_assignment_candidate_count: int = Field(ge=0, le=10000)

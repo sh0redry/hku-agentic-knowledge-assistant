@@ -16,7 +16,7 @@ sys.path.insert(0, str(PROJECT))
 
 from api.app import create_api_app
 from application import ApplicationContainer
-from browser_bridge.models import MoodleNavigationResult
+from browser_bridge.models import MoodleNavigationResult, MoodleAssignmentListSnapshot
 from browser_bridge.service import BrowserBridgeError
 from pydantic import ValidationError
 
@@ -428,6 +428,25 @@ class MoodleDashboardIntegrationTests(unittest.TestCase):
         self.assertFalse(stored.result["private_assignment_details_persisted"])
         self.assertNotIn("assignment_list", stored.result)
         self.assertNotIn("Private milestone", str(stored.result))
+
+    def test_calendar_course_diagnostics_round_trip(self):
+        # Reuse the full Integration API fixture and validate the real bridge
+        # contract, including a name without an invented numeric course ID.
+        self.test_upcoming_assignments_are_bounded_and_not_persisted()
+        payload = self.container.connectors["sis_browser"].list_moodle_upcoming_assignments.return_value
+        payload["diagnostics"].update({
+            "parser_version": "0.4.4",
+            "calendar_course_candidate_count": 2,
+            "calendar_course_enriched_count": 1,
+            "calendar_course_conflict_count": 0,
+            "calendar_course_unmatched_count": 0,
+        })
+        payload["assignments"][1]["course_id"] = None
+        payload["assignments"][1]["course_name"] = "COMP3278 Introduction to database management systems [Section 1A, 2026]"
+        snapshot = MoodleAssignmentListSnapshot.model_validate(payload).model_dump(mode="json")
+        self.assertIsNone(snapshot["assignments"][1]["course_id"])
+        self.assertIn("COMP3278", snapshot["assignments"][1]["course_name"])
+        self.assertEqual(snapshot["diagnostics"]["calendar_course_enriched_count"], 1)
 
     def test_upcoming_assignment_window_is_strictly_bounded(self):
         response = self.client.post(
