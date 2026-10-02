@@ -1,5 +1,11 @@
 # F4 scheduled booking — staged delivery plan
 
+2026-10-02 update: version-2 guarded execution and Desktop operator controls are
+implemented in plugin 0.19.0 / Chrome Bridge 0.17.24. See
+`docs/DESKTOP_LIBRARY_BATCH.md` for current scope, runtime gates and acceptance.
+The historical stages below are not a claim of live acceptance; real-write and
+midnight Date-transition checks remain pending.
+
 F4 is a separate delegated-write feature, not an upgrade of F3's shadow-only
 rules or F2's short-lived confirmation token. No existing F3 rule grants booking
 authority. The first pilot is restricted to one exact Main Library / Level 3

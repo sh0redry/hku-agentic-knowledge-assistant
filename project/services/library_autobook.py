@@ -1,4 +1,4 @@
-"""F4 design review and inert local drafts; no unattended booking authority."""
+"""F4 reviewed drafts and encrypted advance authorizations; arming is separate."""
 
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ class AutobookPilotDraft(BaseModel):
     def exact_pilot_scope(self):
         if not self.room.startswith("Discussion Room ") or not self.room.removeprefix("Discussion Room ").isdigit():
             raise ValueError("The F4 pilot requires one exact Main Library Discussion Room label.")
-        LibraryShadowRuleDefinition.model_validate({
+        normalized = LibraryShadowRuleDefinition.model_validate({
             "facility_type": self.facility_type,
             "target_date": self.target_date,
             "prepare_at": self.prepare_at,
@@ -60,6 +60,14 @@ class AutobookPilotDraft(BaseModel):
             "max_date_checks": self.max_date_checks,
             "shadow_only": True,
         })
+        self.prepare_at = normalized.prepare_at
+        self.execution_at = normalized.execution_at
+        self.stop_at = normalized.stop_at
+        if not self.execution_at.date() <= self.target_date <= self.execution_at.date() + timedelta(days=1):
+            raise ValueError("The F4 pilot targets only execution-day or next-day facilities; live dates must also offer the exact date.")
+        if (int(self.end_time[:2]) * 60 + int(self.end_time[3:]) -
+                int(self.start_time[:2]) * 60 - int(self.start_time[3:])) != 60:
+            raise ValueError("The F4 discussion-room pilot requires one exact 60-minute session.")
         return self
 
 
@@ -87,6 +95,7 @@ def preview_autobook_pilot(draft: AutobookPilotDraft) -> dict:
         raise ValueError("The declared eligibility category is not listed for this facility.")
     policy_facts = {
         "verified_on": LibrarySpaceBookingPreviewCapability.POLICY_VERIFIED_ON,
+        "policy_sources": LibrarySpaceBookingPreviewCapability.POLICY_SOURCES,
         "facility": facility,
     }
     policy_digest = hashlib.sha256(json.dumps(policy_facts, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
@@ -118,8 +127,8 @@ def preview_autobook_pilot(draft: AutobookPilotDraft) -> dict:
         "policy_sources": LibrarySpaceBookingPreviewCapability.POLICY_SOURCES,
         "unmet_gates": [
             "F3.2b live date-transition/release-window acceptance is pending.",
-            "Account eligibility, existing booking limits and authoritative booking-record verification must be checked at execution.",
-            "The guarded F4 browser executor is not connected or enabled.",
+            "Eligibility is user-attested, not account-category verified. Execution requires a verifiably empty target day and an exact authoritative booking-record match.",
+            "The guarded F4 executor requires separate local runtime enablement and exact authorization arming.",
         ],
         "non_blocking_notes": [
             "Automated-use permission is unverified and is not an engineering gate at the user's direction."
@@ -147,7 +156,7 @@ class AutobookAuthorizationActionRequest(BaseModel):
 
 
 class LibraryAutobookDraftService:
-    """Stores reviewed F4 ideas, deliberately disconnected from every executor."""
+    """Stores reviewed F4 ideas; creating a record alone never arms the executor."""
 
     def __init__(self, store: SQLiteStore, protector=None):
         self.store = store
@@ -267,7 +276,7 @@ class LibraryAutobookDraftService:
         now = utc_now()
         authorization_id = str(uuid.uuid4())
         payload = {
-            "capability_version": 1,
+            "capability_version": 2,
             "exact_target": draft.model_dump(mode="json"),
             "policy_digest": policy_digest,
             "policy_acceptance_acknowledged": True,
@@ -324,5 +333,5 @@ class LibraryAutobookDraftService:
             "capability_version": payload["capability_version"],
             "maximum_successful_bookings": 1, "attempt_count": row["attempt_count"],
             "success_count": row["success_count"], "execution_enabled": False,
-            "next_run_at": None, "booking_writes_performed": 0,
+            "next_run_at": None, "booking_writes_performed": "unknown" if row["attempt_count"] else 0,
         }

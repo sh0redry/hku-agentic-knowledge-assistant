@@ -10,6 +10,11 @@
   }
 
   function submitWithExactConfirmation(payload) {
+    if (payload?.not_after && (!Number.isFinite(Date.parse(payload.not_after)) || Date.now() >= Date.parse(payload.not_after))) {
+      const error = new Error("The execution deadline passed; Submit was not clicked.");
+      error.code = "EXECUTION_WINDOW_EXPIRED";
+      throw error;
+    }
     let armed = null;
     const onArmed = event => { armed = readEventDetail(event); };
     window.addEventListener(CONFIRM_ARMED_EVENT, onArmed);
@@ -52,6 +57,12 @@
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (!["library.research.read_results", "library.research.read_item", "library.research.read_access_options", "library.spaces.configure_availability", "library.spaces.select_result_page", "library.spaces.read_availability", "library.spaces.select_exact_slot", "library.spaces.configure_booking_form", "library.spaces.inspect_booking_form", "library.spaces.submit_booking_once", "library.spaces.inspect_booking_confirmation", "library.spaces.accept_booking_confirmation", "library.spaces.read_booking_success_result", "library.spaces.open_booking_record", "library.spaces.read_booking_record", "library.hours.read"].includes(message?.command)) return false;
     try {
+      if (message.command === "library.spaces.accept_booking_confirmation" && message.payload?.not_after &&
+          (!Number.isFinite(Date.parse(message.payload.not_after)) || Date.now() >= Date.parse(message.payload.not_after))) {
+        const error = new Error("The execution deadline passed; booking confirmation was not accepted.");
+        error.code = "EXECUTION_WINDOW_EXPIRED";
+        throw error;
+      }
       const data = message.command === "library.research.read_results"
         ? self.HKULibraryParser.parseResearch(document, location, message.payload?.limit)
         : message.command.startsWith("library.research.read_")
@@ -79,7 +90,8 @@
             : message.command === "library.spaces.open_booking_record"
               ? self.HKULibraryParser.openBookingRecord(document, location)
             : message.command === "library.spaces.read_booking_record"
-              ? self.HKULibraryParser.verifyBookingRecord(document, location, message.payload?.target)
+              ? self.HKULibraryParser.verifyBookingRecord(document, location, message.payload?.target, {
+                fresh_default_record_navigation: message.payload?.fresh_default_record_navigation === true })
             : self.HKULibraryParser.parseSpaceAvailability(document, location);
       sendResponse({ ok: true, data });
     } catch (error) {

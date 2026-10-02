@@ -9,7 +9,7 @@
   const RESEARCH_VERSION = "0.2.2";
   const SPACE_VERSION = "0.3.7";
   const HOURS_VERSION = "0.1.1";
-  const BOOKING_FORM_VERSION = "0.1.2";
+  const BOOKING_FORM_VERSION = "0.1.6";
   function escapeRegExp(value) { return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
 
   function clean(value) {
@@ -853,10 +853,55 @@
       throw error;
     }
     links[0].click();
-    return { navigation_started: true };
+    return { navigation_started: true, default_record_route:
+      /^\/Secure\/(?:My)?BookingRecord\.aspx$/i.test(url.pathname) && !url.search && !url.hash };
   }
 
-  function verifyBookingRecord(documentObject, locationObject, target) {
+  function defaultEmptyRecordGrid(documentObject, locationObject, bodyText, options = {}) {
+    // HKUL's default record view renders a six-column header plus a blank
+    // placeholder row, without a "No records" message. Never accept just any
+    // empty table: require a loaded authenticated unfiltered record view and
+    // the exact known schema. Search/filter/loading views remain unverified.
+    if (documentObject.readyState !== "complete" || !/\blogout\b/i.test(bodyText) ||
+        String(locationObject.search || "") || /loading|please wait|search results|error occurred/i.test(bodyText) ||
+        (documentObject.querySelectorAll?.('[aria-busy="true"]') || []).length) return false;
+    const controls = [...(documentObject.querySelectorAll?.("input, select, textarea") || [])];
+    const dormantIds = new Set(["main_txtRemark", "main_txtEmail", "main_ddlSearchStartDate",
+      "main_txtSearchStartDate", "main_ddlSearchEndDate", "main_ddlSearchFacility", "main_ddlSearchStatus"]);
+    if (controls.some(node => {
+      const type = String(node.type || "").toLowerCase();
+      if (dormantIds.has(node.id) && options.fresh_default_record_navigation === true &&
+          typeof node.getClientRects === "function" && node.getClientRects().length === 0) return false;
+      if (["__EVENTTARGET", "__EVENTARGUMENT", "main_hBookingID", "main_hBtnSearch"].includes(node.id) && clean(node.value)) return true;
+      if (["submit", "button", "image", "reset"].includes(type)) return false;
+      return type !== "hidden" ||
+        /filter|search|startdate|enddate|fromdate|todate/i.test(`${node.id || ""} ${node.name || ""}`) && !!clean(node.value);
+    })) return false;
+    const expected = ["startdatetime", "enddatetime", "location", "floor", "facility", "status"];
+    const candidates = [...(documentObject.querySelectorAll?.("table") || [])].filter(table => {
+      const rows = [...(table.querySelectorAll?.("tr") || [])].filter(row =>
+        !(row.querySelectorAll?.("tr") || []).length && (!row.closest || row.closest("table") === table));
+      if (rows.length < 2 || rows.length > 3) return false;
+      const header = [...(rows[0].querySelectorAll?.("th, td") || [])].map(cell => clean(cell.innerText || cell.textContent).toLowerCase().replace(/[^a-z]/g, ""));
+      const columnCount = header.length;
+      if (header.length === 7 && header[0] === "") header.shift();
+      if (header.join(",") !== expected.join(",")) return false;
+      return rows.slice(1).every((row, index) => {
+        const cells = [...(row.querySelectorAll?.("th, td") || [])];
+        const emptyPager = index === 1 && rows.length === 3 &&
+          table.id === "main_tableRecordHeader" &&
+          /(?:^|\s)tablePagerGray(?:\s|$)/.test(row.className || "") &&
+          /(?:^|\s)tableBottomGray(?:\s|$)/.test(row.className || "") &&
+          cells.length === 1 && Number(cells[0].getAttribute?.("colspan")) === columnCount;
+        return (cells.length >= 6 && cells.length <= 7 || emptyPager) && !clean(row.innerText || row.textContent) &&
+          cells.every(cell => !clean(cell.innerText || cell.textContent)) &&
+          !(row.querySelectorAll?.("a, button, input, select, textarea, img") || []).length;
+      });
+    });
+    return candidates.length === 1;
+  }
+
+  function verifyBookingRecord(documentObject, locationObject, target, options = {}) {
     if (locationObject?.origin !== BOOKING_ORIGIN) {
       const error = new Error("The booking record did not remain on the HKUL booking origin.");
       error.code = "WRONG_LIBRARY_BOOKING_PAGE";
@@ -866,25 +911,55 @@
     const bodyText = clean(documentObject.body?.innerText || documentObject.body?.textContent).toLowerCase();
     const rows = [...(documentObject.querySelectorAll?.("table tr") || [])];
     const [year, month, day] = values.date.split("-");
-    const dateNeedles = [values.date.toLowerCase(), `${day}/${month}/${year}`, `${day}-${month}-${year}`];
+    const dateNeedles = [values.date.toLowerCase(), `${day}/${month}/${year}`, `${day}-${month}-${year}`,
+      `${Number(day)}/${Number(month)}/${year}`, `${Number(day)}-${Number(month)}-${year}`];
     const roomNumber = values.facility.match(/\bRoom\s*([A-Za-z0-9-]+)\s*$/i)?.[1]?.toLowerCase() || null;
     const roomNeedle = values.facility.toLowerCase();
+    const escapedRoom = roomNeedle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const exactRoomPattern = new RegExp(`(?:^|\\s)${escapedRoom}(?![a-z0-9-])`, "i");
+    const leafRows = rows.filter(row => !(row.querySelectorAll?.("tr") || []).length);
     let matchingCount = 0;
-    for (const row of rows) {
+    let strictMatchingCount = 0;
+    for (const row of leafRows) {
       const text = clean(row.innerText || row.textContent).toLowerCase();
       const hasDate = dateNeedles.some((needle) => text.includes(needle));
-      const hasRoom = text.includes(roomNeedle) || (roomNumber && new RegExp(`\\broom\\s*${roomNumber}\\b`, "i").test(text));
+      const hasRoom = exactRoomPattern.test(text) || (roomNumber && new RegExp(`\\broom\\s*${roomNumber}\\b`, "i").test(text));
       const hasTimes = text.includes(values.start.toLowerCase()) && text.includes(values.end.toLowerCase());
       if (hasDate && hasRoom && hasTimes && !/\b(?:cancelled|canceled|rejected|expired)\b/i.test(text)) {
         // Count each visible active row. Text-deduplicating here could hide
         // two genuinely distinct reservations for the same target.
         matchingCount += 1;
+        if (text.includes(values.location.toLowerCase()) && text.includes(values.floor.toLowerCase()) &&
+            exactRoomPattern.test(text) && /discussion\s+room/i.test(text)) strictMatchingCount += 1;
       }
     }
     // The New Booking page also has a "My Booking Record" navigation link;
     // its presence alone is not evidence that the booking was recorded.
     const isRecordPage = /bookingrecord/i.test(String(locationObject.pathname || "")) &&
       /my booking record|booking record|my bookings/i.test(bodyText) && rows.length > 0;
+    // Narrow F4 pilot: require a verifiably empty target day rather than
+    // inferring remaining quota or interleaving from partial records.
+    let datedRows = 0;
+    let dailyCount = 0;
+    let incomplete = false;
+    for (const row of leafRows) {
+      const text = clean(row.innerText || row.textContent).toLowerCase();
+      if (!/\b\d{4}-\d{2}-\d{2}\b|\b\d{1,2}[/-]\d{1,2}[/-]\d{4}\b/.test(text)) {
+        if (/\broom\s*[a-z0-9-]*\d[a-z0-9-]*\b/.test(text)) incomplete = true;
+        continue;
+      }
+      datedRows += 1;
+      if (!/\b\d{1,2}:\d{2}\b/.test(text)) incomplete = true;
+      if (dateNeedles.some(needle => text.includes(needle)) && !/\b(?:cancelled|canceled|rejected|expired)\b/.test(text)) dailyCount += 1;
+    }
+    const empty = /no (?:booking records?|bookings?|records?)(?: found| available)?/.test(bodyText);
+    const paginated = [...(documentObject.querySelectorAll?.("select") || [])].some(node =>
+      /page/i.test(`${node.id || ""} ${node.name || ""}`) && (node.options?.length || 0) > 1
+    ) || /\bpage\s+\d+\s+(?:of|\/)\s*[2-9]\d*\b/.test(bodyText) ||
+      [...(documentObject.querySelectorAll?.("a") || [])].some(node =>
+        /^(?:next|previous|prev|[<>»«])$/i.test(clean(node.innerText || node.textContent)));
+    const emptyGrid = isRecordPage && defaultEmptyRecordGrid(documentObject, locationObject, bodyText, options);
+    const complete = isRecordPage && !incomplete && !paginated && (datedRows > 0 || empty || emptyGrid);
     return {
       origin: BOOKING_ORIGIN,
       logged_in: true,
@@ -892,11 +967,19 @@
       record_page_marker_found: isRecordPage,
       exact_target_match_count: matchingCount,
       verified_exactly_once: isRecordPage && matchingCount === 1,
+      account_limits: { complete, target_day_active_count: dailyCount, empty_target_day_verified: complete && dailyCount === 0,
+        strict_exact_target_count: strictMatchingCount },
       diagnostics: {
         parser_version: BOOKING_FORM_VERSION,
         record_marker_found: isRecordPage,
         record_row_count: rows.length,
-        exact_target_candidate_count: matchingCount
+        exact_target_candidate_count: matchingCount,
+        default_empty_grid_found: emptyGrid,
+        fresh_default_record_navigation: options.fresh_default_record_navigation === true,
+        record_incomplete_found: incomplete,
+        record_pagination_found: paginated,
+        record_loading_found: documentObject.readyState === "loading" || documentObject.readyState === "interactive" ||
+          /loading|please wait/i.test(bodyText) || !!(documentObject.querySelectorAll?.('[aria-busy="true"]') || []).length
       }
     };
   }

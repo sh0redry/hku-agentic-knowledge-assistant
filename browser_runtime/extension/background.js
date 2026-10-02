@@ -381,6 +381,21 @@ async function librarySpaceNavigationError(tabId, error) {
     "HKUL authentication has not returned to the booking page. Complete any visible login prompt and retry the read.");
 }
 
+// Recover only pre-submit reads on workflow-owned tabs. The fixed secure route
+// lets HKUL reuse its SSO session; never enter credentials or replay Submit.
+async function recoverLibraryReadSession(tabId, error, recovery, deadline) {
+  if (error.code !== "LIBRARY_LOGIN_REQUIRED" || recovery.attempted ||
+      Date.now() >= deadline || Date.now() - recovery.startedAt < 2000) return false;
+  const tab = await chrome.tabs.get(tabId);
+  const url = new URL(tab.url);
+  // Do not interrupt a Portal password/MFA page or an in-flight SSO redirect.
+  if (tab.pendingUrl || tab.status !== "complete" ||
+      !["https://lib.hku.hk", "https://booking.lib.hku.hk"].includes(url.origin)) return false;
+  recovery.attempted = true;
+  await chrome.tabs.update(tabId, { url: SPACE_AVAILABILITY_URL });
+  return true;
+}
+
 async function searchLibrarySpaceAvailability(payload, options = {}) {
   const facilityType = String(payload?.facility_type || "");
   const target = SPACE_ROUTES[facilityType];
@@ -404,6 +419,7 @@ async function searchLibrarySpaceAvailability(payload, options = {}) {
   const tab = await chrome.tabs.create({ url: SPACE_AVAILABILITY_URL, active: true });
   const deadline = Date.now() + NAVIGATION_DEADLINE_MS;
   const filterPayload = { ...target, date };
+  const recovery = { attempted: false, startedAt: Date.now() };
   let searchSubmitted = false;
   let configured = false;
   let lastConfigurationError = null;
@@ -421,6 +437,7 @@ async function searchLibrarySpaceAvailability(payload, options = {}) {
       }
     } catch (error) {
       lastConfigurationError = await librarySpaceNavigationError(tab.id, error);
+      await recoverLibraryReadSession(tab.id, lastConfigurationError, recovery, deadline);
       if (["INVALID_INPUT", "LIBRARY_SPACE_FILTER_AMBIGUOUS", "LIBRARY_SPACE_DATE_NOT_OFFERED", "LIBRARY_SPACE_DATE_OPTIONS_UNVERIFIED", "LIBRARY_SPACE_SEARCH_AMBIGUOUS"].includes(error.code)) throw error;
     }
     await delay(500);
@@ -520,6 +537,7 @@ async function inspectLibrarySpaceDates(payload) {
   const target = SPACE_ROUTES[facilityType];
   if (!target) throw commandError("INVALID_INPUT", "A supported facility_type is required to read HKUL Date options.");
   const deadline = Date.now() + NAVIGATION_DEADLINE_MS;
+  const recovery = { attempted: false, startedAt: Date.now() };
   let tab = null;
   const prior = dateInspectionTabs.get(facilityType);
   if (prior && Date.now() - prior.observedAt < 15 * 60 * 1000) {
@@ -567,6 +585,7 @@ async function inspectLibrarySpaceDates(payload) {
       }
     } catch (error) {
       lastError = await librarySpaceNavigationError(tab.id, error);
+      await recoverLibraryReadSession(tab.id, lastError, recovery, deadline);
       if (["INVALID_INPUT", "LIBRARY_SPACE_FILTER_AMBIGUOUS", "LIBRARY_SPACE_DATE_OPTIONS_UNVERIFIED"].includes(error.code)) throw error;
     }
     await delay(500);
@@ -630,6 +649,7 @@ async function bookLibrarySpaceExactlyOnce(payload) {
   const facilityType = String(payload?.facility_type || "");
   const targetRoute = SPACE_ROUTES[facilityType];
   const target = payload?.target || {};
+  if (payload?.operation === "record_check") return readExactLibraryBookingRecord(target);
   if (payload?.operation === "submit") return submitPreparedLibraryBooking(payload);
   if (!F2_BOOKABLE_FACILITY_TYPES.has(facilityType)) {
     throw commandError(
@@ -667,7 +687,7 @@ async function bookLibrarySpaceExactlyOnce(payload) {
   const snapshot = availability.snapshot;
   const diagnostics = snapshot.diagnostics || {};
   if (snapshot.result_set_complete !== true || diagnostics.unclassified_status_cell_count > 0 ||
-      diagnostics.incomplete_available_slot_candidate_count > 0 || diagnostics.parser_version !== "0.3.6") {
+      diagnostics.incomplete_available_slot_candidate_count > 0 || !["0.3.6", "0.3.7"].includes(diagnostics.parser_version)) {
     throw commandError("LIBRARY_BOOKING_AVAILABILITY_INCOMPLETE", "The refreshed availability matrix was incomplete; no slot was selected.");
   }
   if (snapshot.location !== targetRoute.location || snapshot.booking_facility_type !== targetRoute.booking_facility_type || snapshot.date !== target.date) {
@@ -727,6 +747,44 @@ async function bookLibrarySpaceExactlyOnce(payload) {
   };
 }
 
+async function readExactLibraryBookingRecord(target) {
+  if (target?.facility_type !== "discussion_room" || target.location !== "Main Library" ||
+      target.booking_facility_type !== "Discussion Room" || target.floor !== "Level 3" ||
+      !/^Discussion Room \d+$/.test(target.room || "") || !/^\d{4}-\d{2}-\d{2}$/.test(target.date || "") ||
+      !/^\d{2}:\d{2}$/.test(target.start_time || "") || !/^\d{2}:\d{2}$/.test(target.end_time || "")) {
+    throw commandError("INVALID_INPUT", "An exact discussion-room record target is required.");
+  }
+  const tab = await chrome.tabs.create({ url: SPACE_AVAILABILITY_URL, active: true });
+  const deadline = Date.now() + NAVIGATION_DEADLINE_MS;
+  const recovery = { attempted: false, startedAt: Date.now() };
+  let opened = false;
+  let freshDefaultRecordNavigation = false;
+  let lastError = null;
+  while (Date.now() < deadline) {
+    try {
+      if (!opened) {
+        const navigation = await sendTabCommand(tab.id, "library.spaces.open_booking_record");
+        freshDefaultRecordNavigation = navigation?.default_record_route === true;
+        opened = true;
+      } else {
+        const record = await sendTabCommand(tab.id, "library.spaces.read_booking_record", {
+          target, fresh_default_record_navigation: freshDefaultRecordNavigation });
+        if (record?.record_page_marker_found === true && record.diagnostics?.record_loading_found !== true) return record;
+      }
+    } catch (error) {
+      const translated = await librarySpaceNavigationError(tab.id, error);
+      lastError = translated;
+      if (await recoverLibraryReadSession(tab.id, translated, recovery, deadline)) {
+        opened = false;
+        freshDefaultRecordNavigation = false;
+      }
+      if (["UNSAFE_LIBRARY_BOOKING_RECORD_ROUTE", "LIBRARY_BOOKING_RECORD_LINK_AMBIGUOUS"].includes(translated.code)) throw translated;
+    }
+    await delay(500);
+  }
+  throw commandError(lastError?.code || "LIBRARY_BOOKING_RECORD_NOT_READY", "The authoritative booking record could not be read completely. Complete any Library login/MFA prompt manually and retry.");
+}
+
 async function submitPreparedLibraryBooking(payload) {
   const target = payload?.target || {};
   const executionId = String(payload?.execution_id || "");
@@ -763,10 +821,14 @@ async function submitPreparedLibraryBooking(payload) {
   // Persist the one-shot key before dispatch. A worker restart or ambiguous
   // response can never cause the same action to click Submit twice.
   await ensureBookingAttemptUnused(executionId);
+  if (payload.not_after && (!Number.isFinite(Date.parse(payload.not_after)) || Date.now() >= Date.parse(payload.not_after))) {
+    throw commandError("EXECUTION_WINDOW_EXPIRED", "The execution deadline passed; Submit was not clicked.");
+  }
   let submit;
   try {
     submit = await sendTabCommand(tab.id, "library.spaces.submit_booking_once", {
       target,
+      not_after: payload.not_after || null,
       policy_acceptance_acknowledged: true
     });
     if (submit?.submit_click_dispatched !== true || submit?.submit_button_candidate_count !== 1) {
@@ -796,7 +858,7 @@ async function submitPreparedLibraryBooking(payload) {
       if (!dialog?.ready_to_confirm) {
         throw commandError("LIBRARY_BOOKING_OUTCOME_UNKNOWN", "HKUL's exact Yes confirmation was not verified. The booking page was left open; inspect it manually and do not retry automatically.");
       }
-      const accepted = await sendTabCommand(tab.id, "library.spaces.accept_booking_confirmation", { target });
+      const accepted = await sendTabCommand(tab.id, "library.spaces.accept_booking_confirmation", { target, not_after: payload.not_after || null });
       if (accepted?.confirmation_yes_click_dispatched !== true || accepted?.exact_target_matched !== true) {
         throw commandError("LIBRARY_BOOKING_OUTCOME_UNKNOWN", "HKUL's exact Yes confirmation was not acknowledged. Inspect the booking page manually; do not retry automatically.");
       }

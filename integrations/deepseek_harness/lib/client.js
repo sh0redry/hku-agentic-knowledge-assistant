@@ -190,7 +190,7 @@ export class HKUAgentsClient {
     dailyBriefing(input, signal) {
         return this.request('POST', '/api/v1/integration/briefing/today', input, signal);
     }
-    async request(method, path, body, parentSignal) {
+    async request(method, path, body, parentSignal, operator = false) {
         let token = process.env[this.tokenEnv]?.trim();
         if (!token && this.tokenEnv === 'INTEGRATION_API_TOKEN') {
             try {
@@ -243,6 +243,16 @@ export class HKUAgentsClient {
                     cause: error,
                 });
             }
+            if (operator && response.ok && typeof value === 'object' && value !== null &&
+                !Array.isArray(value) && value.ok === true &&
+                typeof value.operation === 'string' &&
+                typeof value.correlation_id === 'string' &&
+                value.result !== null &&
+                !Array.isArray(value.result) &&
+                typeof value.result === 'object') {
+                // This operator-only response is NOT a read-only tool envelope.
+                return value;
+            }
             if (!isEnvelope(value)) {
                 throw new HKUAgentsAPIError('INVALID_RESPONSE', 'HKU AGENTS returned an incompatible Integration API envelope.', { status: response.status });
             }
@@ -271,6 +281,9 @@ export class HKUAgentsClient {
         finally {
             cancellation.dispose();
         }
+    }
+    async libraryOperator(operation, input, signal) {
+        return this.request('POST', '/api/v1/integration/library/operator', { operation, input }, signal, true);
     }
 }
 //# sourceMappingURL=client.js.map

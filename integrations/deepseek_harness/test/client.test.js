@@ -79,6 +79,33 @@ test('client sends bearer auth and accepts the versioned read-only envelope', as
   }
 })
 
+test('operator transport is fixed and does not claim a booking response is read-only', async () => {
+  const previous = process.env.INTEGRATION_API_TOKEN
+  process.env.INTEGRATION_API_TOKEN = TOKEN
+  try {
+    await withServer((request, response) => {
+      assert.equal(request.url, '/api/v1/integration/library/operator')
+      assert.equal(request.headers.authorization, `Bearer ${TOKEN}`)
+      let text = ''; request.on('data', chunk => { text += chunk })
+      request.on('end', () => {
+        const input = JSON.parse(text)
+        assert.equal(input.operation, 'booking_execute')
+        response.setHeader('content-type', 'application/json')
+        response.end(JSON.stringify({ ok: true, operation: input.operation, result: { state: 'queued' },
+          correlation_id: 'test', task_id: 'test-task', execution_enabled: null }))
+      })
+    }, async baseUrl => {
+      const client = new HKUAgentsClient({ baseUrl, tokenEnv: 'INTEGRATION_API_TOKEN', timeoutMs: 5000 })
+      const value = await client.libraryOperator('booking_execute', { id: 'test' })
+      assert.equal(value.result.state, 'queued')
+      assert.equal(value.read_only, undefined)
+    })
+  } finally {
+    if (previous === undefined) delete process.env.INTEGRATION_API_TOKEN
+    else process.env.INTEGRATION_API_TOKEN = previous
+  }
+})
+
 test('client preserves stable API errors without leaking the token', async () => {
   const previous = process.env.INTEGRATION_API_TOKEN
   process.env.INTEGRATION_API_TOKEN = TOKEN

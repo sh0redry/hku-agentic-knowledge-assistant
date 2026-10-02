@@ -35,6 +35,12 @@ class BrowserSISConnector(BaseConnector):
     def health(self) -> dict:
         return self.bridge.status()
 
+    async def read_library_booking_record(self, target: dict) -> dict:
+        from browser_bridge.models import LibraryBookingRecordSnapshot
+        data = await self._command(BrowserCommandName.BOOK_LIBRARY_SPACE_ONCE,
+                                   {"operation": "record_check", "target": target})
+        return LibraryBookingRecordSnapshot.model_validate(data).model_dump(mode="json")
+
     async def bind_hku_tab(self) -> dict:
         data = await self._command(BrowserCommandName.BIND_HKU_TAB)
         if data.get("origin") in {

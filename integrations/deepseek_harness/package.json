@@ -1,7 +1,7 @@
 {
   "name": "dsh-hku-agents",
-  "version": "0.18.14",
-  "description": "Read-only HKU AGENTS tools for DeepSeek Harness",
+  "version": "0.19.2",
+  "description": "HKU AGENTS read-only Chat tools and separately confirmed local operator workflows",
   "type": "module",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
@@ -23,7 +23,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
-    "test": "npm run build && node test/client.test.js && node test/local_credentials.test.js && node test/desktop_status.test.js && node test/desktop_admin.test.js && node test/desktop_sis.test.js && node test/desktop_readonly.test.js && node test/browser-client.test.js && node test/presentation.test.js && node test/history.test.js && node test/core_launcher.test.js"
+    "test": "npm run build && node test/client.test.js && node test/local_credentials.test.js && node test/desktop_status.test.js && node test/desktop_admin.test.js && node test/desktop_sis.test.js && node test/desktop_readonly.test.js && node test/desktop_library.test.js && node test/desktop_workbench.test.js && node test/browser-client.test.js && node test/presentation.test.js && node test/history.test.js && node test/core_launcher.test.js"
   },
   "dsh": {
     "bundle": {

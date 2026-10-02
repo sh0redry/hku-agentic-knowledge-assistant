@@ -8,6 +8,8 @@ import { installDesktopStatusBridge } from './desktop_status.js'
 import { installDesktopAdminBridge } from './desktop_admin.js'
 import { installDesktopSISBridge } from './desktop_sis.js'
 import { installDesktopReadBridge } from './desktop_readonly.js'
+import { installDesktopLibraryBridge } from './desktop_library.js'
+import { installDesktopWorkbench } from './desktop_workbench.js'
 
 export const name = 'hku-agents'
 export const inject = ['tools']
@@ -38,6 +40,8 @@ export function apply(ctx: Context, config: Config): void {
   installDesktopAdminBridge(ctx, client)
   installDesktopSISBridge(ctx, client)
   installDesktopReadBridge(ctx, client)
+  installDesktopLibraryBridge(ctx, client)
+  installDesktopWorkbench(ctx, client)
 
   ctx.tools.register(
     defineTool({
@@ -330,7 +334,7 @@ export function apply(ctx: Context, config: Config): void {
       name: 'hku_moodle_upcoming_assignments',
       ...toolPresentation('hku_moodle_upcoming_assignments'),
       description:
-        'After manual HKU Portal authentication, continue through verified SSO controls when needed and read Dashboard deadlines for a bounded 1-90 day future window. Restricted SSO navigation may occur, but credential entry and MFA interaction never do. Private titles and dates remain process-local. It does not open activity pages or read grades, participants, submissions, or submission status and performs no Moodle write.',
+        'After manual HKU Portal authentication, continue through verified SSO controls when needed and read Dashboard deadlines for a bounded 1-90 day future window. Course names may be enriched from matching visible Calendar events; inspect source.course_attribution_source and diagnostics, and never infer course IDs from module IDs or titles. Beyond-window rows were parsed then filtered, not necessarily unread. Restricted SSO navigation may occur, but credential entry and MFA interaction never do. Core caches private titles and dates in process memory; Harness handles conversation retention separately. It does not open activity pages or read grades, participants, submissions, or submission status and performs no Moodle write.',
       parameters: {
         days_ahead: {
           type: 'number',

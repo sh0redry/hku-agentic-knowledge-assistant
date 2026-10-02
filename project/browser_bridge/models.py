@@ -595,6 +595,7 @@ class LibraryBookingRecordSnapshot(StrictMessage):
     record_page_marker_found: bool
     exact_target_match_count: int = Field(ge=0, le=100)
     verified_exactly_once: bool
+    account_limits: dict = Field(default_factory=dict)
     diagnostics: dict
 
 

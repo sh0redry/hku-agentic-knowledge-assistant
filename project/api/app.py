@@ -56,13 +56,16 @@ def create_api_app(
     @asynccontextmanager
     async def lifespan(lifespan_app: FastAPI):
         shadow = lifespan_app.state.container.library_shadow
+        autobook = lifespan_app.state.container.library_autobook_executor
         local_binding = library_booking_host_is_loopback()
         if local_binding:
             await shadow.start()
+            await autobook.start()
         try:
             yield
         finally:
             if local_binding:
+                await autobook.stop()
                 await shadow.stop()
 
     app = FastAPI(
@@ -480,7 +483,7 @@ def create_api_app(
     async def library_autobook_authorization_list(request: Request):
         require_local_shadow_access(request, "F4 authorization")
         try:
-            return app.state.container.library_autobook.list_authorizations()
+            return app.state.container.library_autobook_executor.list()
         except DataProtectionUnavailable as exc:
             raise shadow_error(exc) from exc
 
@@ -490,7 +493,7 @@ def create_api_app(
     ):
         require_local_shadow_access(request, "F4 authorization")
         try:
-            return app.state.container.library_autobook.change_authorization(authorization_id, body.action)
+            return app.state.container.library_autobook_executor.disarm(authorization_id, body.action)
         except (ValueError, KeyError, DataProtectionUnavailable) as exc:
             raise shadow_error(exc) from exc
 

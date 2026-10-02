@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile, rename, lstat } from 'node:fs/promises';
 import { join } from 'node:path';
 const operations = new Set(['timetable_sync', 'next_class', 'moodle_dashboard', 'moodle_courses', 'moodle_assignments',
-    'portal_notices', 'briefing', 'library_hours', 'library_dates', 'library_availability', 'library_research', 'sis_sync', 'sis_preflight', 'facilities']);
+    'portal_notices', 'briefing', 'library_hours', 'library_dates', 'library_availability', 'library_research', 'sis_sync', 'sis_preflight', 'facilities',
+    'library_operator_f1', 'library_operator_f2', 'library_operator_f3', 'library_operator_f4']);
 const verdicts = new Set(['pending', 'pass', 'fail', 'needs_review']);
 const obj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 const id = (v) => typeof v === 'string' && /^[a-zA-Z0-9-]{1,64}$/.test(v) ? v : null;
@@ -70,7 +71,7 @@ export class TestHistory {
                 throw new Error('Invalid history input');
             const rows = await this.read();
             const error = obj(value.error) ? value.error : {};
-            const entry = { id: randomUUID(), operation, recorded_at: new Date().toISOString(), plugin_version: '0.18.14',
+            const entry = { id: randomUUID(), operation, recorded_at: new Date().toISOString(), plugin_version: '0.19.2',
                 outcome: value.ok === true ? 'completed' : 'failed', task_id: id(value.task_id), correlation_id: id(value.correlation_id),
                 error_code: typeof error.code === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(error.code) ? error.code : null,
                 verdict: 'pending', diagnostics: safeDiagnostics(value.diagnostics), domain_writes: value.domain_writes_performed === 0 ? '0' : 'not_verified',

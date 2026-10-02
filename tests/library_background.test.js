@@ -16,6 +16,9 @@ const bookingCommands = [];
 let bookingPhase = "form";
 let storedBookingAttempts = [];
 let loginTransitionReads = 0;
+let recordLoadingReads = 0;
+let recordLoginFailures = 0;
+let recoveryNavigations = 0;
 let tabUrl = "https://booking.lib.hku.hk/Secure/FacilityStatusDate.aspx";
 const dateParts = new Intl.DateTimeFormat("en-GB", {
   timeZone: "Asia/Hong_Kong", year: "numeric", month: "2-digit", day: "2-digit"
@@ -99,7 +102,7 @@ const context = {
     tabs: {
       async create() { openedTabs += 1; return { id: 42 }; },
       async get(tabId) { return { id: tabId, url: tabUrl, status: "complete" }; },
-      async update(tabId, options) { tabUrl = options.url; return { id: tabId }; },
+      async update(tabId, options) { recoveryNavigations += 1; tabUrl = options.url; return { id: tabId }; },
       async sendMessage(_tabId, message) {
         bookingCommands.push(message.command);
         if (message.command === "library.spaces.inspect_booking_form") {
@@ -118,9 +121,23 @@ const context = {
           return { ok: true, data: { confirmation_yes_click_dispatched: true, exact_target_matched: true } };
         }
         if (message.command === "library.spaces.read_booking_record") {
+          if (message.payload?.fresh_default_record_navigation !== undefined) {
+            assert.equal(message.payload.fresh_default_record_navigation, true);
+          }
+          const loading = recordLoadingReads > 0;
+          if (loading) recordLoadingReads -= 1;
           return { ok: true, data: { record_page_marker_found: bookingPhase === "record",
             exact_target_match_count: bookingPhase === "record" ? 1 : 0,
-            verified_exactly_once: bookingPhase === "record", diagnostics: {} } };
+            verified_exactly_once: bookingPhase === "record", diagnostics: { record_loading_found: loading } } };
+        }
+        if (message.command === "library.spaces.open_booking_record") {
+          if (recordLoginFailures > 0) {
+            recordLoginFailures -= 1;
+            tabUrl = "https://lib.hku.hk/hkulauth/";
+            return { ok: false, error: { code: "LIBRARY_LOGIN_REQUIRED", message: "Session timed out" } };
+          }
+          bookingPhase = "record";
+          return { ok: true, data: { navigation_started: true, default_record_route: true } };
         }
         if (message.command === "library.spaces.configure_availability") {
           if (loginTransitionReads > 0) {
@@ -274,6 +291,40 @@ vm.runInContext(source, context);
   assert.equal(bookingResult.outcome, "confirmed");
   assert.equal(bookingCommands.filter((command) => command === "library.spaces.accept_booking_confirmation").length, 1);
   assert.equal(bookingCommands.includes("library.spaces.open_booking_record"), false);
+  const submitsBeforeExpiry = bookingCommands.filter(command => command === "library.spaces.submit_booking_once").length;
+  await assert.rejects(vm.runInContext(`submitPreparedLibraryBooking({
+    execution_id:"22222222-2222-4222-8222-222222222222",prepared_tab_id:42,policy_acceptance_acknowledged:true,
+    discussion_room_rules_acknowledged:true,not_after:"2000-01-01T00:00:00+08:00",
+    target:{facility_type:"discussion_room",location:"Main Library",booking_facility_type:"Discussion Room",
+      date:"${today}",floor:"Level 3",room:"Discussion Room 1",start_time:"13:00",end_time:"14:00"}
+  })`, context), error => error.code === "EXECUTION_WINDOW_EXPIRED");
+  assert.equal(bookingCommands.filter(command => command === "library.spaces.submit_booking_once").length, submitsBeforeExpiry);
+  recordLoginFailures = 5;
+  const recoveryBefore = recoveryNavigations;
+  const recoveredRecord = await vm.runInContext(`readExactLibraryBookingRecord({facility_type:"discussion_room",
+    location:"Main Library",booking_facility_type:"Discussion Room",date:"${today}",floor:"Level 3",
+    room:"Discussion Room 1",start_time:"13:00",end_time:"14:00"})`, context);
+  assert.equal(recoveredRecord.record_page_marker_found, true);
+  assert.equal(recoveryNavigations - recoveryBefore, 1);
+  assert.equal(bookingCommands.filter(command => command === "library.spaces.submit_booking_once").length, submitsBeforeExpiry);
+  context.recoveryState = { attempted: false, startedAt: Date.now() - 3000 };
+  tabUrl = "https://hkuportal.hku.hk/login";
+  assert.equal(await vm.runInContext('recoverLibraryReadSession(42, {code:"LIBRARY_LOGIN_REQUIRED"}, recoveryState, Date.now()+1000)', context), false);
+  assert.equal(context.recoveryState.attempted, false);
+  tabUrl = "https://lib.hku.hk/hkulauth/";
+  assert.equal(await vm.runInContext('recoverLibraryReadSession(42, {code:"LIBRARY_LOGIN_REQUIRED"}, recoveryState, Date.now()+1000)', context), true);
+  assert.equal(await vm.runInContext('recoverLibraryReadSession(42, {code:"LIBRARY_LOGIN_REQUIRED"}, recoveryState, Date.now()+1000)', context), false);
+  context.recoveryState = { attempted: false, startedAt: Date.now() - 3000 };
+  assert.equal(await vm.runInContext('recoverLibraryReadSession(42, {code:"LIBRARY_LOGIN_REQUIRED"}, recoveryState, Date.now()-1)', context), false);
+  recordLoadingReads = 2;
+  const readsBeforeLoading = bookingCommands.filter(command => command === "library.spaces.read_booking_record").length;
+  const recordCheck = await vm.runInContext(`bookLibrarySpaceExactlyOnce({operation:"record_check",
+    target:{facility_type:"discussion_room",location:"Main Library",booking_facility_type:"Discussion Room",
+      date:"${today}",floor:"Level 3",room:"Discussion Room 1",start_time:"13:00",end_time:"14:00"}})`, context);
+  assert.equal(recordCheck.record_page_marker_found, true);
+  assert.equal(bookingCommands.filter(command => command === "library.spaces.read_booking_record").length - readsBeforeLoading, 3);
+  assert.equal(bookingCommands.filter(command => command === "library.spaces.submit_booking_once").length, submitsBeforeExpiry);
+  await assert.rejects(vm.runInContext('readExactLibraryBookingRecord({facility_type:"study_room"})', context), error => error.code === "INVALID_INPUT");
   console.log("HKUL background date and pagination tests passed.");
 })().catch((error) => {
   console.error(error);

@@ -686,4 +686,6 @@ def create_integration_router(expected_token: str) -> APIRouter:
             )
         return response(correlation_id, ok=True, task=record, result=record.result)
 
+    from api.library_operator import install_library_operator
+    install_library_operator(router, authorize)
     return router

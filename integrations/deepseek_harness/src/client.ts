@@ -62,6 +62,15 @@ export interface HKUAgentsClientOptions {
   maxResponseBytes?: number
 }
 
+export interface LibraryOperatorResponse {
+  ok: true
+  operation: string
+  result: Record<string, JsonValue>
+  correlation_id: string
+  task_id: string | null
+  execution_enabled: boolean | null
+}
+
 export class HKUAgentsAPIError extends Error {
   readonly code: string
   readonly status: number | null
@@ -414,12 +423,17 @@ export class HKUAgentsClient {
     return this.request('POST', '/api/v1/integration/briefing/today', input, signal)
   }
 
+  private request(method: 'GET' | 'POST', path: string, body: { [key: string]: JsonValue } | undefined,
+    parentSignal: AbortSignal | undefined, operator: true): Promise<LibraryOperatorResponse>
+  private request(method: 'GET' | 'POST', path: string, body: { [key: string]: JsonValue } | undefined,
+    parentSignal: AbortSignal | undefined, operator?: false): Promise<IntegrationEnvelope>
   private async request(
     method: 'GET' | 'POST',
     path: string,
     body: { [key: string]: JsonValue } | undefined,
     parentSignal: AbortSignal | undefined,
-  ): Promise<IntegrationEnvelope> {
+    operator = false,
+  ): Promise<IntegrationEnvelope | LibraryOperatorResponse> {
     let token = process.env[this.tokenEnv]?.trim()
     if (!token && this.tokenEnv === 'INTEGRATION_API_TOKEN') {
       try { token = await readLocalIntegrationToken(this.baseUrl) || undefined }
@@ -474,6 +488,16 @@ export class HKUAgentsClient {
           cause: error,
         })
       }
+      if (operator && response.ok && typeof value === 'object' && value !== null &&
+          !Array.isArray(value) && (value as Record<string, unknown>).ok === true &&
+          typeof (value as Record<string, unknown>).operation === 'string' &&
+          typeof (value as Record<string, unknown>).correlation_id === 'string' &&
+          (value as Record<string, unknown>).result !== null &&
+          !Array.isArray((value as Record<string, unknown>).result) &&
+          typeof (value as Record<string, unknown>).result === 'object') {
+        // This operator-only response is NOT a read-only tool envelope.
+        return value as LibraryOperatorResponse
+      }
       if (!isEnvelope(value)) {
         throw new HKUAgentsAPIError(
           'INVALID_RESPONSE',
@@ -511,5 +535,9 @@ export class HKUAgentsClient {
     } finally {
       cancellation.dispose()
     }
+  }
+
+  async libraryOperator(operation: string, input: { [key: string]: JsonValue }, signal?: AbortSignal): Promise<LibraryOperatorResponse> {
+    return this.request('POST', '/api/v1/integration/library/operator', { operation, input }, signal, true)
   }
 }

@@ -155,6 +155,15 @@ class SQLiteStore:
                     updated_at TEXT NOT NULL,
                     UNIQUE(authorization_id)
                 );
+                CREATE TABLE IF NOT EXISTS library_autobook_runtime (
+                    authorization_id TEXT PRIMARY KEY REFERENCES library_autobook_authorizations(id),
+                    armed INTEGER NOT NULL DEFAULT 0,
+                    dry_run INTEGER NOT NULL DEFAULT 1,
+                    phase TEXT NOT NULL DEFAULT 'not_armed',
+                    date_check_count INTEGER NOT NULL DEFAULT 0,
+                    error_code TEXT,
+                    updated_at TEXT NOT NULL
+                );
                 """
             )
             # Older local F4 development databases had no execution bound.
@@ -224,6 +233,19 @@ class SQLiteStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def get_autobook_authorization(self, authorization_id: str) -> dict:
+        with self._connection() as db:
+            row = db.execute("SELECT * FROM library_autobook_authorizations WHERE id = ?", (authorization_id,)).fetchone()
+        if row is None:
+            raise KeyError(authorization_id)
+        return dict(row)
+
+    def armed_autobook_authorizations(self) -> list[dict]:
+        with self._connection() as db:
+            rows = db.execute("""SELECT a.* FROM library_autobook_authorizations a
+                JOIN library_autobook_runtime r ON r.authorization_id = a.id WHERE r.armed = 1""").fetchall()
+        return [dict(row) for row in rows]
+
     def expire_library_autobook_authorizations(self, now: str) -> list[str]:
         with self._connection() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -239,6 +261,8 @@ class SQLiteStore:
                     WHERE state IN ('pending_executor', 'paused') AND expires_at <= ?""",
                     (now, now),
                 )
+                db.executemany("""UPDATE library_autobook_runtime SET armed = 0, phase = 'expired', updated_at = ?
+                    WHERE authorization_id = ?""", [(now, row["id"]) for row in rows])
         return [row["id"] for row in rows]
 
     def change_library_autobook_authorization_state(
@@ -268,7 +292,7 @@ class SQLiteStore:
         return result
 
     def claim_library_autobook_attempt(
-        self, authorization_id: str, attempt_id: str, now: str
+        self, authorization_id: str, attempt_id: str, now: str, *, require_armed: bool = False
     ) -> bool:
         """Single-use claim for a future executor; claim means no automatic retry."""
         with self._connection() as db:
@@ -281,6 +305,11 @@ class SQLiteStore:
                     or not row["execution_at"] or now < row["execution_at"] or row["expires_at"] <= now
                     or row["attempt_count"] != 0):
                 return False
+            if require_armed:
+                runtime = db.execute("SELECT armed, phase FROM library_autobook_runtime WHERE authorization_id = ?",
+                                     (authorization_id,)).fetchone()
+                if runtime is None or not runtime["armed"] or runtime["phase"] != "preparing":
+                    return False
             db.execute(
                 """INSERT INTO library_autobook_attempts
                 (id, authorization_id, state, created_at, updated_at)
@@ -293,6 +322,64 @@ class SQLiteStore:
                 (now, authorization_id),
             )
             return True
+
+    def autobook_runtime(self, authorization_id: str) -> dict:
+        with self._connection() as db:
+            row = db.execute("SELECT * FROM library_autobook_runtime WHERE authorization_id = ?",
+                             (authorization_id,)).fetchone()
+        return dict(row) if row else {"armed": 0, "phase": "not_armed", "date_check_count": 0, "error_code": None}
+
+    def arm_autobook(self, authorization_id: str, now: str, *, dry_run: bool = True) -> None:
+        with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if db.execute("SELECT COUNT(*) FROM library_autobook_runtime WHERE armed = 1 AND authorization_id != ?",
+                          (authorization_id,)).fetchone()[0]:
+                raise ValueError("The F4 pilot permits only one armed authorization.")
+            row = db.execute("SELECT * FROM library_autobook_authorizations WHERE id = ?", (authorization_id,)).fetchone()
+            if row is None:
+                raise KeyError(authorization_id)
+            if row["state"] not in {"pending_executor", "paused"} or row["attempt_count"] or row["expires_at"] <= now:
+                raise ValueError("Authorization is no longer armable.")
+            runtime = db.execute("SELECT phase FROM library_autobook_runtime WHERE authorization_id = ?",
+                                 (authorization_id,)).fetchone()
+            if runtime and runtime["phase"] not in {"not_armed", "armed", "paused"}:
+                raise ValueError("A started occurrence cannot be rearmed.")
+            db.execute("UPDATE library_autobook_authorizations SET state = 'pending_executor', updated_at = ? WHERE id = ?",
+                       (now, authorization_id))
+            db.execute("""INSERT INTO library_autobook_runtime (authorization_id, armed, dry_run, phase, updated_at)
+                VALUES (?, 1, ?, 'armed', ?) ON CONFLICT(authorization_id) DO UPDATE
+                SET armed = 1, dry_run = excluded.dry_run, phase = 'armed', error_code = NULL, updated_at = excluded.updated_at""",
+                (authorization_id, int(dry_run), now))
+
+    def begin_autobook(self, authorization_id: str, now: str) -> bool:
+        with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            cursor = db.execute("""UPDATE library_autobook_runtime SET phase = 'preparing', updated_at = ?
+                WHERE authorization_id = ? AND armed = 1 AND phase = 'armed'
+                AND EXISTS (SELECT 1 FROM library_autobook_authorizations a WHERE a.id = authorization_id
+                            AND a.state = 'pending_executor' AND a.attempt_count = 0 AND a.expires_at > ?)""",
+                (now, authorization_id, now))
+            return cursor.rowcount == 1
+
+    def update_autobook_runtime(self, authorization_id: str, now: str, *, phase: str | None = None,
+                               armed: bool | None = None, checks: int | None = None, error_code: str | None = None) -> None:
+        fields, values = ["updated_at = ?"], [now]
+        for name, value in (("phase", phase), ("armed", int(armed) if armed is not None else None),
+                            ("date_check_count", checks), ("error_code", error_code)):
+            if value is not None:
+                fields.append(name + " = ?")
+                values.append(value)
+        values.append(authorization_id)
+        with self._connection() as db:
+            db.execute("UPDATE library_autobook_runtime SET " + ", ".join(fields) + " WHERE authorization_id = ?", values)
+
+    def recover_autobook_preparation(self, now: str) -> None:
+        # No Submit was claimed for these occurrences, but do not replay them.
+        with self._connection() as db:
+            db.execute("""UPDATE library_autobook_runtime SET armed = 0,
+                phase = CASE WHEN EXISTS (SELECT 1 FROM library_autobook_authorizations a
+                    WHERE a.id = authorization_id AND a.attempt_count > 0) THEN 'outcome_unknown' ELSE 'interrupted' END,
+                error_code = 'CORE_RESTARTED', updated_at = ? WHERE phase = 'preparing'""", (now,))
 
     def confirm_library_autobook_attempt(
         self, authorization_id: str, attempt_id: str, now: str,

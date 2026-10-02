@@ -1,5 +1,44 @@
 ﻿# HKU AGENTS for DeepSeek Harness
 
+## 0.19.2: empty booking record and F3 status corrections
+
+Chrome Bridge 0.17.25 / booking parser 0.1.4 recognizes the confirmed default
+empty record grid only on a complete authenticated unfiltered record page with
+the exact six-column header and blank rows. Loading, filter controls, pagination
+and unknown row shapes remain unverified. Record inspection waits for loading
+to finish; an empty grid is never booking-success evidence.
+F3 task cards now label read-only mode, distinguish preparation from checking
+time, show the explicitly suggested candidate, and separate rule run counters
+from F4 submission counters. No stored rules/authorizations are changed.
+
+## 0.19.1: consolidated acceptance workbench
+
+Agent Chat is the primary business entry; optional manual controls are collapsed.
+Admin tests are grouped by SIS, Moodle, Portal and Library. The read-only task
+center shows bounded F3/F4 snapshots with Hong Kong times and explicit unknown
+submission warnings; it never retries, arms or changes a task. Auto-refresh is
+opt-in and stops on unmount. Connection reads have visible deadlines, stale Host
+responses are discarded, and Bridge disconnects trigger paced status refresh.
+
+Admin's local checks and redacted report use fixed Host-only routes. They read
+Core/Bridge versions, local catalog and gate status, never navigate or log in,
+and never change a gate. Report generation includes only the last 100 local
+Admin history summaries and human verdicts, not booking targets or private rows.
+Check completion is not live acceptance. Chrome Bridge remains 0.17.24; a stale
+or unreported extension version requires review, not an automatic upgrade.
+See `docs/DESKTOP_PRODUCTIZATION_BATCH.md` for one combined acceptance session.
+
+## 0.19.0: consolidated Desktop Library workflows
+
+Business and Admin now have separate F1/F2/F3/F4 controls; the 23 Chat tools
+remain read-only. Fixed authenticated operator RPC is not a generic write proxy.
+F2 requires an explicit Admin gate and fresh exact confirmation. F4 requires
+separate runtime enablement and exact arming, one verifiably empty target day and
+one discussion-room session. Dry run cannot select/submit. Unknown outcomes are
+terminal and never auto-retried. Restart Core and reload Chrome Bridge 0.17.24.
+See `docs/DESKTOP_LIBRARY_BATCH.md` for the consolidated acceptance and limits.
+The following sections describe earlier milestones, not current feature parity.
+
 ## Desktop 0.18.12: Start and connect HKU
 
 ### 0.18.14 rc.2 Chat toolview correction
@@ -180,7 +219,7 @@ npm test
 npm pack
 $dshDesktop = Join-Path $env:LOCALAPPDATA 'Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd'
 & $dshDesktop --version
-& $dshDesktop plugin --profile desktop add .\dsh-hku-agents-0.18.10.tgz
+& $dshDesktop plugin --profile desktop add .\dsh-hku-agents-0.19.2.tgz
 & $dshDesktop plugin --profile desktop list
 ```
 

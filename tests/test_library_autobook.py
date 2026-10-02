@@ -143,13 +143,16 @@ class AutobookPilotDesignTests(unittest.TestCase):
                 service.create_authorization(request)
             self.assertNotIn(b"Discussion Room 2", database.read_bytes())
             restarted = LibraryAutobookDraftService(SQLiteStore(database), FakeProtector())
-            self.assertEqual(restarted.list_authorizations()["authorization_count"], 1)
-            paused = restarted.change_authorization(authorized["id"], "pause")
-            self.assertEqual(paused["state"], "paused")
-            revoked = restarted.change_authorization(authorized["id"], "revoke")
-            self.assertEqual(revoked["state"], "revoked")
-            with self.assertRaises(ValueError):
-                restarted.change_authorization(authorized["id"], "pause")
+            # Keep restart/lifecycle checks at the same fixture time, rather
+            # than expiring this authorization against the machine's date.
+            with patch("services.library_autobook.utc_now", return_value=now):
+                self.assertEqual(restarted.list_authorizations()["authorization_count"], 1)
+                paused = restarted.change_authorization(authorized["id"], "pause")
+                self.assertEqual(paused["state"], "paused")
+                revoked = restarted.change_authorization(authorized["id"], "revoke")
+                self.assertEqual(revoked["state"], "revoked")
+                with self.assertRaises(ValueError):
+                    restarted.change_authorization(authorized["id"], "pause")
 
     def test_authorization_requires_all_explicit_attestations(self):
         for missing in ("future_booking_acknowledged", "policy_acceptance_acknowledged",

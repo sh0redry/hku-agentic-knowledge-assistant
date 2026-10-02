@@ -50,6 +50,7 @@ from services.portal import PortalNoticeService
 from services.library_booking import LibraryBookingPreviewRegistry
 from services.library_shadow import LibraryShadowScheduler
 from services.library_autobook import LibraryAutobookDraftService
+from services.library_autobook_executor import LibraryAutobookExecutor
 
 
 class ApplicationContainer:
@@ -136,6 +137,8 @@ class ApplicationContainer:
         self.actions = ActionService(self.registry, self.store, self.tasks, self.policy)
         self.library_shadow = LibraryShadowScheduler(self.store, self.tasks)
         self.library_autobook = LibraryAutobookDraftService(self.store)
+        self.library_autobook_executor = LibraryAutobookExecutor(
+            self.library_autobook, self.tasks, self.connectors["sis_browser"], self.library_shadow._browser_lock)
 
     def connection_status(self) -> list[dict]:
         return [connector.health() for connector in self.connectors.values()]

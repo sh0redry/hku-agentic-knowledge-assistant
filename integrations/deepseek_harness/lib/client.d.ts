@@ -40,6 +40,14 @@ export interface HKUAgentsClientOptions {
     timeoutMs: number;
     maxResponseBytes?: number;
 }
+export interface LibraryOperatorResponse {
+    ok: true;
+    operation: string;
+    result: Record<string, JsonValue>;
+    correlation_id: string;
+    task_id: string | null;
+    execution_enabled: boolean | null;
+}
 export declare class HKUAgentsAPIError extends Error {
     readonly code: string;
     readonly status: number | null;
@@ -146,5 +154,8 @@ export declare class HKUAgentsClient {
         max_cache_age_minutes?: number;
     }, signal?: AbortSignal): Promise<IntegrationEnvelope>;
     private request;
+    libraryOperator(operation: string, input: {
+        [key: string]: JsonValue;
+    }, signal?: AbortSignal): Promise<LibraryOperatorResponse>;
 }
 //# sourceMappingURL=client.d.ts.map

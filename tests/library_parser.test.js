@@ -812,7 +812,7 @@ const bookingRecordLink = {
   click() { bookingRecordLinkClicks += 1; }
 };
 assert.deepEqual(parser.openBookingRecord({ querySelectorAll: selector => selector === "a" ? [bookingRecordLink] : [] }, bookingLocation), {
-  navigation_started: true
+  navigation_started: true, default_record_route: true
 });
 assert.equal(bookingRecordLinkClicks, 1);
 const exactRecordText = "2026-09-23 4/F Single Study Room (3 sessions) Room 424 13:00 17:00";
@@ -840,6 +840,92 @@ const duplicateBookingRecord = parser.verifyBookingRecord({
 }, recordLocation, bookingTarget);
 assert.equal(duplicateBookingRecord.exact_target_match_count, 2);
 assert.equal(duplicateBookingRecord.verified_exactly_once, false);
+const f4Target = { facility_type: "discussion_room", location: "Main Library", floor: "Level 3",
+  booking_facility_type: "Discussion Room", room: "Discussion Room 2", date: "2026-09-23", start_time: "10:00", end_time: "11:00" };
+const recordDocument = (texts, body = "My Booking Record", paginated = false) => ({ body: { innerText: body },
+  querySelectorAll(selector) { return selector === "table tr" ? texts.map(innerText => ({ innerText }))
+    : selector === "select" && paginated ? [{ id: "Page", options: [1, 2] }] : []; } });
+const f4ExactRow = "2026-09-23 Main Library Level 3 Discussion Room 2 10:00 11:00";
+assert.equal(parser.verifyBookingRecord(recordDocument([f4ExactRow]), recordLocation, f4Target).account_limits.strict_exact_target_count, 1);
+assert.equal(parser.verifyBookingRecord(recordDocument([f4ExactRow]), recordLocation, f4Target).account_limits.empty_target_day_verified, false);
+assert.equal(parser.verifyBookingRecord(recordDocument(["header"], "My Booking Record No bookings found"), recordLocation, f4Target).account_limits.empty_target_day_verified, true);
+assert.equal(parser.verifyBookingRecord(recordDocument(["header"], "My Booking Record"), recordLocation, f4Target).account_limits.complete, false);
+assert.equal(parser.verifyBookingRecord(recordDocument([f4ExactRow], "My Booking Record", true), recordLocation, f4Target).account_limits.complete, false);
+assert.equal(parser.verifyBookingRecord(recordDocument(["2026-09-23 Discussion Room 2 missing times"]), recordLocation, f4Target).account_limits.complete, false);
+assert.equal(parser.verifyBookingRecord(recordDocument([f4ExactRow.replace("Main Library", "Other Library")]), recordLocation, f4Target).account_limits.strict_exact_target_count, 0);
+assert.equal(parser.verifyBookingRecord(recordDocument([f4ExactRow.replace("Room 2", "Room 20")]), recordLocation, f4Target).exact_target_match_count, 0);
+assert.equal(parser.verifyBookingRecord(recordDocument([f4ExactRow.replace("2026-09-23", "2026-09-22"), "Discussion Room 3 10:00 11:00"]), recordLocation, f4Target).account_limits.complete, false);
+// Real HKUL default empty record layout: exact table header + blank cells,
+// no textual "No records" message. No personal page data in this fixture.
+function defaultEmptyRecordFixture(options = {}) {
+  const header = options.header || ["Start Date/Time", "End Date/Time", "Location", "Floor", "Facility", "Status"];
+  const makeRow = texts => ({ innerText: texts.join(" "), querySelectorAll(selector) {
+    return selector === "th, td" ? texts.map(innerText => ({ innerText })) : []; } });
+  const rows = [makeRow(header), makeRow(options.values || Array(7).fill(""))];
+  if (options.pager) rows.push({ innerText: options.pagerText || "", className: options.pagerClass || "tablePagerGray tableBottomGray",
+    querySelectorAll(selector) { return selector === "th, td" ? [{ innerText: options.pagerText || "",
+      getAttribute(name) { return name === "colspan" ? String(options.pagerSpan || 7) : null; } }]
+      : selector === "a, button, input, select, textarea, img" && options.pagerInteractive ? [{}] : []; } });
+  const table = { id: options.tableId || "main_tableRecordHeader", querySelectorAll(selector) { return selector === "tr" ? rows : []; } };
+  for (const row of rows) row.closest = () => table;
+  const wrapper = { querySelectorAll(selector) { return selector === "tr" ? rows : []; } };
+  return { readyState: options.readyState || "complete", body: { innerText: options.body || "My Booking Record Logout Search Record" },
+    querySelectorAll(selector) { return selector === "table tr" ? rows : selector === "table" ? options.duplicate ? [table, table] : options.nested ? [wrapper, table] : [table]
+      : selector === "input, select, textarea" ? options.controls || []
+      : selector === '[aria-busy="true"]' && options.busy ? [{}]
+      : selector === "select" && options.paginated ? [{ id: "Page", options: [1, 2] }] : []; } };
+}
+const emptyDefaultRecord = parser.verifyBookingRecord(defaultEmptyRecordFixture(), recordLocation, f4Target);
+assert.equal(emptyDefaultRecord.account_limits.complete, true);
+assert.equal(emptyDefaultRecord.account_limits.empty_target_day_verified, true);
+assert.equal(emptyDefaultRecord.account_limits.target_day_active_count, 0);
+assert.equal(emptyDefaultRecord.verified_exactly_once, false, "Empty record is never booking success");
+assert.equal(emptyDefaultRecord.diagnostics.default_empty_grid_found, true);
+const liveEmptyLayout = { header: ["\u00a0", "Start Date/Time", "End Date/Time", "Location", "Floor", "Facility", "Status"],
+  values: ["", "\u00a0", "", "", "", "", ""], pager: true, nested: true };
+assert.equal(parser.verifyBookingRecord(defaultEmptyRecordFixture(liveEmptyLayout), recordLocation, f4Target).account_limits.empty_target_day_verified, true);
+assert.equal(parser.verifyBookingRecord(defaultEmptyRecordFixture(liveEmptyLayout), recordLocation, f4Target).verified_exactly_once, false);
+const hiddenField = (id, type, value = "") => ({ id, type, value, getClientRects: () => [] });
+const liveControls = [hiddenField("__EVENTTARGET", "hidden"), hiddenField("__EVENTARGUMENT", "hidden"),
+  hiddenField("__VIEWSTATE", "hidden", "synthetic-state"), hiddenField("main_hBtnSearch", "hidden"),
+  hiddenField("main_hBookingID", "hidden"), hiddenField("main_txtRemark", "text"), hiddenField("main_txtEmail", "text"),
+  hiddenField("main_ddlSearchStartDate", "select-one", "synthetic-default"),
+  hiddenField("main_txtSearchStartDate", "text", "synthetic-default"),
+  hiddenField("main_ddlSearchEndDate", "select-one"), hiddenField("main_ddlSearchFacility", "select-one"),
+  hiddenField("main_ddlSearchStatus", "select-one"), hiddenField("main_btnSearchStart", "submit", "Search")];
+const freshRead = { fresh_default_record_navigation: true };
+const liveDocument = defaultEmptyRecordFixture({ ...liveEmptyLayout, controls: liveControls });
+assert.equal(parser.verifyBookingRecord(liveDocument, recordLocation, f4Target, freshRead).account_limits.empty_target_day_verified, true);
+assert.equal(parser.verifyBookingRecord(liveDocument, recordLocation, f4Target).account_limits.complete, false, "Dormant defaults require fresh unfiltered navigation proof");
+for (const extra of [
+  { ...hiddenField("main_txtSearchStartDate", "text"), getClientRects: () => [{}] },
+  hiddenField("main_hBtnSearch", "hidden", "applied"), hiddenField("__EVENTTARGET", "hidden", "search"),
+  hiddenField("main_hBookingID", "hidden", "synthetic-id"), hiddenField("unknown_filter", "text"),
+  hiddenField("unknown_search", "hidden", "applied")]) {
+  assert.equal(parser.verifyBookingRecord(defaultEmptyRecordFixture({ ...liveEmptyLayout,
+    controls: [...liveControls, extra] }), recordLocation, f4Target, freshRead).account_limits.complete, false);
+}
+let recordLinkClicked = 0;
+const routeDocument = href => ({ querySelectorAll: () => [{ innerText: "My Booking Record",
+  getAttribute: () => href, click() { recordLinkClicked += 1; } }] });
+assert.equal(parser.openBookingRecord(routeDocument("/Secure/MyBookingRecord.aspx"),
+  { ...bookingLocation, href: "https://booking.lib.hku.hk/Secure/FacilityStatusDate.aspx" }).default_record_route, true);
+assert.equal(parser.openBookingRecord(routeDocument("/Secure/MyBookingRecord.aspx?date=2026-10-02"),
+  { ...bookingLocation, href: "https://booking.lib.hku.hk/Secure/FacilityStatusDate.aspx" }).default_record_route, false);
+assert.equal(recordLinkClicked, 2);
+for (const invalid of [{ pagerSpan: 6 }, { pagerText: "Next" }, { pagerInteractive: true },
+  { pagerClass: "unknown" }, { tableId: "other_table" }]) {
+  assert.equal(parser.verifyBookingRecord(defaultEmptyRecordFixture({ ...liveEmptyLayout, ...invalid }), recordLocation, f4Target).account_limits.complete, false);
+}
+for (const options of [
+  { readyState: "loading" }, { busy: true }, { body: "My Booking Record Logout Loading" },
+  { body: "My Booking Record" }, { header: ["Date", "Room"] }, { duplicate: true },
+  { values: ["", "", "", "", "Unknown record", "", ""] },
+  { controls: [{ type: "text", value: "" }] }, { controls: [{ type: "hidden", name: "SearchDate", value: "2026-09-23" }] },
+  { paginated: true },
+]) assert.equal(parser.verifyBookingRecord(defaultEmptyRecordFixture(options), recordLocation, f4Target).account_limits.complete, false);
+assert.equal(parser.verifyBookingRecord(defaultEmptyRecordFixture(), { ...recordLocation, search: "?date=2026-09-23" }, f4Target).account_limits.complete, false);
+assert.equal(parser.verifyBookingRecord(defaultEmptyRecordFixture(), bookingLocation, f4Target).account_limits.complete, false);
 assert.equal(parser.verifyBookingRecord({
   body: { innerText: "New Booking My Booking Record" },
   querySelectorAll(selector) { return selector === "table tr" ? [{ innerText: exactRecordText }] : []; }
