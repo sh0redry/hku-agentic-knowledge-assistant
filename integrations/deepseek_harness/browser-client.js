@@ -197,7 +197,7 @@ window.__ModuleLoader__.load({
             h('h2', { id: 'hku-connection-heading', style: { marginTop: 0, fontSize: 18 } }, '连接与启动 / Connection'),
             h('p', { role: 'status', 'aria-live': 'polite' }, statusText),
             bridge ? h('p', null, `Chrome Bridge: ${bridge.status}${bridge.lifecycle_state ? ` (${bridge.lifecycle_state})` : ''}.`) : null,
-            bridge ? h('p', null, `Chrome 扩展：${bridge.extension_version || '版本未报告'}；本批要求 0.17.25 或更新。更新后需重新加载扩展并刷新 HKU 标签页。`) : null,
+            bridge ? h('p', null, `Chrome 扩展：${bridge.extension_version || '版本未报告'}；本批要求 0.17.29 或更新。更新后需重新加载扩展并刷新 HKU 标签页。`) : null,
             view.phase === 'error' || core?.state !== 'connected' || bridge?.status !== 'connected'
               ? h('p', { role: 'status' }, '排查顺序：Desktop Host → 启动 Core → Chrome 扩展连接 → Portal 登录。Bridge 断线时每 15 秒刷新本地状态；不会自动登录或提交预约。') : null,
             status?.binding ? h('p', { role: 'status' }, status.binding.state === 'connected'
@@ -415,6 +415,9 @@ window.__ModuleLoader__.load({
     }
 
     const phaseNames = { not_armed: '未武装', armed: '已武装，等待准备', preparing: '准备中',
+      waiting_for_release: '等待开放时间', checking_date: '正在核对开放日期', checking_availability: '正在核对精确空位',
+      checking_account_records: '正在核对账号记录', preparing_booking_form: '正在准备精确预约表单',
+      failed_before_submit: '提交前停止（未提交）', booking_record_verified: '预约记录已核验',
       waiting: '等待检查时间', querying: '正在查询', suggestion_ready: '建议已生成（未预约）',
       dry_run_ready_no_submission: '演练通过，未提交', pending_executor: '已保存，尚未执行',
       completed: '执行结束（需核验业务结果）', outcome_unknown: '提交结果未知，请人工核对，勿重试',
@@ -469,7 +472,7 @@ window.__ModuleLoader__.load({
           group.ok !== true ? h('p', { role: 'alert' }, `读取失败：${group.error_code || 'UNKNOWN'}，不是零任务。`)
             : !group.rows.length ? h('p', null, '此次快照没有记录。')
             : h('ul', null, ...group.rows.map(row => h('li', { key: row.id, style: { marginBottom: 12 } },
-              h('strong', null, phaseNames[row.phase] || phaseNames[row.state] || row.phase || row.state || '状态未报告'),
+              h('strong', null, `${row.state === 'expired' ? '授权已过期 · ' : ''}${phaseNames[row.execution_result?.phase || row.phase] || phaseNames[row.state] || row.phase || row.state || '状态未报告'}`),
               h('p', null, `${row.kind} | ${row.id} | ${row.read_only === true ? 'F3 只读' : row.dry_run === true ? '只读演练' : row.dry_run === false ? '真实模式' : '模式未报告'}`),
               h('p', null, `目标：${row.target?.date || '日期未报告'} ${row.target?.facility_type || ''} ${row.target?.room || ''} ${row.target?.start_time || ''}–${row.target?.end_time || ''}`),
               row.target?.preference_summary_only ? h('p', null, '仅显示首选摘要；完整偏好和实际候选请查看 F3 原始结果。') : null,
@@ -481,6 +484,12 @@ window.__ModuleLoader__.load({
                 : row.kind === 'F3 runs' ? h('p', null, `只读运行 / 写入 ${row.booking_writes_performed ?? '未报告'}；预约尝试和成功次数不适用。`)
                 : h('p', null, `尝试 ${row.attempt_count ?? '未报告'} / 成功 ${row.success_count ?? '未报告'} / 写入 ${row.booking_writes_performed ?? '未报告'}`),
               row.error_code ? h('p', { role: 'alert' }, `停止原因：${row.error_code}`) : null,
+              row.kind === 'F4 authorizations' ? h('details', null, h('summary', null, '执行详情与脱敏诊断'),
+                h('p', null, `授权状态：${phaseNames[row.state] || row.state}；执行结果：${phaseNames[row.execution_result?.phase] || row.execution_result?.phase || '未报告，不能推断成功'}`),
+                h('p', null, `完成：${hongKongTime(row.execution_result?.completed_at)}；结果来源：${row.execution_result?.source === 'legacy_audit' ? '旧审计记录恢复' : row.execution_result?.source === 'executor' ? '执行器持久化结果' : '未报告'}`),
+                h('p', null, `已记录的登录恢复尝试：${row.session_recovery_count ?? '未报告'}（仅统计诊断中的恢复，不代表所有失败请求）`),
+                h('pre', { style: { whiteSpace: 'pre-wrap', maxHeight: 360, overflowY: 'auto' } }, JSON.stringify({
+                  execution_result: row.execution_result, stages: row.diagnostics || [] }, null, 2))) : null,
               row.state === 'outcome_unknown' || row.phase === 'outcome_unknown'
                 ? h('p', { role: 'alert' }, '可能已提交。请检查 My Booking Record，不要重新提交。') : null)))))
       )
@@ -711,7 +720,9 @@ window.__ModuleLoader__.load({
           button('List inert drafts', 'f4_drafts'), button('List pending authorizations', 'f4_authorizations'),
           field('record_id', 'Selected draft / authorization ID'), check('exact', 'I reviewed the selected exact record and explicitly acknowledge this arm/revoke action.'),
           selected ? h('pre', { style: { whiteSpace: 'pre-wrap' } }, JSON.stringify({ state: selected.state, exact_target: selected.exact_target,
-            dry_run: selected.dry_run, phase: selected.phase, error_code: selected.error_code }, null, 2)) : null,
+            dry_run: selected.dry_run, phase: selected.phase, error_code: selected.error_code,
+            execution_result: selected.execution_result, started_at: selected.started_at, completed_at: selected.completed_at,
+            diagnostics: selected.diagnostics }, null, 2)) : null,
           button('Arm selected exact authorization', 'f4_authorization_arm', () => ({ id: selected.id, arming_digest: selected.arming_digest,
             exact_booking_acknowledged: true, future_booking_acknowledged: true, policy_acceptance_acknowledged: true,
             discussion_room_rules_acknowledged: true }), !selected?.arming_digest || !selected?.execution_enabled ||

@@ -7,7 +7,7 @@ function fixture() {
   const calls = []
   const client = {
     async status() { calls.push('status'); return { result: { service_version: '0.1.0',
-      connections: [{ id: 'sis_browser', status: 'connected', extension_version: '0.17.25' }], token: 'SECRET' }, correlation_id: 'safe' } },
+      connections: [{ id: 'sis_browser', status: 'connected', extension_version: '0.17.29' }], token: 'SECRET' }, correlation_id: 'safe' } },
     async listLibraryFacilities() { calls.push('catalog'); return { result: { read_only: true,
       browser_interactions_performed: false, domain_writes_performed: 0, library_writes_performed: 0,
       booking_writes_performed: 0, slot_selection_performed: false, booking_form_opened: false,
@@ -42,7 +42,7 @@ test('local diagnostics call only fixed non-navigating reads and report versions
 test('missing and stale extension version are not reported as accepted', () => {
   assert.equal(compatibleExtension('0.17.23'), false)
   assert.equal(compatibleExtension('0.17.24'), false)
-  assert.equal(compatibleExtension('0.17.25'), true)
+  assert.equal(compatibleExtension('0.17.29'), true)
   assert.equal(compatibleExtension('0.18.0'), true)
   assert.equal(compatibleExtension('0.17.24-rc.1'), null)
   assert.equal(compatibleExtension(null), null)
@@ -89,6 +89,21 @@ test('partial task failure is not presented as an empty successful group', async
   assert.equal(result.groups[1].error_code, 'LOCAL_CHECK_FAILED')
 })
 
+test('expired authorization retains separate terminal result and bounded redacted stages', () => {
+  const row = taskRow({ id: 'expired-id', state: 'expired', phase: 'expired', dry_run: true,
+    execution_result: { phase: 'dry_run_ready_no_submission', error_code: null,
+      completed_at: '2026-10-02T09:36:12Z', source: 'legacy_audit', cookie: 'SECRET' },
+    diagnostics: [{ stage: 'read_completed', session_recovery_attempted: true, session_recovery_succeeded: true,
+      raw_dom: 'PRIVATE', token: 'SECRET' }], arming_digest: 'SECRET', encrypted_payload: 'PRIVATE' }, 'F4 authorizations')
+  assert.equal(row.state, 'expired')
+  assert.equal(row.execution_result.phase, 'dry_run_ready_no_submission')
+  assert.equal(row.execution_result.source, 'legacy_audit')
+  assert.equal(row.session_recovery_count, 1)
+  assert.doesNotMatch(JSON.stringify(row), /SECRET|PRIVATE|raw_dom|cookie|arming_digest|encrypted_payload/)
+  assert.equal(taskRow({ id: 'old-id', state: 'expired' }, 'F4 authorizations').execution_result, null)
+  assert.equal(taskRow({ id: 'bounded', diagnostics: Array(100).fill({ stage: 'read_completed' }) }, 'F4 authorizations').diagnostics.length, 40)
+})
+
 test('F3 run uses matching rule checking time and verified suggested candidate, not preparation or arbitrary candidate', () => {
   const rule = { id: 'rule-id', shadow_only: true, rule: { target_date: '2026-10-02', facility_type: 'discussion_room',
     prepare_at: '2026-10-02T13:59:00+08:00', execution_at: '2026-10-02T14:01:00+08:00', stop_at: '2026-10-02T14:04:00+08:00',
@@ -116,7 +131,7 @@ test('report omits targets, diagnostics, inputs, account content and keeps human
     diagnostics: { raw_dom: 'PRIVATE' }, input: 'SECRET' }] } })
   assert.equal(report.review_totals.pending, 1); assert.equal(report.review_totals.pass, 0)
   assert.doesNotMatch(JSON.stringify(report), /PRIVATE|SECRET|target_date|raw_dom/)
-  assert.equal(report.plugin_version, '0.19.2')
+  assert.equal(report.plugin_version, '0.19.3')
 })
 
 test('unreadable history remains an explicit report error, not an empty accepted history', async () => {

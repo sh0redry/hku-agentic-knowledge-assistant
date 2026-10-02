@@ -232,5 +232,140 @@ class F4ExecutorTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ValueError, "only one"):
             self.worker.arm(another["id"], self.worker.public(self.worker._row(another["id"]))["arming_digest"])
 
+    async def test_expiry_preserves_success_and_timestamps_without_rearming(self):
+        self.arm(dry_run=True); self.due()
+        await self.worker.run_due_once()
+        before = self.value()
+        self.now = self.draft.stop_at.astimezone(timezone.utc) + timedelta(seconds=1)
+        after = self.value()
+        self.assertEqual(after["state"], "expired")
+        self.assertEqual(after["phase"], "dry_run_ready_no_submission")
+        self.assertEqual(after["execution_result"], before["execution_result"])
+        self.assertEqual(after["execution_result"]["source"], "executor")
+        self.assertIsNotNone(after["started_at"])
+        self.assertEqual(after["completed_at"], before["completed_at"])
+        self.assertFalse(after["armed"])
+        self.assertEqual(await self.worker.run_due_once(), 0)
+        with self.assertRaises(ValueError): self.worker.arm(self.identity, after["arming_digest"])
+
+    async def test_expiry_preserves_failure_and_redacted_diagnostics(self):
+        self.preview_ready = False
+        self.arm(dry_run=True); self.due(); await self.worker.run_due_once()
+        self.now = self.draft.stop_at.astimezone(timezone.utc) + timedelta(seconds=1)
+        value = self.value()
+        self.assertEqual(value["execution_result"]["phase"], "failed_before_submit")
+        self.assertEqual(value["execution_result"]["error_code"], "EXACT_SLOT_UNAVAILABLE")
+        self.assertTrue(any(d["stage"] == "checking_availability" for d in value["diagnostics"]))
+        import json
+        self.assertNotIn("Discussion Room", json.dumps(value["diagnostics"]))
+        self.assertEqual(value["attempt_count"], 0)
+
+    async def test_legacy_expired_result_recovers_from_audit_read_only(self):
+        self.arm(dry_run=True); self.due(); await self.worker.run_due_once()
+        with self.store._connection() as db:
+            db.execute("UPDATE library_autobook_runtime SET phase='expired', execution_result_json=NULL WHERE authorization_id=?", (self.identity,))
+        self.now = self.draft.stop_at.astimezone(timezone.utc) + timedelta(seconds=1)
+        value = self.value()
+        self.assertEqual(value["state"], "expired")
+        self.assertEqual(value["execution_result"]["phase"], "dry_run_ready_no_submission")
+        self.assertEqual(value["execution_result"]["source"], "legacy_audit")
+        self.assertEqual(self.store.autobook_runtime(self.identity)["phase"], "expired")
+        self.assertFalse(value["armed"])
+
+    async def test_midnight_prepare_poll_release_with_simulated_clock(self):
+        self.arm(dry_run=True)
+        self.now = self.draft.prepare_at.astimezone(timezone.utc)
+        reads = []
+        original = self.tasks.submit_and_wait.side_effect
+        date_checks = 0
+        async def read(capability, arguments, **kwargs):
+            nonlocal date_checks
+            reads.append((capability, self.now))
+            result = await original(capability, arguments, **kwargs)
+            if capability == "library.spaces.list_dates":
+                date_checks += 1
+                result.result["offered_dates"] = ["2026-09-28", "2026-09-29"] if date_checks < 3 else self.dates
+                result.result["navigation"] = {"session_recovery_attempted": date_checks == 1, "session_recovery_succeeded": date_checks == 1}
+            return result
+        async def advance(seconds): self.now += timedelta(seconds=seconds)
+        self.tasks.submit_and_wait.side_effect = read
+        with patch("services.library_autobook_executor.asyncio.sleep", side_effect=advance):
+            await self.worker.run_due_once()
+        value = self.value()
+        self.assertEqual(value["execution_result"]["phase"], "dry_run_ready_no_submission")
+        self.assertEqual(value["date_check_count"], 2)
+        preview_times = [when for capability, when in reads if capability == "library.spaces.booking_preview"]
+        self.assertEqual(preview_times, [self.draft.execution_at.astimezone(timezone.utc) + timedelta(seconds=15)])
+        self.assertTrue(any(d.get("session_recovery_succeeded") for d in value["diagnostics"]))
+        self.connector.prepare_library_space_booking.assert_not_called()
+        self.connector.submit_library_space_booking.assert_not_called()
+
+    async def test_midnight_stop_bound_and_login_refusal_are_terminal(self):
+        self.arm(dry_run=True); self.due()
+        self.tasks.submit_and_wait.return_value = SimpleNamespace(status=TaskStatus.FAILED,
+            result=None, error={"code": "LIBRARY_LOGIN_REQUIRED"})
+        self.tasks.submit_and_wait.side_effect = None
+        await self.worker.run_due_once()
+        self.assertEqual(self.value()["execution_result"]["error_code"], "LIBRARY_LOGIN_REQUIRED")
+        self.assertEqual(await self.worker.run_due_once(), 0)
+        self.connector.submit_library_space_booking.assert_not_called()
+
+    async def test_midnight_poll_expires_without_fallback_or_submit(self):
+        self.arm(dry_run=True)
+        self.now = self.draft.execution_at.astimezone(timezone.utc)
+        self.dates = ["2026-09-29"]
+        async def advance(seconds): self.now += timedelta(seconds=seconds)
+        # Eight checks stop after 105 seconds, before the 120-second deadline.
+        with patch("services.library_autobook_executor.asyncio.sleep", side_effect=advance):
+            await self.worker.run_due_once()
+        self.assertEqual(self.value()["execution_result"]["error_code"], "TARGET_DATE_NOT_OFFERED")
+        self.assertEqual(self.value()["date_check_count"], 8)
+        self.assertTrue(all(call.args[0] == "library.spaces.list_dates" for call in self.tasks.submit_and_wait.call_args_list))
+        self.connector.submit_library_space_booking.assert_not_called()
+
+    async def test_midnight_date_read_crossing_stop_deadline_cannot_continue(self):
+        self.arm(dry_run=True); self.due()
+        original = self.tasks.submit_and_wait.side_effect
+        async def late(capability, arguments, **kwargs):
+            result = await original(capability, arguments, **kwargs)
+            self.now = self.draft.stop_at.astimezone(timezone.utc)
+            return result
+        self.tasks.submit_and_wait.side_effect = late
+        await self.worker.run_due_once()
+        self.assertEqual(self.value()["execution_result"]["error_code"], "EXECUTION_WINDOW_EXPIRED")
+        self.assertEqual(self.tasks.submit_and_wait.await_count, 1)
+        self.connector.read_library_booking_record.assert_not_called()
+        self.connector.submit_library_space_booking.assert_not_called()
+
+    async def test_new_pre_submit_stages_recover_after_restart_without_replay(self):
+        self.arm(dry_run=True); self.due()
+        self.store.begin_autobook(self.identity, self.now.isoformat())
+        self.worker._stage(self.identity, "waiting_for_release")
+        self.store.recover_autobook_preparation(self.now.isoformat())
+        value = self.value()
+        self.assertFalse(value["armed"])
+        self.assertEqual(value["phase"], "interrupted")
+        self.assertEqual(value["error_code"], "CORE_RESTARTED")
+        self.assertEqual(await self.worker.run_due_once(), 0)
+        self.connector.submit_library_space_booking.assert_not_called()
+
+    def test_old_runtime_schema_migrates_without_inventing_execution_success(self):
+        import sqlite3
+        old_path = Path(self.directory.name) / "old.db"
+        db = sqlite3.connect(old_path)
+        try:
+            db.executescript("""CREATE TABLE library_autobook_runtime (
+                authorization_id TEXT PRIMARY KEY, armed INTEGER NOT NULL DEFAULT 0,
+                dry_run INTEGER NOT NULL DEFAULT 1, phase TEXT NOT NULL DEFAULT 'not_armed',
+                date_check_count INTEGER NOT NULL DEFAULT 0, error_code TEXT, updated_at TEXT NOT NULL);
+                INSERT INTO library_autobook_runtime VALUES ('legacy',0,1,'expired',0,NULL,'2026-10-02T10:00:00Z');""")
+        finally:
+            db.close()
+        migrated = SQLiteStore(old_path)
+        self.assertIsNone(migrated.autobook_execution_details("legacy")["execution_result"])
+        self.assertEqual(migrated.autobook_runtime("legacy")["phase"], "expired")
+        self.assertFalse(migrated.autobook_runtime("legacy")["armed"])
+        self.assertIsNone(SQLiteStore(old_path).autobook_execution_details("legacy")["execution_result"])
+
 
 if __name__ == "__main__": unittest.main()

@@ -1,5 +1,17 @@
 ﻿# HKU AGENTS for DeepSeek Harness
 
+## 0.19.3: durable execution outcomes and task diagnostics
+
+Requires Chrome Bridge 0.17.29 for recovery diagnostics. Authorization expiry
+no longer replaces the saved execution outcome. Old overwritten outcomes can
+be projected from their terminal audit event without rearming anything.
+The task center now shows separate authorization/result states and expandable
+redacted stage details. New runtime columns migrate in place on Core startup.
+Hong Kong midnight preparation/release/poll/deadline behavior is covered by
+simulated-clock tests; real midnight/live booking acceptance remains pending.
+Installation requires a safe Core restart as well as Desktop plugin installation.
+See `docs/DESKTOP_EXECUTION_DETAILS.md` in the repository for minimal acceptance.
+
 ## 0.19.2: empty booking record and F3 status corrections
 
 Chrome Bridge 0.17.25 / booking parser 0.1.4 recognizes the confirmed default

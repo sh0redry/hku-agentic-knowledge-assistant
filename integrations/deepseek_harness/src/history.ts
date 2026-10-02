@@ -60,7 +60,7 @@ export class TestHistory {
       if (!operations.has(operation) || !obj(value)) throw new Error('Invalid history input')
       const rows = await this.read()
       const error = obj(value.error) ? value.error : {}
-      const entry: TestRecord = { id: randomUUID(), operation, recorded_at: new Date().toISOString(), plugin_version: '0.19.2',
+      const entry: TestRecord = { id: randomUUID(), operation, recorded_at: new Date().toISOString(), plugin_version: '0.19.3',
         outcome: value.ok === true ? 'completed' : 'failed', task_id: id(value.task_id), correlation_id: id(value.correlation_id),
         error_code: typeof error.code === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(error.code) ? error.code : null,
         verdict: 'pending', diagnostics: safeDiagnostics(value.diagnostics), domain_writes: value.domain_writes_performed === 0 ? '0' : 'not_verified',

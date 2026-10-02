@@ -1,8 +1,8 @@
 import type { Context } from '@deepseek-ai/cordis';
 import { type HKUAgentsClient } from './client.js';
 import { type TestHistory } from './history.js';
-export declare const RELEASE = "0.19.2";
-export declare const REQUIRED_EXTENSION = "0.17.25";
+export declare const RELEASE = "0.19.3";
+export declare const REQUIRED_EXTENSION = "0.17.29";
 type Client = Pick<HKUAgentsClient, 'status' | 'listLibraryFacilities' | 'libraryOperator'>;
 type Route = {
     path: string;
@@ -54,6 +54,14 @@ export declare function taskRow(value: unknown, kind: string, ruleContext?: unkn
     id: string;
     rule_id: string | null;
     state: string | null;
+    execution_result: {
+        phase: string | null;
+        error_code: string | null;
+        completed_at: string | null;
+        source: unknown;
+    } | null;
+    diagnostics: Record<string, unknown>[];
+    session_recovery_count: number;
     phase: string | null;
     error_code: string | null;
     next_run_at: string | null;
@@ -94,6 +102,14 @@ export declare function taskSnapshot(client: Client, signal?: AbortSignal): Prom
             id: string;
             rule_id: string | null;
             state: string | null;
+            execution_result: {
+                phase: string | null;
+                error_code: string | null;
+                completed_at: string | null;
+                source: unknown;
+            } | null;
+            diagnostics: Record<string, unknown>[];
+            session_recovery_count: number;
             phase: string | null;
             error_code: string | null;
             next_run_at: string | null;

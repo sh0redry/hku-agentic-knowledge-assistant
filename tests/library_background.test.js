@@ -305,6 +305,8 @@ vm.runInContext(source, context);
     location:"Main Library",booking_facility_type:"Discussion Room",date:"${today}",floor:"Level 3",
     room:"Discussion Room 1",start_time:"13:00",end_time:"14:00"})`, context);
   assert.equal(recoveredRecord.record_page_marker_found, true);
+  assert.equal(recoveredRecord.diagnostics.session_recovery_attempted, true);
+  assert.equal(recoveredRecord.diagnostics.session_recovery_succeeded, true);
   assert.equal(recoveryNavigations - recoveryBefore, 1);
   assert.equal(bookingCommands.filter(command => command === "library.spaces.submit_booking_once").length, submitsBeforeExpiry);
   context.recoveryState = { attempted: false, startedAt: Date.now() - 3000 };

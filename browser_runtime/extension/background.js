@@ -509,6 +509,8 @@ async function searchLibrarySpaceAvailability(payload, options = {}) {
     navigation_interactions_performed: true,
     target_origin: "https://booking.lib.hku.hk",
     target_page_kind: "space_availability",
+    session_recovery_attempted: recovery.attempted,
+    session_recovery_succeeded: recovery.attempted,
     facility_type: facilityType,
     location: target.location,
     booking_facility_type: target.booking_facility_type,
@@ -575,6 +577,8 @@ async function inspectLibrarySpaceDates(payload) {
           navigation_interactions_performed: true,
           target_origin: "https://booking.lib.hku.hk",
           target_page_kind: "space_date_options",
+          session_recovery_attempted: recovery.attempted,
+          session_recovery_succeeded: recovery.attempted,
           facility_type: facilityType,
           location: target.location,
           booking_facility_type: target.booking_facility_type,
@@ -769,7 +773,9 @@ async function readExactLibraryBookingRecord(target) {
       } else {
         const record = await sendTabCommand(tab.id, "library.spaces.read_booking_record", {
           target, fresh_default_record_navigation: freshDefaultRecordNavigation });
-        if (record?.record_page_marker_found === true && record.diagnostics?.record_loading_found !== true) return record;
+        if (record?.record_page_marker_found === true && record.diagnostics?.record_loading_found !== true) return {
+          ...record, diagnostics: { ...record.diagnostics,
+            session_recovery_attempted: recovery.attempted, session_recovery_succeeded: recovery.attempted } };
       }
     } catch (error) {
       const translated = await librarySpaceNavigationError(tab.id, error);

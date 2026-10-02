@@ -1,6 +1,6 @@
 {
   "name": "dsh-hku-agents",
-  "version": "0.19.2",
+  "version": "0.19.3",
   "description": "HKU AGENTS read-only Chat tools and separately confirmed local operator workflows",
   "type": "module",
   "main": "./lib/index.js",

@@ -171,6 +171,10 @@ class SQLiteStore:
             columns = {row["name"] for row in db.execute("PRAGMA table_info(library_autobook_authorizations)")}
             if "execution_at" not in columns:
                 db.execute("ALTER TABLE library_autobook_authorizations ADD COLUMN execution_at TEXT")
+            runtime_columns = {row["name"] for row in db.execute("PRAGMA table_info(library_autobook_runtime)")}
+            for column in ("started_at", "completed_at", "execution_result_json", "diagnostics_json"):
+                if column not in runtime_columns:
+                    db.execute(f"ALTER TABLE library_autobook_runtime ADD COLUMN {column} TEXT")
 
     def create_library_autobook_draft(self, record: dict) -> None:
         with self._connection() as db:
@@ -261,7 +265,9 @@ class SQLiteStore:
                     WHERE state IN ('pending_executor', 'paused') AND expires_at <= ?""",
                     (now, now),
                 )
-                db.executemany("""UPDATE library_autobook_runtime SET armed = 0, phase = 'expired', updated_at = ?
+                db.executemany("""UPDATE library_autobook_runtime SET armed = 0,
+                    phase = CASE WHEN phase IN ('not_armed', 'armed', 'paused') THEN 'expired' ELSE phase END,
+                    updated_at = ?
                     WHERE authorization_id = ?""", [(now, row["id"]) for row in rows])
         return [row["id"] for row in rows]
 
@@ -308,7 +314,7 @@ class SQLiteStore:
             if require_armed:
                 runtime = db.execute("SELECT armed, phase FROM library_autobook_runtime WHERE authorization_id = ?",
                                      (authorization_id,)).fetchone()
-                if runtime is None or not runtime["armed"] or runtime["phase"] != "preparing":
+                if runtime is None or not runtime["armed"] or runtime["phase"] not in {"preparing", "preparing_booking_form"}:
                     return False
             db.execute(
                 """INSERT INTO library_autobook_attempts
@@ -354,12 +360,48 @@ class SQLiteStore:
     def begin_autobook(self, authorization_id: str, now: str) -> bool:
         with self._connection() as db:
             db.execute("BEGIN IMMEDIATE")
-            cursor = db.execute("""UPDATE library_autobook_runtime SET phase = 'preparing', updated_at = ?
+            cursor = db.execute("""UPDATE library_autobook_runtime SET phase = 'preparing', updated_at = ?, started_at = ?
                 WHERE authorization_id = ? AND armed = 1 AND phase = 'armed'
                 AND EXISTS (SELECT 1 FROM library_autobook_authorizations a WHERE a.id = authorization_id
                             AND a.state = 'pending_executor' AND a.attempt_count = 0 AND a.expires_at > ?)""",
-                (now, authorization_id, now))
+                (now, now, authorization_id, now))
             return cursor.rowcount == 1
+
+    def record_autobook_diagnostic(self, authorization_id: str, now: str, stage: str, facts: dict) -> None:
+        # Only caller-built booleans/counts/stable codes; never raw DOM/targets/secrets.
+        with self._connection() as db:
+            row = db.execute("SELECT diagnostics_json FROM library_autobook_runtime WHERE authorization_id = ?", (authorization_id,)).fetchone()
+            if not row:
+                return
+            entries = json.loads(row[0] or "[]")
+            entries.append({"stage": stage, "observed_at": now, **facts})
+            db.execute("UPDATE library_autobook_runtime SET diagnostics_json = ? WHERE authorization_id = ?",
+                       (_json(entries[-40:]), authorization_id))
+
+    def finish_autobook(self, authorization_id: str, now: str, phase: str, error_code: str | None) -> None:
+        with self._connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            result = {"phase": phase, "error_code": error_code, "completed_at": now, "source": "executor"}
+            db.execute("""UPDATE library_autobook_runtime SET phase = ?, armed = 0, error_code = ?,
+                completed_at = ?, execution_result_json = ?, updated_at = ? WHERE authorization_id = ?""",
+                (phase, error_code, now, _json(result), now, authorization_id))
+
+    def autobook_execution_details(self, authorization_id: str) -> dict:
+        runtime = self.autobook_runtime(authorization_id)
+        result = json.loads(runtime.get("execution_result_json") or "null")
+        if result is None:
+            # Recover old terminal results overwritten by expiry, without changing authority.
+            with self._connection() as db:
+                rows = db.execute("""SELECT event_type, data_json, created_at FROM audit_events
+                    WHERE capability = 'library.autobook.attempt' AND json_extract(data_json, '$.authorization_id') = ?
+                    ORDER BY id DESC LIMIT 1""", (authorization_id,)).fetchall()
+            if rows and rows[0]["event_type"] in {"dry_run_ready_no_submission", "failed_before_submit", "outcome_unknown", "booking_record_verified"}:
+                row = rows[0]
+                result = {"phase": row["event_type"], "error_code": json.loads(row["data_json"]).get("error_code"),
+                          "completed_at": row["created_at"], "source": "legacy_audit"}
+        return {"execution_result": result, "started_at": runtime.get("started_at"),
+                "completed_at": result.get("completed_at") if result else runtime.get("completed_at"),
+                "diagnostics": json.loads(runtime.get("diagnostics_json") or "[]")}
 
     def update_autobook_runtime(self, authorization_id: str, now: str, *, phase: str | None = None,
                                armed: bool | None = None, checks: int | None = None, error_code: str | None = None) -> None:
@@ -379,7 +421,9 @@ class SQLiteStore:
             db.execute("""UPDATE library_autobook_runtime SET armed = 0,
                 phase = CASE WHEN EXISTS (SELECT 1 FROM library_autobook_authorizations a
                     WHERE a.id = authorization_id AND a.attempt_count > 0) THEN 'outcome_unknown' ELSE 'interrupted' END,
-                error_code = 'CORE_RESTARTED', updated_at = ? WHERE phase = 'preparing'""", (now,))
+                error_code = 'CORE_RESTARTED', updated_at = ? WHERE phase IN
+                ('preparing', 'waiting_for_release', 'checking_date', 'checking_availability',
+                 'checking_account_records', 'preparing_booking_form', 'outcome_unknown') AND armed = 1""", (now,))
 
     def confirm_library_autobook_attempt(
         self, authorization_id: str, attempt_id: str, now: str,

@@ -2,8 +2,8 @@ import { HKUAgentsAPIError } from './client.js';
 import { readDesktopStatus } from './desktop_status.js';
 import { readDesktopFacilities } from './desktop_admin.js';
 import { testHistory } from './history.js';
-export const RELEASE = '0.19.2';
-export const REQUIRED_EXTENSION = '0.17.25';
+export const RELEASE = '0.19.3';
+export const REQUIRED_EXTENSION = '0.17.29';
 const object = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 const text = (v, limit = 120) => typeof v === 'string' && v.length <= limit ? v.replace(/[<>\r\n]/g, ' ') : null;
 const code = (e) => e instanceof HKUAgentsAPIError && /^[A-Z0-9_]{1,64}$/.test(e.code) ? e.code : 'LOCAL_CHECK_FAILED';
@@ -83,7 +83,20 @@ export function taskRow(value, kind, ruleContext) {
         /^\d{2}:\d{2}$/.test(String(candidates[0].start_time)) && /^\d{2}:\d{2}$/.test(String(candidates[0].end_time)) ? candidates[0] : null;
     const room = candidate || (Array.isArray(target.room_preference_order) && object(target.room_preference_order[0]) ? target.room_preference_order[0] : target);
     const session = candidate || (Array.isArray(target.session_preference_order) && object(target.session_preference_order[0]) ? target.session_preference_order[0] : target);
+    const rawResult = object(value.execution_result) ? value.execution_result : null;
+    const executionResult = rawResult ? { phase: text(rawResult.phase, 64), error_code: text(rawResult.error_code, 64),
+        completed_at: text(rawResult.completed_at, 40), source: ['executor', 'legacy_audit'].includes(String(rawResult.source)) ? rawResult.source : null } : null;
+    const diagnosticFlags = ['session_recovery_attempted', 'session_recovery_succeeded', 'record_page_marker_found',
+        'complete', 'empty_target_day_verified', 'default_empty_grid_found', 'record_incomplete_found',
+        'record_pagination_found', 'record_loading_found', 'fresh_default_record_navigation'];
+    const diagnostics = (Array.isArray(value.diagnostics) ? value.diagnostics : []).slice(-40).filter(object).map(entry => ({
+        stage: text(entry.stage, 64), observed_at: text(entry.observed_at, 40), check: count(entry.check),
+        error_code: text(entry.error_code, 64), result_phase: text(entry.result_phase, 64),
+        ...Object.fromEntries(diagnosticFlags.filter(key => typeof entry[key] === 'boolean').map(key => [key, entry[key]]))
+    }));
     return { kind, id, rule_id: text(value.rule_id, 64), state: text(value.state || value.outcome, 64),
+        execution_result: executionResult, diagnostics,
+        session_recovery_count: diagnostics.filter(entry => entry.session_recovery_attempted === true).length,
         phase: text(value.phase, 64), error_code: text(value.error_code, 64),
         next_run_at: text(value.next_run_at || value.next_check_at, 40),
         scheduled_at: text(target.execution_at || value.scheduled_at_local || value.scheduled_at, 40),

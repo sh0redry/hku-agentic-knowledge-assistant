@@ -530,6 +530,25 @@ test('F3 task cards distinguish checking time and read-only run data from F4 boo
   assert.doesNotMatch(text, /尝试 未报告|模式未报告/)
 })
 
+test('F4 expiry and execution outcome are separate with directly expandable diagnostics', async () => {
+  const harness = libraryHarness(async () => ({ ok: true, value: { ok: true, read_only: true, changes_performed: false,
+    observed_at: '2026-10-02T10:00:00Z', groups: [{ kind: 'F4 authorizations', ok: true, rows: [{
+      kind: 'F4 authorizations', id: 'expired-id', state: 'expired', phase: 'expired', dry_run: true, target: {},
+      attempt_count: 0, success_count: 0, booking_writes_performed: 0, session_recovery_count: 1,
+      execution_result: { phase: 'dry_run_ready_no_submission', error_code: null, source: 'legacy_audit', completed_at: '2026-10-02T09:36:12Z' },
+      diagnostics: [{ stage: 'account_records_read', complete: true, default_empty_grid_found: true }] }] }] } }), false, 'TaskCenter')
+  harness.button('刷新任务状态').props.onClick()
+  await new Promise(resolve => setImmediate(resolve))
+  const text = JSON.stringify(harness.render())
+  assert.match(text, /授权已过期 · 演练通过，未提交/)
+  assert.match(text, /执行详情与脱敏诊断/)
+  assert.match(text, /旧审计记录恢复/)
+  assert.match(text, /17:36:12 HKT/)
+  assert.match(text, /account_records_read/)
+  assert.match(text, /登录恢复尝试：1/)
+  assert.equal(harness.button('Arm selected exact authorization'), null)
+})
+
 test('workbench checks and redacted report require explicit clicks, never trigger login or submission', async () => {
   const calls = []
   const harness = libraryHarness(async (_channel, endpoint, payload) => {

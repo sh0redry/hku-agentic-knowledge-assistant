@@ -700,6 +700,8 @@ class LibrarySpaceSnapshot(StrictMessage):
 
 
 class LibrarySpaceNavigationResult(StrictMessage):
+    session_recovery_attempted: bool = False
+    session_recovery_succeeded: bool = False
     read_only: Literal[True]
     navigation_only: Literal[True]
     library_write_requests_sent: Literal[0]
@@ -737,6 +739,8 @@ class LibrarySpaceNavigationResult(StrictMessage):
 
 
 class LibrarySpaceDateOptionsNavigationResult(StrictMessage):
+    session_recovery_attempted: bool = False
+    session_recovery_succeeded: bool = False
     read_only: Literal[True]
     navigation_only: Literal[True]
     library_write_requests_sent: Literal[0]

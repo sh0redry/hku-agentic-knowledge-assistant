@@ -102,6 +102,7 @@ class LibraryAutobookExecutor:
                       date_check_count=runtime["date_check_count"], arming_digest=self._digest(row),
                       execution_enabled=self.enabled, dry_run=bool(runtime.get("dry_run", self.dry_run)),
                       next_run_at=result["exact_target"]["prepare_at"] if runtime["armed"] and row["state"] == "pending_executor" else None)
+        result.update(self.store.autobook_execution_details(row["id"]))
         if row["success_count"]:
             result["booking_writes_performed"] = 1
         return result
@@ -199,10 +200,21 @@ class LibraryAutobookExecutor:
         task = await self._bounded(identity, draft, lambda: self.tasks.submit_and_wait(
             capability, arguments, session_id="library-f4-pilot", correlation_id=identity))
         if task.status != TaskStatus.COMPLETED or not task.result:
+            self.store.record_autobook_diagnostic(identity, utc_now().isoformat(), "read_failed", {
+                "capability": capability, "error_code": (task.error or {}).get("code", "LIBRARY_READ_FAILED")})
             raise F4Refusal((task.error or {}).get("code", "LIBRARY_READ_FAILED"))
         if task.result.get("booking_writes_performed") != 0 or task.result.get("read_only") is not True:
             raise F4Refusal("READ_INVARIANT_FAILED")
+        navigation = task.result.get("navigation", {})
+        self.store.record_autobook_diagnostic(identity, utc_now().isoformat(), "read_completed", {
+            "capability": capability, "session_recovery_attempted": navigation.get("session_recovery_attempted", False) is True,
+            "session_recovery_succeeded": navigation.get("session_recovery_succeeded", False) is True})
         return task.result
+
+    def _stage(self, identity, phase, **facts):
+        now = utc_now().isoformat()
+        self.store.update_autobook_runtime(identity, now, phase=phase)
+        self.store.record_autobook_diagnostic(identity, now, phase, facts)
 
     async def _run(self, row, draft):
         identity, claimed = row["id"], False
@@ -214,11 +226,14 @@ class LibraryAutobookExecutor:
             if utc_now() - draft.prepare_at > timedelta(seconds=120):
                 raise F4Refusal("MISSED_AFTER_RESTART")
             if utc_now() < draft.execution_at:
+                self._stage(identity, "preparing")
                 async with self._browser_lock:
                     await self._read(identity, draft, "library.spaces.list_dates", {"facility_type": "discussion_room"})
+                self._stage(identity, "waiting_for_release")
                 await self._wait(identity, draft, draft.execution_at)
             offered = False
             for check in range(draft.max_date_checks):
+                self._stage(identity, "checking_date", check=check + 1)
                 self.store.update_autobook_runtime(identity, utc_now().isoformat(), checks=check + 1)
                 async with self._browser_lock:
                     dates = await self._read(identity, draft, "library.spaces.list_dates", {"facility_type": "discussion_room"})
@@ -233,6 +248,7 @@ class LibraryAutobookExecutor:
             if not offered:
                 raise F4Refusal("TARGET_DATE_NOT_OFFERED")
             async with self._browser_lock:
+                self._stage(identity, "checking_availability")
                 preview = await self._read(identity, draft, "library.spaces.booking_preview", {
                     "facility_type": "discussion_room", "date": draft.target_date.isoformat(), "floor": draft.floor,
                     "room": draft.room, "start_time": draft.start_time, "end_time": draft.end_time,
@@ -245,8 +261,17 @@ class LibraryAutobookExecutor:
                                    "start_time": draft.start_time, "end_time": draft.end_time}.items():
                     if target.get(key) != value:
                         raise F4Refusal("EXACT_TARGET_MISMATCH")
+                self._stage(identity, "checking_account_records")
                 record = await self._bounded(identity, draft, lambda: self.connector.read_library_booking_record(target))
                 limits = record.get("account_limits", {})
+                diagnostics = record.get("diagnostics", {})
+                self.store.record_autobook_diagnostic(identity, utc_now().isoformat(), "account_records_read", {
+                    "record_page_marker_found": record.get("record_page_marker_found") is True,
+                    "complete": limits.get("complete") is True,
+                    "empty_target_day_verified": limits.get("empty_target_day_verified") is True,
+                    **{key: diagnostics.get(key) is True for key in (
+                        "default_empty_grid_found", "record_incomplete_found", "record_pagination_found",
+                        "record_loading_found", "fresh_default_record_navigation", "session_recovery_attempted", "session_recovery_succeeded")}})
                 if not isinstance(limits.get("complete"), bool):
                     raise F4Refusal("EXTENSION_UPDATE_REQUIRED")
                 if record.get("record_page_marker_found") is not True or limits.get("complete") is not True:
@@ -256,6 +281,7 @@ class LibraryAutobookExecutor:
                 if self.dry_run:
                     phase = "dry_run_ready_no_submission"
                     return
+                self._stage(identity, "preparing_booking_form")
                 prepared = await self._bounded(identity, draft, lambda: self.connector.prepare_library_space_booking({
                     "facility_type": "discussion_room", "target": target, "discussion_room_rules_acknowledged": True}))
                 if prepared.get("ready_to_submit") is not True or prepared.get("exact_target_verified") is not True or prepared.get("booking_writes_performed") != 0:
@@ -265,6 +291,7 @@ class LibraryAutobookExecutor:
                 if not self.store.claim_library_autobook_attempt(identity, attempt_id, utc_now().isoformat(), require_armed=True):
                     raise F4Refusal("AUTHORIZATION_ALREADY_USED")
                 claimed, phase = True, "outcome_unknown"
+                self._stage(identity, "outcome_unknown")
                 result = await asyncio.wait_for(self.connector.submit_library_space_booking({
                     "target": target, "execution_id": attempt_id, "prepared_tab_id": prepared.get("prepared_tab_id"),
                     "policy_acceptance_acknowledged": True, "discussion_room_rules_acknowledged": True,
@@ -286,6 +313,8 @@ class LibraryAutobookExecutor:
             error = exc.code if isinstance(exc, F4Refusal) else "BOOKING_OUTCOME_UNKNOWN" if claimed else "READ_OR_PREPARATION_FAILED"
         finally:
             # Unknown means unknown writes, never zero, and never automatic retry.
-            self.store.update_autobook_runtime(identity, utc_now().isoformat(), phase=phase, armed=False, error_code=error)
+            finished_at = utc_now().isoformat()
+            self.store.record_autobook_diagnostic(identity, finished_at, "execution_finished", {"result_phase": phase, "error_code": error})
+            self.store.finish_autobook(identity, finished_at, phase, error)
             self.store.add_audit_event("library.autobook.attempt", phase,
                                        {"authorization_id": identity, "attempt_id": attempt_id if claimed else None, "error_code": error})
